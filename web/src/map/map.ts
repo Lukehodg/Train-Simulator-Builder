@@ -1,9 +1,13 @@
-import maplibregl, { Map as MLMap } from 'maplibre-gl'
+import * as maplibregl from 'maplibre-gl'
+import { Map as MLMap } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import { MapboxOverlay } from '@deck.gl/mapbox'
 import { AmbientLight, DirectionalLight, LightingEffect, type Layer, type PickingInfo } from '@deck.gl/core'
 import { CONFIG } from '../config'
 import type { CameraMode, RouteData } from '../types'
+
+maplibregl.setWorkerUrl(workerUrl)
 
 export interface MapCtx {
   map: MLMap

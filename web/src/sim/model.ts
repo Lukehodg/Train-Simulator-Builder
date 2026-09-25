@@ -6,6 +6,7 @@
 import type { LinkResult, RouteData, Scenario, SimResult } from '../types'
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v)
+const satHandover = (km: number, sky: number, tunnel: boolean) => !tunnel && sky > 0.5 && Math.sin(km * 7.3) * Math.sin(km * 2.1 + 1) > 0.93
 
 function lossTable(q: number, table: [number, number][]): number {
   let out = table[table.length - 1][1]
@@ -52,17 +53,18 @@ export function simulate(data: RouteData, sc: Scenario): SimResult {
         r.lat[i] = cfg.latency_ms.base + cfg.latency_ms.at_zero_extra * (1 - q) + h.latency_spike_ms * hp
         r.loss[i] = lossTable(q, cfg.packet_loss_pct) + h.packet_loss_pct * hp
         r.avail[i] = q > floor ? 1 : 0
-        r.rsrp[i] = cfg.rsrp_dbm.at_zero + (cfg.rsrp_dbm.at_one - cfg.rsrp_dbm.at_zero) * q
+        r.rsrp[i] = (b.rsrpIntercept?.[i] ?? cfg.rsrp_dbm.at_zero) + (b.rsrpSlope?.[i] ?? (cfg.rsrp_dbm.at_one - cfg.rsrp_dbm.at_zero)) * q
         r.reason[i] = tun && !isDas ? 'TUNNEL' : r.avail[i] ? 'OK' : 'NO_COVERAGE'
       }
     } else {
       const av = p.availability!, w = av.weather[sc.weather] ?? av.weather.nominal, prior = p.capacity_prior_mbps as number, lp = p.latency_prior_ms!
-      const satEnabled = sim.satcom_enabled !== false
+      const satEnabled = sim.satcom_enabled !== false && p.enabled !== false
+        && (!p.service_area || p.service_area.countries.some(c => c.toUpperCase() === meta.route.country.toUpperCase()))
       for (let i = 0; i < n; i++) {
         const tun = data.inTunnel[i] === 1
         let sky = clamp(b.qb[i] - w.sky_penalty - 0.18 * data.urban[i] * (1 - data.canopy[i]), 0, 1)
         if (tun) sky = 0
-        const temp = b.hp[i] > 0.5
+        const temp = satHandover(data.distance[i] / 1000, sky, tun)
         const avail = satEnabled && !tun && sky >= av.sky_threshold
         r.q[i] = sky
         r.avail[i] = avail ? 1 : 0
@@ -99,7 +101,8 @@ export function simulate(data: RouteData, sc: Scenario): SimResult {
     for (let k = 0; k < P; k++) {
       const r = links[ids[k]], conf = data.base[ids[k]].conf[i]
       const nc = clamp(r.cap[i] / nrm.capacity_mbps, 0, 1), nl = clamp(1 - r.lat[i] / nrm.latency_ms, 0, 1), np_ = clamp(1 - r.loss[i] / nrm.packet_loss_pct, 0, 1)
-      const stab = data.base[ids[k]].hp[i] > 0 ? 0.3 : 1
+      const handover = isCell[k] ? data.base[ids[k]].hp[i] > 0 : satHandover(data.distance[i] / 1000, r.q[i], data.inTunnel[i] === 1)
+      const stab = handover ? 0.3 : 1
       const s = r.avail[i] ? wts.capacity * nc + wts.latency * nl + wts.packet_loss * np_ + wts.stability * stab + wts.confidence * conf : 0
       r.score[i] = score[k] = s
       if (s > bs) { bs = s; best = k }
@@ -134,7 +137,7 @@ export function simulate(data: RouteData, sc: Scenario): SimResult {
     const perUser = active > 0 ? Math.min(wf.per_user_cap_mbps, wanCap * 0.85 / Math.max(active, 1)) : 0
     const l = Number.isNaN(lat) ? 999 : lat
     let s = 100 * (ww.per_user * clamp(perUser / wf.per_user_target_mbps, 0, 1) + ww.latency * clamp(1 - l / 250, 0, 1) + ww.loss * clamp(1 - loss / 8, 0, 1))
-    if (bonded < 1) s = 0
+    if (wanCap < 1) s = 0
     out.perUser[i] = perUser; out.activeUsers[i] = active; out.wifi[i] = s
     out.wifiClass[i] = s >= th.EXCELLENT ? 0 : s >= th.GOOD ? 1 : s >= th.USABLE ? 2 : s >= th.POOR ? 3 : 4
   }

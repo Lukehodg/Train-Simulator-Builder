@@ -132,6 +132,7 @@ class OSTerrain50:
 
     def __init__(self, folder: Path, bbox_bng: tuple[float, float, float, float] | None = None):
         import zipfile
+
         from pyproj import Transformer
 
         folder = Path(folder)

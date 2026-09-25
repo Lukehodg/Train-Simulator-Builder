@@ -38,9 +38,12 @@ export async function loadRoute(routeId = CONFIG.defaultRoute): Promise<RouteDat
   const meta: Meta = await metaRes.json()
   const t = tableFromIPC(await arrowRes.arrayBuffer())
   const n = t.numRows
+  if (n < 2) throw new Error('Route bundle must contain at least two samples.')
   const providers: Record<string, ProviderBase> = {}
   for (const p of meta.providers) {
     providers[p.id] = {
+      rsrpSlope: t.getChild(`${p.id}_rsrp_slope`) ? f32(t, `${p.id}_rsrp_slope`, n) : undefined,
+      rsrpIntercept: t.getChild(`${p.id}_rsrp_intercept`) ? f32(t, `${p.id}_rsrp_intercept`, n) : undefined,
       qb: f32(t, `${p.id}_qb`, n), hp: f32(t, `${p.id}_hp`, n), conf: f32(t, `${p.id}_conf`, n), tech: str(t, `${p.id}_tech`, n),
       cell: str(t, `${p.id}_cell`, n), celld: f32(t, `${p.id}_celld`, n), src: str(t, `${p.id}_src`, n), rsrp: f32(t, `${p.id}_sig`, n),
     }

@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .config import ROOT, Settings
+from .config import Settings
 
 WIFI_CLASSES = ["EXCELLENT", "GOOD", "USABLE", "POOR", "OUTAGE"]
 CLASS_COLORS = {"EXCELLENT": "#1e7d3e", "GOOD": "#3f9a52", "USABLE": "#c9a100", "POOR": "#d6531a", "OUTAGE": "#9c1b2c"}
@@ -46,7 +46,7 @@ def section_table(samples: pd.DataFrame, rc: pd.DataFrame, obs: pd.DataFrame, st
             "latency_mean_ms": round(float(seg["effective_latency_ms"].mean()), 0),
             "streaming_share_pct": round(100 * (cls.get("EXCELLENT", 0) + cls.get("GOOD", 0)), 1),
             "usable_share_pct": round(100 * (1 - cls.get("OUTAGE", 0) - cls.get("POOR", 0)), 1),
-            "outage_km": round(float((seg["bonded_capacity_mbps"] < 1).sum() * (s["distance_m"].iloc[1] - s["distance_m"].iloc[0]) / 1000), 2),
+            "outage_km": round(float(np.sum(np.diff(s["distance_m"]) * (seg["service_class"].iloc[:-1].to_numpy() == "OUTAGE"))) / 1000, 2),
             "tunnels": int(((s["in_tunnel"].astype(int).diff() == 1).sum()) + (1 if s["in_tunnel"].iloc[0] else 0)),
             "weakest_link": str(worst),
             **{f"{p}_avail_pct": round(100 * float(avail.loc[a:b, p].mean()), 1) for p in providers if p in avail},
@@ -76,7 +76,7 @@ def kpis(rc: pd.DataFrame, samples: pd.DataFrame, spacing_m: float) -> dict:
         "streaming_share_pct": round(100 * (cls.get("EXCELLENT", 0) + cls.get("GOOD", 0)), 1),
         "usable_share_pct": round(100 * (1 - cls.get("OUTAGE", 0) - cls.get("POOR", 0)), 1),
         "outage_share_pct": round(100 * cls.get("OUTAGE", 0), 2),
-        "outage_km": round(float((rc["bonded_capacity_mbps"] < 1).sum() * spacing_m / 1000), 1),
+        "outage_km": round(float(np.sum(np.diff(samples["distance_m"]) * (rc["service_class"].iloc[:-1].to_numpy() == "OUTAGE"))) / 1000, 1),
         "bonded_mean_mbps": round(float(rc["bonded_capacity_mbps"].mean()), 0),
         "bonded_median_mbps": round(float(rc["bonded_capacity_mbps"].median()), 0),
         "bonded_p10_mbps": round(float(rc["bonded_capacity_mbps"].quantile(0.1)), 0),
@@ -211,7 +211,7 @@ def write_docx(path: Path, settings: Settings, meta: dict, k: dict, sec: pd.Data
         return t
 
     route = meta["route"]
-    h = doc.add_heading(f"Onboard connectivity performance evidence", 0)
+    doc.add_heading("Onboard connectivity performance evidence", 0)
     doc.add_paragraph(f"{route['name']} · {meta['stations'][0]['name']} → {meta['stations'][-1]['name']} · {k['route_length_km']} km · {int(k['journey_minutes'])} min")
     p = doc.add_paragraph(); r = p.add_run(f"Scenario: {scenario_label}"); r.bold = True
     doc.add_paragraph(f"Generated {datetime.now(timezone.utc).strftime('%d %B %Y %H:%M UTC')} · model version {meta['model_version']} · sample spacing {route['sample_spacing_m']} m ({meta['n_samples']:,} samples)")

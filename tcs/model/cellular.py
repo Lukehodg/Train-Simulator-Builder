@@ -51,10 +51,25 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
     dist_pen = np.where(np.isnan(dist_km), 0.0, np.clip(dist_km - cfg["cell_distance"]["free_km"], 0, None) * cfg["cell_distance"]["penalty_per_km"])
     vehicle = float(vprof["score_offset"])
 
-    q_base = s - cutting - dist_pen
-    if calibration and "bias" in calibration:
-        b = calibration["bias"]                             # {provider_id: additive score correction}
-        q_base = q_base + df["provider_id"].map(b).fillna(0).values
+    q_base = np.clip(s - cutting - dist_pen, 0, 1)
+    raw_quality = np.clip(np.clip(q_base, 0, 1) + vehicle, 0, 1)
+    calibrated = np.zeros(len(df), dtype=bool)
+    if calibration:
+        section_km = float(calibration.get("section_km", 10))
+        if not np.isfinite(section_km) or section_km <= 0:
+            raise ValueError("calibration section_km must be positive and finite")
+        sections = (df["distance_m"].to_numpy() / (section_km * 1000)).astype(int)
+        bias = calibration.get("bias", {})
+        correction = df["provider_id"].map(bias).fillna(0).to_numpy(copy=True)
+        calibrated = df["provider_id"].isin(bias).to_numpy(copy=True)
+        for pid, values in calibration.get("sections", {}).items():
+            for section, value in values.items():
+                mask = (df["provider_id"].to_numpy() == pid) & (sections == int(section))
+                correction[mask] = float(value)
+                calibrated[mask] = True
+        if not np.isfinite(correction).all():
+            raise ValueError("calibration biases must be finite")
+        q_base = q_base + correction
     q_base = np.clip(q_base, 0, 1).astype(np.float32)
     q = q_base + vehicle
     tun = df["in_tunnel"].fillna(False).values.astype(bool)
@@ -67,6 +82,21 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
     hcfg = cfg["handover"]
 
     rsrp = cfg["rsrp_dbm"]["at_zero"] + (cfg["rsrp_dbm"]["at_one"] - cfg["rsrp_dbm"]["at_zero"]) * q + float(vprof["db_offset"]) * 0
+    rsrp_slope = np.full(len(df), cfg["rsrp_dbm"]["at_one"] - cfg["rsrp_dbm"]["at_zero"], dtype=float)
+    rsrp_intercept = np.full(len(df), cfg["rsrp_dbm"]["at_zero"], dtype=float)
+    mapped = np.zeros(len(df), dtype=bool)
+    for pid, mapping in (calibration or {}).get("rsrp_map", {}).items():
+        slope, intercept = float(mapping["slope"]), float(mapping["intercept"])
+        if not np.isfinite([slope, intercept]).all() or slope <= 0:
+            raise ValueError("calibration RSRP mapping must be finite with a positive slope")
+        mask = (df["provider_id"].to_numpy() == pid) & ~tun
+        rsrp_slope[mask] = slope
+        rsrp_intercept[mask] = intercept
+        if calibration.get("rsrp_input") != "corrected_quality":
+            rsrp_intercept[mask] += slope * (raw_quality[mask] - q[mask])
+        mapped[mask] = True
+    calibrated = (calibrated | mapped) & ~tun
+    rsrp = rsrp_slope * q + rsrp_intercept
     sinr = cfg["sinr_db"]["at_zero"] + (cfg["sinr_db"]["at_one"] - cfg["sinr_db"]["at_zero"]) * q
     tech = df["radio_technology"].fillna("4G").astype(str).values
     cap_prior = np.array([ops[p]["capacity_prior_mbps"].get(t, ops[p]["capacity_prior_mbps"]["4G"]) for p, t in zip(df["provider_id"], tech)], dtype=np.float32)
@@ -82,10 +112,9 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
     avail = q > floor
 
     flags = np.where(has_prior, df["source"].astype(str).values, "no_coverage_record")
-    flags = np.char.add(flags.astype(str), "|synthetic_rsrp")
+    flags = np.char.add(flags.astype(str), np.where(mapped, "|calibrated_rsrp", "|synthetic_rsrp"))
     flags = np.where(df["serving_cell"].notna().values, np.char.add(flags.astype(str), "|cells"), flags)
-    if calibration:
-        flags = np.char.add(flags.astype(str), "|calibrated")
+    flags = np.char.add(flags.astype(str), np.where(calibrated, "|calibrated", ""))
 
     out = pd.DataFrame({
         "sample_id": df["sample_id"].values, "route_id": settings.route_id, "provider_id": df["provider_id"].values,
@@ -96,6 +125,8 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
         "serving_cell": df["serving_cell"].values, "serving_distance_m": df["serving_distance_m"].values.astype(np.float32),
         "handover": df["handover"].fillna(False).values.astype(bool), "source_flags": flags, "model_version": settings.sim["model_version"],
         "quality_base": q_base, "handover_penalty": hp,
+        "rsrp_slope": rsrp_slope, "rsrp_intercept": rsrp_intercept,
+        "_calibrated": calibrated,
         "_has_prior": has_prior, "_prior_source": df["source"].astype(str).values, "_in_tunnel": tun,
     })
     return out

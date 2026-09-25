@@ -73,11 +73,14 @@ Build: {built}  |  model version {model_version}  |  routes: {routes}
 
 def build_web(web_dir: Path) -> Path:
     """npm run build -> web/dist (includes public/: data bundles, Train Builder, examples)."""
+    npm = shutil.which("npm.cmd") or shutil.which("npm")
+    if npm is None:
+        raise RuntimeError("Node.js/npm is required to build the viewer")
     if not (web_dir / "node_modules").exists():
         console.log("installing web dependencies (npm install)…")
-        subprocess.run(["npm", "install"], cwd=web_dir, check=True, shell=True)
+        subprocess.run([npm, "ci"], cwd=web_dir, check=True)
     console.log("building the viewer (npm run build)…")
-    subprocess.run(["npm", "run", "build"], cwd=web_dir, check=True, shell=True)
+    subprocess.run([npm, "run", "build"], cwd=web_dir, check=True)
     dist = web_dir / "dist"
     if not (dist / "index.html").exists():
         raise RuntimeError("web build produced no index.html")
@@ -87,6 +90,8 @@ def build_web(web_dir: Path) -> Path:
 def package(out_dir: Path | None = None, include_reports: bool = True, zip_it: bool = True, skip_build: bool = False) -> Path:
     web = ROOT / "web"
     dist = (web / "dist") if skip_build else build_web(web)
+    if not (dist / "index.html").is_file():
+        raise RuntimeError("web/dist has no index.html; build the viewer before packaging")
     out_dir = out_dir or (ROOT / "dist")
     stamp = date.today().isoformat()
     stage = out_dir / f"train-link-simulator-{stamp}"

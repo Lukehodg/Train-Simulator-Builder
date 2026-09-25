@@ -7,6 +7,9 @@ export interface ProviderMeta {
   capacity_prior_mbps: Record<string, number> | number
   terminal?: string
   terminal_default?: string
+  enabled?: boolean
+  enabled_default?: boolean
+  service_area?: { countries: string[] }
   capacity_priors?: Record<string, number>
   min_elevation_deg?: Record<string, number>
   latency_prior_ms?: { base: number; obstruction_penalty: number }
@@ -74,6 +77,8 @@ export interface RouteData {
 }
 
 export interface ProviderBase {
+  rsrpSlope?: Float32Array
+  rsrpIntercept?: Float32Array
   qb: Float32Array         // cellular: quality before vehicle loss / tunnel override; satcom: raw sky visibility
   hp: Float32Array         // handover penalty 0..1 (satcom: temporary beam handover flag)
   conf: Float32Array

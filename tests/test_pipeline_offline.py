@@ -1,6 +1,5 @@
 """Hermetic end-to-end run on synthetic sources with coarse spacing (fast)."""
 import numpy as np
-import pandas as pd
 import pytest
 
 from tcs.config import load_settings
@@ -92,3 +91,77 @@ def test_handset_profile_is_worse(pipeline):
     a = obs[obs["provider_type"] == "cellular"]["capacity_mbps"].mean()
     b_ = obs2[obs2["provider_type"] == "cellular"]["capacity_mbps"].mean()
     assert b_ < a
+
+
+@pytest.mark.parametrize("calibrated", [False, True])
+def test_browser_model_parity(pipeline, calibrated):
+    import copy
+    import json
+    import shutil
+    import subprocess
+    from itertools import product
+
+    from tcs.config import ROOT
+
+    node = shutil.which("node")
+    if not node or not (ROOT / "web/node_modules/typescript").exists():
+        pytest.skip("Install Node.js and web dependencies to run browser parity checks")
+    s, b, _, prior, serving, obs, _ = pipeline
+    cal = {"version": 2, "rsrp_input": "corrected_quality", "section_km": 10,
+           "bias": {"ee": 0.08}, "sections": {"ee": {"1": -0.05}},
+           "rsrp_map": {"ee": {"slope": 42, "intercept": -119}}} if calibrated else None
+    obs, _ = simulate(s, b.samples, prior, serving, calibration=cal)
+    providers = [{"id": p["id"], "type": "cellular", "capacity_prior_mbps": p["capacity_prior_mbps"]} for p in s.operators]
+    for p in s.starlink["satcom"]["providers"]:
+        providers.append({**p, "type": "satcom", "capacity_prior_mbps": p["capacity_prior_mbps"][p["terminal"]]})
+    data = {"n": len(b.samples), "meta": {"providers": providers, "sim": s.sim, "route": s.route}, "base": {}}
+    for field, col in {"inTunnel": "in_tunnel", "tunnelName": "tunnel_name", "distance": "distance_m",
+                       "speed": "speed_kph", "urban": "urban_density", "canopy": "canopy_probability",
+                       "cutting": "cutting_depth_m"}.items():
+        data[field] = b.samples[col].astype(object).where(b.samples[col].notna(), None).tolist()
+    data["inTunnel"] = [int(v) for v in data["inTunnel"]]
+    for pid, g in obs.groupby("provider_id", sort=False):
+        g = g.sort_values("sample_id")
+        data["base"][pid] = {field: g[col].tolist() for field, col in
+                              {"qb": "quality_base", "hp": "handover_penalty", "conf": "confidence", "tech": "radio_technology"}.items()}
+        if g["provider_type"].iloc[0] == "cellular":
+            data["base"][pid]["rsrpSlope"] = g["rsrp_slope"].tolist()
+            data["base"][pid]["rsrpIntercept"] = g["rsrp_intercept"].tolist()
+    cases = []
+    for policy in POLICIES:
+        for ap_capacity, weather in product([0, 300], ["nominal", "rain", "storm"]):
+            settings = copy.deepcopy(s)
+            settings.sim["passenger_wifi"]["ap_capacity_mbps"] = ap_capacity
+            scenario_obs, result = simulate(settings, b.samples, prior, serving, policy=policy, weather=weather, calibration=cal)
+            case_data = {**data, "meta": {**data["meta"], "sim": settings.sim}}
+            cases.append({"data": case_data, "scenario": {"policy": policy, "vehicle": settings.sim["vehicle"]["profile"], "weather": weather},
+                          "expected": {"rsrp": {pid: g.sort_values("sample_id")["signal_primary"].tolist() for pid, g in scenario_obs[scenario_obs["provider_type"] == "cellular"].groupby("provider_id")},
+                                       "bonded": result["bonded_capacity_mbps"].tolist(), "wifi": result["wifi_service_score"].tolist(),
+                                       "cls": result["service_class"].tolist()}})
+    completed = subprocess.run([node, str(ROOT / "web/tests/model-parity.mjs")], input=json.dumps(cases), text=True, capture_output=True)
+    assert completed.returncode == 0, (completed.stdout + completed.stderr)[-5000:]
+
+
+def test_calibration_applies_only_to_calibrated_provider_and_sections(pipeline):
+    from tcs.model.cellular import cellular_observations
+    from tcs.model.confidence import cellular_confidence
+
+    s, b, _, prior, serving, *_ = pipeline
+    prior = prior.copy()
+    prior["source"] = "ofcom_test"
+    cal = {"version": 2, "rsrp_input": "corrected_quality", "section_km": 10, "bias": {"ee": 0.05},
+           "sections": {"ee": {"1": -0.1}}, "rsrp_map": {"ee": {"slope": 40, "intercept": -115}}}
+    raw = cellular_observations(s, b.samples, prior, serving)
+    adjusted = cellular_observations(s, b.samples, prior, serving, cal)
+    ee = (adjusted["provider_id"] == "ee") & ~adjusted["_in_tunnel"]
+    other = adjusted["provider_id"] != "ee"
+    assert np.allclose(adjusted.loc[ee, "signal_primary"], 40 * adjusted.loc[ee, "quality_score"] - 115)
+    assert np.allclose(raw.loc[other, "quality_score"], adjusted.loc[other, "quality_score"])
+    assert not adjusted.loc[other, "source_flags"].str.contains("calibrated").any()
+    distances = adjusted["sample_id"].map(b.samples.set_index("sample_id")["distance_m"])
+    correction = np.where((distances >= 10000) & (distances < 20000), -0.1, 0.05)
+    assert np.allclose(adjusted.loc[ee, "quality_base"], np.clip(raw.loc[ee, "quality_base"] + correction[ee], 0, 1))
+    before = cellular_confidence(s, raw)
+    after = cellular_confidence(s, adjusted)
+    assert np.allclose(before[other], after[other])
+    assert np.all(after[ee] > before[ee])

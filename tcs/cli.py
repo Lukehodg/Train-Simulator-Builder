@@ -191,6 +191,8 @@ def build_all(offline: bool = typer.Option(False), only: str | None = typer.Opti
     write_index()
     console.rule("build-all")
     console.log(f"{len(ids) - len(failures)}/{len(ids)} routes built" + (f"; failed: {', '.join(f for f, _ in failures)}" if failures else ""))
+    if failures:
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -272,7 +274,12 @@ def calibrate(measurements: Path = typer.Argument(..., help="CSV file"), preset:
     b = load_bundle(interim, s.route["country"])
     meas = load_measurements(measurements, preset, s.operators)
     meas = attach_to_route(meas, b.samples, b.proj, max_distance_m=max_distance_m)
-    obs = pd.read_parquet(s.paths()["processed"] / "provider_observation.parquet").merge(b.samples[["sample_id", "distance_m"]], on="sample_id")
+    from .model.cellular import cellular_observations
+
+    # Always fit against an uncalibrated baseline, even after a calibrated run.
+    obs = cellular_observations(s, b.samples, pd.read_parquet(interim / "coverage_prior.parquet"),
+                                pd.read_parquet(interim / "serving.parquet"))
+    obs = obs.merge(b.samples[["sample_id", "distance_m"]], on="sample_id")
     r = s.sim["cellular"]["rsrp_dbm"]
     cal = calibration.fit(obs, meas, nominal_rsrp=(float(r["at_zero"]), float(r["at_one"])))
     calibration.save(cal, interim / "calibration.json")

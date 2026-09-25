@@ -1,13 +1,13 @@
 import numpy as np
+import pandas as pd
 from shapely.geometry import LineString
 
-from tcs.geo import Projector, bearings, local_crs, offset_xy, sample_line
+from tcs.geo import Projector, local_crs, offset_xy, sample_line
 from tcs.model.calibration import fit
 from tcs.sources.measurements import PRESETS
 from tcs.sources.ofcom_coverage import _aggregate, _parse_payload
-from tcs.sources.timetable import _hhmm, schedule_seconds
 from tcs.sources.terrain import SyntheticDEM, sky_visibility
-import pandas as pd
+from tcs.sources.timetable import _hhmm, schedule_seconds
 
 
 def test_local_crs():
