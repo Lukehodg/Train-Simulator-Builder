@@ -1,0 +1,46 @@
+route:
+  id: eg_edb_glq
+  name: Edinburgh - Glasgow via Falkirk High
+  country: GB
+  operator: ScotRail
+  direction: westbound
+  origin_crs: EDB
+  destination_crs: GLQ
+  stations:
+  - crs: EDB
+    name: Edinburgh Waverley
+    stop: true
+    trainshed: true
+  - crs: HYM
+    name: Haymarket
+    stop: true
+    trainshed: false
+  - crs: LIN
+    name: Linlithgow
+    stop: false
+    trainshed: false
+  - crs: PMT
+    name: Polmont
+    stop: false
+    trainshed: false
+  - crs: FKK
+    name: Falkirk High
+    stop: true
+    trainshed: false
+  - crs: CRO
+    name: Croy
+    stop: false
+    trainshed: false
+  - crs: GLQ
+    name: Glasgow Queen Street
+    stop: true
+    trainshed: true
+  timetable:
+    source: yaml
+    departure: 09:00
+    calls:
+      EDB: 09:00
+      HYM: 09:04
+      FKK: 09:26
+      GLQ: 09:52
+    dwell_s: 90

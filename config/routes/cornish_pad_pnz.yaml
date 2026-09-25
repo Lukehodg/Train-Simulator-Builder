@@ -1,0 +1,89 @@
+route:
+  id: cornish_pad_pnz
+  name: West of England & Cornish Main Line
+  country: GB
+  operator: Great Western Railway
+  direction: westbound
+  origin_crs: PAD
+  destination_crs: PNZ
+  stations:
+  - crs: PAD
+    name: London Paddington
+    stop: true
+    trainshed: true
+  - crs: RDG
+    name: Reading
+    stop: true
+    trainshed: false
+  - crs: TAU
+    name: Taunton
+    stop: true
+    trainshed: false
+  - crs: EXD
+    name: Exeter St Davids
+    stop: true
+    trainshed: false
+  - crs: NTA
+    name: Newton Abbot
+    stop: true
+    trainshed: false
+  - crs: PLY
+    name: Plymouth
+    stop: true
+    trainshed: false
+  - crs: LSK
+    name: Liskeard
+    stop: true
+    trainshed: false
+  - crs: BOD
+    name: Bodmin Parkway
+    stop: true
+    trainshed: false
+  - crs: PAR
+    name: Par
+    stop: true
+    trainshed: false
+  - crs: SAU
+    name: St Austell
+    stop: true
+    trainshed: false
+  - crs: TRU
+    name: Truro
+    stop: true
+    trainshed: false
+  - crs: RED
+    name: Redruth
+    stop: true
+    trainshed: false
+  - crs: CBN
+    name: Camborne
+    stop: true
+    trainshed: false
+  - crs: SER
+    name: St Erth
+    stop: true
+    trainshed: false
+  - crs: PNZ
+    name: Penzance
+    stop: true
+    trainshed: true
+  timetable:
+    source: yaml
+    departure: 09:00
+    calls:
+      PAD: 09:00
+      RDG: 09:26
+      TAU: '10:45'
+      EXD: '11:10'
+      NTA: '11:30'
+      PLY: '12:08'
+      LSK: '12:34'
+      BOD: '12:50'
+      PAR: '13:03'
+      SAU: '13:10'
+      TRU: '13:30'
+      RED: '13:42'
+      CBN: '13:49'
+      SER: '14:03'
+      PNZ: '14:15'
+    dwell_s: 90

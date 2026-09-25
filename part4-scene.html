@@ -1,0 +1,182 @@
+<script>
+(function(){
+'use strict';
+const {CFG, TUNNELS, LINKS, R, S, SITES, classOf, confStep, clamp} = window.__SIM;
+const N=R.n, EX=CFG.v_exag/1000;               // metres -> scene units (1 unit = 1 km, exaggerated)
+const railY = i => R.elev[i]*EX;
+const $ = id => document.getElementById(id);
+
+/* ---------- theme tokens ---------- */
+const TOK = {};
+function readTokens(){
+  const cs=getComputedStyle(document.documentElement);
+  for (const k of ['sky','terrain-lo','terrain-hi','c-strong','c-usable','c-poor','c-outage','c-unknown','conf-1','conf-2','conf-3','conf-4','conf-5','train','text','muted','lane-edge','accent','surface'])
+    TOK[k]=cs.getPropertyValue('--'+k).trim();
+  TOK.cls=[TOK['c-strong'],TOK['c-usable'],TOK['c-poor'],TOK['c-outage'],TOK['c-unknown']].map(c=>new THREE.Color(c));
+  TOK.conf=[1,2,3,4,5].map(k=>new THREE.Color(TOK['conf-'+k]));
+}
+readTokens();
+
+/* ---------- renderer / scene ---------- */
+const canvas=$('gl'), viewport=$('viewport');
+const renderer=new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const scene=new THREE.Scene();
+scene.fog=new THREE.Fog(0x000000, 30, 300);
+const camera=new THREE.PerspectiveCamera(50, 1, 0.1, 4000);
+const hemi=new THREE.HemisphereLight(0xffffff, 0x445544, 0.9); scene.add(hemi);
+const sun=new THREE.DirectionalLight(0xffffff, 0.65); sun.position.set(-1,1.4,0.5); scene.add(sun);
+
+function resize(){ const w=viewport.clientWidth, h=viewport.clientHeight; if(!w||!h) return; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
+new ResizeObserver(resize).observe(viewport); resize();
+
+/* ---------- terrain (procedural DEM stand-in, carved along the railway) ---------- */
+let minX=1e9,maxX=-1e9,minY=1e9,maxY=-1e9; for(let i=0;i<N;i++){ minX=Math.min(minX,R.x[i]);maxX=Math.max(maxX,R.x[i]);minY=Math.min(minY,R.y[i]);maxY=Math.max(maxY,R.y[i]); }
+const PAD=45, TW=maxX-minX+2*PAD, TH=maxY-minY+2*PAD, TCX=(minX+maxX)/2, TCY=(minY+maxY)/2;
+const terrainGeo=new THREE.PlaneGeometry(TW, TH, 170, 330); terrainGeo.rotateX(-Math.PI/2);
+const bins=new Map(); const BIN=2; const bkey=(x,y)=>Math.floor(x/BIN)+','+Math.floor(y/BIN);
+for(let i=0;i<N;i+=3){ const k=bkey(R.x[i],R.y[i]); (bins.get(k)||bins.set(k,[]).get(k)).push(i); }
+function nearestSample(x,y,reach){ let best=-1,bd=1e18; const r=Math.ceil(reach/BIN); const bx=Math.floor(x/BIN), by=Math.floor(y/BIN);
+  for(let ix=bx-r;ix<=bx+r;ix++) for(let iy=by-r;iy<=by+r;iy++){ const a=bins.get(ix+','+iy); if(!a) continue; for(const i of a){ const d=(R.x[i]-x)**2+(R.y[i]-y)**2; if(d<bd){bd=d;best=i;} } }
+  return [best, Math.sqrt(bd)]; }
+const terrainH=new Float32Array(terrainGeo.attributes.position.count);
+{ const pos=terrainGeo.attributes.position; 
+  for(let v=0;v<pos.count;v++){ const x=pos.getX(v)+TCX, y=-pos.getZ(v)+TCY; pos.setX(v,x); pos.setZ(v,-y);
+    let h=terrainM(x,y); const [ni,nd]=nearestSample(x,y,4); if(ni>=0&&nd<4){ const w=1-nd/4; h=h*(1-w*w)+R.elev[ni]*w*w; }
+    terrainH[v]=h; pos.setY(v,h*EX); }
+  terrainGeo.computeVertexNormals();
+  terrainGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count*3),3));
+}
+function terrainM(x,y){ // same function as the simulation module (kept local for the mesh)
+  const hash=n=>{const s=Math.sin(n)*43758.5453;return s-Math.floor(s);}; const hash2=(x,y)=>hash(x*127.1+y*311.7);
+  const noise2=(x,y)=>{const ix=Math.floor(x),iy=Math.floor(y),fx=x-ix,fy=y-iy,ux=fx*fx*(3-2*fx),uy=fy*fy*(3-2*fy);const a=hash2(ix,iy),b=hash2(ix+1,iy),c=hash2(ix,iy+1),d=hash2(ix+1,iy+1);return (a*(1-ux)+b*ux)*(1-uy)+(c*(1-ux)+d*ux)*uy;};
+  const fbm2=(x,y,oct)=>{let a=0.5,s=0,f=1,n=0;for(let o=0;o<oct;o++){s+=a*noise2(x*f+o*3.1,y*f-o*7.3);n+=a;a*=0.55;f*=2;}return s/n;};
+  const pennine=Math.max(0,1-Math.hypot((x+150)/80,(y-300)/150)), cheviot=Math.max(0,1-Math.hypot((x+124)/38,(y-444)/32)), lammer=Math.max(0,1-Math.hypot((x+163)/45,(y-478)/26)), fens=Math.max(0,1-Math.hypot((x-20)/45,(y-115)/45));
+  const base=15+50*fbm2(x/45,y/45,3)+150*fbm2(x/11,y/11,5)*(0.35+0.65*fbm2(x/70,y/70,2));
+  return Math.max(2, base*(1-0.8*fens)+420*pennine+520*cheviot+380*lammer);
+}
+const terrainMat=new THREE.MeshLambertMaterial({vertexColors:true});
+const terrain=new THREE.Mesh(terrainGeo, terrainMat); scene.add(terrain);
+function colorTerrain(){ const col=terrainGeo.attributes.color, lo=new THREE.Color(TOK['terrain-lo']), hi=new THREE.Color(TOK['terrain-hi']), c=new THREE.Color();
+  for(let v=0;v<col.count;v++){ const t=clamp(terrainH[v]/520,0,1); c.copy(lo).lerp(hi, Math.pow(t,0.7)); col.setXYZ(v,c.r,c.g,c.b); } col.needsUpdate=true; }
+
+/* ---------- ribbons ---------- */
+const LANES = [
+  {key:'wan', off:0,   hw:0.46, lift:0.07, link:'wan'},
+  {key:'ee',  off:1.25,hw:0.28, lift:0.10, link:'ee'},
+  {key:'o2',  off:1.95,hw:0.28, lift:0.13, link:'o2'},
+  {key:'vf',  off:2.65,hw:0.28, lift:0.16, link:'vf'},
+  {key:'sl',  off:0,   hw:0.30, lift:5.2,  link:'sl', sky:true}
+];
+const ribbons={};
+for (const L of LANES){
+  const pos=new Float32Array(N*6), col=new Float32Array(N*6), idx=new Uint32Array((N-1)*6);
+  for(let i=0;i<N;i++){ const b=R.bearing[i], nx=Math.cos(b), nz=Math.sin(b); const px=R.x[i]+nx*L.off, pz=-R.y[i]+nz*L.off;
+    let y=railY(i); if(L.off>0){ y=Math.max(y, terrainM(px,-pz)*EX); } y+=L.lift;
+    pos[i*6]=px-nx*L.hw; pos[i*6+1]=y; pos[i*6+2]=pz-nz*L.hw; pos[i*6+3]=px+nx*L.hw; pos[i*6+4]=y; pos[i*6+5]=pz+nz*L.hw;
+    if(i<N-1){ const a=i*2; idx[i*6]=a; idx[i*6+1]=a+1; idx[i*6+2]=a+2; idx[i*6+3]=a+1; idx[i*6+4]=a+3; idx[i*6+5]=a+2; } }
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(pos,3)); g.setAttribute('color',new THREE.BufferAttribute(col,3)); g.setIndex(new THREE.BufferAttribute(idx,1));
+  const m=new THREE.MeshBasicMaterial({vertexColors:true, side:THREE.DoubleSide, transparent:!!L.sky, opacity:L.sky?0.78:1});
+  const mesh=new THREE.Mesh(g,m); scene.add(mesh); ribbons[L.key]={mesh,geo:g,lane:L};
+}
+let metric='quality';
+function recolor(){ for(const L of LANES){ const col=ribbons[L.key].geo.attributes.color; const arr=col.array;
+    for(let i=0;i<N;i++){ let c; if(metric==='conf'){ const cv=L.link==='wan'?S.conf[i]:S.links[L.link].conf[i]; c=TOK.conf[confStep(cv)]; } else c=TOK.cls[classOf(metric,L.link,i)];
+      const o=i*6; arr[o]=c.r;arr[o+1]=c.g;arr[o+2]=c.b;arr[o+3]=c.r;arr[o+4]=c.g;arr[o+5]=c.b; } col.needsUpdate=true; } }
+
+/* ---------- tunnels, stations, cells ---------- */
+const tunnelMat=new THREE.MeshLambertMaterial({color:0x888888, transparent:true, opacity:0.85});
+const tunnelMeshes=[];
+for(const [a,b,name] of TUNNELS){ const i0=Math.round(a/CFG.spacing_km), i1=Math.round(b/CFG.spacing_km), im=(i0+i1)>>1; const len=b-a;
+  const g=new THREE.BoxGeometry(len+0.2, 0.7, 3.6); const m=new THREE.Mesh(g, tunnelMat); m.position.set(R.x[im], railY(im)+0.25, -R.y[im]); m.rotation.y=Math.PI/2-R.bearing[im]; scene.add(m); tunnelMeshes.push(m); }
+
+const labelSprites=[];
+function makeLabel(text, sub){ const c=document.createElement('canvas'); c.width=512; c.height=128; const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c), transparent:true, depthTest:false})); sp.userData={c,text,sub}; drawLabel(sp); return sp; }
+function drawLabel(sp){ const {c,text,sub}=sp.userData, ctx=c.getContext('2d'); ctx.clearRect(0,0,c.width,c.height);
+  ctx.font='600 44px "Barlow Condensed", "Arial Narrow", sans-serif'; ctx.textBaseline='middle'; const w=ctx.measureText(text).width+36;
+  ctx.fillStyle=TOK.surface; ctx.globalAlpha=0.85; ctx.fillRect(4,22,w,84); ctx.globalAlpha=1; ctx.fillStyle=TOK.text; ctx.fillText(text,22,52);
+  ctx.font='500 26px "IBM Plex Mono", monospace'; ctx.fillStyle=TOK.muted; ctx.fillText(sub,22,88); sp.material.map.needsUpdate=true; }
+const stationMat=new THREE.MeshBasicMaterial({color:0x888888});
+for(const s of R.stations){ const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,3.2,8), stationMat); pole.position.set(s.x, railY(s.i)+1.6, -s.y); scene.add(pole);
+  const sp=makeLabel(s.name, s.km.toFixed(1)+' km'+(s.stop?' · stop':'')); sp.position.set(s.x, railY(s.i)+4.4, -s.y); sp.center.set(0,0.5); scene.add(sp); labelSprites.push(sp); }
+
+const siteList=[]; for(const L of LINKS){ if(SITES[L.id]) for(const s of SITES[L.id]) siteList.push({...s, link:L.id}); }
+const cellMesh=new THREE.InstancedMesh(new THREE.CylinderGeometry(0.07,0.09,1.6,6), new THREE.MeshBasicMaterial({color:0x888888}), siteList.length);
+{ const m=new THREE.Matrix4(); siteList.forEach((s,k)=>{ m.makeTranslation(s.x, s.elev*EX+0.8, -s.y); cellMesh.setMatrixAt(k,m); }); cellMesh.visible=false; scene.add(cellMesh); }
+const servingLines={}; for(const L of LINKS){ if(L.type!=='cellular') continue; const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(6),3));
+  const ln=new THREE.Line(g, new THREE.LineBasicMaterial({color:0x888888, transparent:true, opacity:0.7})); ln.visible=false; scene.add(ln); servingLines[L.id]=ln; }
+
+/* ---------- train + sky cone ---------- */
+const train=new THREE.Group();
+const trainMat=new THREE.MeshLambertMaterial({color:0x2b6fd6});
+const body=new THREE.Mesh(new THREE.BoxGeometry(1.7,0.34,0.42), trainMat); body.position.y=0.2; train.add(body);
+const nose=new THREE.Mesh(new THREE.ConeGeometry(0.21,0.5,4), trainMat); nose.rotation.z=-Math.PI/2; nose.rotation.y=Math.PI/4; nose.position.set(1.1,0.2,0); train.add(nose);
+const mast=new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,1.2,4), new THREE.MeshBasicMaterial({color:0x888888})); mast.position.y=0.95; train.add(mast);
+scene.add(train);
+const coneGeo=new THREE.ConeGeometry(3.4, 3.8, 40, 1, true);
+const coneMat=new THREE.MeshBasicMaterial({color:0x3aa864, transparent:true, opacity:0.16, side:THREE.DoubleSide, depthWrite:false});
+const coneWire=new THREE.MeshBasicMaterial({color:0x3aa864, transparent:true, opacity:0.35, wireframe:true, depthWrite:false});
+const cone=new THREE.Group(); const c1=new THREE.Mesh(coneGeo,coneMat), c2=new THREE.Mesh(coneGeo,coneWire); c1.rotation.x=Math.PI; c2.rotation.x=Math.PI; cone.add(c1,c2); cone.position.y=1.9+1.5; train.add(cone);
+const beam=new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,1.5,0), new THREE.Vector3(0,1.5+5.2-0.1,0)]), new THREE.LineBasicMaterial({color:0x3aa864, transparent:true, opacity:0.6})); train.add(beam);
+
+/* ---------- theme application ---------- */
+function applyTheme(){ readTokens(); const sky=new THREE.Color(TOK.sky); scene.background=sky; scene.fog.color=sky; colorTerrain(); recolor();
+  trainMat.color.set(TOK.train); stationMat.color.set(TOK['lane-edge']); cellMesh.material.color.set(TOK.muted); tunnelMat.color.set(TOK['lane-edge']); mast.material.color.set(TOK.muted);
+  for(const k in servingLines) servingLines[k].material.color.set(TOK.text); for(const sp of labelSprites) drawLabel(sp); }
+applyTheme();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+new MutationObserver(applyTheme).observe(document.documentElement,{attributes:true, attributeFilter:['data-theme']});
+document.fonts && document.fonts.ready.then(()=>{ for(const sp of labelSprites) drawLabel(sp); });
+
+/* ---------- camera ---------- */
+const cam={mode:'chase', yaw:0, pitch:0.36, dist:15, target:new THREE.Vector3(), userYaw:0, userPitch:0.7, userDist:30};
+const mid=(N/2)|0; const overviewTarget=new THREE.Vector3((minX+maxX)/2, 0, -(minY+maxY)/2);
+function setMode(m){ cam.mode=m; document.querySelectorAll('#cams button').forEach(b=>b.classList.toggle('on', b.dataset.cam===m));
+  if(m==='orbit'){ cam.userYaw=cam.yaw; cam.userPitch=0.55; cam.userDist=26; } if(m==='overview'){ cam.userYaw=0.25; cam.userPitch=1.05; cam.userDist=640; } }
+$('cams').addEventListener('click', e=>{ const b=e.target.closest('button'); if(b) setMode(b.dataset.cam); });
+let drag=null;
+canvas.addEventListener('pointerdown', e=>{ drag={x:e.clientX,y:e.clientY,moved:false}; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointermove', e=>{ if(!drag) return; const dx=e.clientX-drag.x, dy=e.clientY-drag.y; if(Math.abs(dx)+Math.abs(dy)>4) drag.moved=true;
+  if(drag.moved){ if(cam.mode==='chase'||cam.mode==='oblique') setMode('orbit'); cam.userYaw+=dx*0.006; cam.userPitch=clamp(cam.userPitch-dy*0.005,0.08,1.5); drag.x=e.clientX; drag.y=e.clientY; } });
+canvas.addEventListener('pointerup', e=>{ if(drag&&!drag.moved) pick(e); drag=null; });
+canvas.addEventListener('wheel', e=>{ e.preventDefault(); if(cam.mode==='chase'||cam.mode==='oblique') setMode('orbit'); cam.userDist=clamp(cam.userDist*Math.exp(e.deltaY*0.0012),3,2000); },{passive:false});
+function lerpAngle(a,b,t){ let d=b-a; while(d>Math.PI)d-=2*Math.PI; while(d<-Math.PI)d+=2*Math.PI; return a+d*t; }
+function updateCamera(bearing, dt){
+  let target=cam.target, yaw, pitch, dist;
+  if(cam.mode==='overview'){ target=overviewTarget; yaw=cam.userYaw; pitch=cam.userPitch; dist=cam.userDist; }
+  else if(cam.mode==='orbit'){ yaw=cam.userYaw; pitch=cam.userPitch; dist=cam.userDist; }
+  else if(cam.mode==='oblique'){ cam.yaw=lerpAngle(cam.yaw, bearing-0.75, Math.min(1,dt*2)); yaw=cam.yaw; pitch=0.78; dist=46; }
+  else { cam.yaw=lerpAngle(cam.yaw, bearing, Math.min(1,dt*2.5)); yaw=cam.yaw; pitch=0.36; dist=15; }
+  const fx=Math.sin(yaw), fz=-Math.cos(yaw);
+  camera.position.set(target.x-fx*dist*Math.cos(pitch), target.y+dist*Math.sin(pitch), target.z-fz*dist*Math.cos(pitch));
+  const look = cam.mode==='chase' ? new THREE.Vector3(target.x+fx*4, target.y+0.6, target.z+fz*4) : target;
+  camera.lookAt(look); camera.near=Math.max(0.1,dist*0.02); camera.far=Math.max(400,dist*30); camera.updateProjectionMatrix();
+  scene.fog.near=dist*2.2; scene.fog.far=cam.mode==='overview'?1e6:dist*16;
+  const ls=clamp(dist*0.55,3,70); for(const sp of labelSprites) sp.scale.set(ls, ls/4, 1);
+  return dist;
+}
+
+/* ---------- picking ---------- */
+const ray=new THREE.Raycaster(); const ndc=new THREE.Vector2();
+function pick(e){ const r=canvas.getBoundingClientRect(); ndc.set(((e.clientX-r.left)/r.width)*2-1, -((e.clientY-r.top)/r.height)*2+1); ray.setFromCamera(ndc,camera);
+  const targets=LANES.filter(L=>ribbons[L.key].mesh.visible).map(L=>ribbons[L.key].mesh); const hit=ray.intersectObjects(targets,false)[0];
+  if(!hit){ window.__UI.hidePopup(); return; } const [i]=nearestSample(hit.point.x, -hit.point.z, 6); if(i>=0) window.__UI.showPopup(i, e.clientX-r.left, e.clientY-r.top); }
+
+/* ---------- per-frame scene update ---------- */
+const tmpM=new THREE.Matrix4();
+function updateScene(i, frac, dt){
+  const j=Math.min(N-1,i+1); const x=R.x[i]+(R.x[j]-R.x[i])*frac, y=R.y[i]+(R.y[j]-R.y[i])*frac, ey=railY(i)+(railY(j)-railY(i))*frac, b=R.bearing[i];
+  train.position.set(x, ey+0.06, -y); train.rotation.y=Math.PI/2-b; cam.target.set(x, ey+0.3, -y);
+  const sl=S.links.sl; const skyOn=$('ly_sky').checked;
+  cone.visible=skyOn && R.tunnel[i]<0; beam.visible=skyOn && !!sl.avail[i];
+  const sc=0.3+0.7*sl.q[i]; cone.scale.set(sc,1,sc); const cc=sl.avail[i]?TOK.cls[0]:TOK.cls[3]; coneMat.color.copy(cc); coneWire.color.copy(cc); beam.material.color.copy(cc);
+  const showCells=$('ly_cells').checked; cellMesh.visible=showCells;
+  for(const L of LINKS){ if(L.type!=='cellular') continue; const ln=servingLines[L.id]; const k=S.links[L.id].serving[i]; ln.visible=showCells&&k>=0&&ribbons[L.id].mesh.visible;
+    if(ln.visible){ const s=SITES[L.id][k]; const p=ln.geometry.attributes.position.array; p[0]=x;p[1]=ey+1.5;p[2]=-y; p[3]=s.x;p[4]=s.elev*EX+1.6;p[5]=-s.y; ln.geometry.attributes.position.needsUpdate=true; } }
+  updateCamera(b, dt);
+  renderer.render(scene,camera);
+}
+function setLayer(key, on){ if(ribbons[key]) ribbons[key].mesh.visible=on; }
+window.__SCENE={ updateScene, recolor, setLayer, setMetric:m=>{metric=m;recolor();}, setMode, cam };
+})();
+</script>

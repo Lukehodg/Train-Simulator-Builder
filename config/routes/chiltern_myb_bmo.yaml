@@ -1,0 +1,54 @@
+route:
+  id: chiltern_myb_bmo
+  name: Chiltern Main Line
+  country: GB
+  operator: Chiltern Railways
+  direction: northbound
+  origin_crs: MYB
+  destination_crs: BMO
+  stations:
+  - crs: MYB
+    name: London Marylebone
+    stop: true
+    trainshed: true
+  - crs: HWY
+    name: High Wycombe
+    stop: true
+    trainshed: false
+  - crs: BCS
+    name: Bicester North
+    stop: true
+    trainshed: false
+  - crs: BAN
+    name: Banbury
+    stop: true
+    trainshed: false
+  - crs: LMS
+    name: Leamington Spa
+    stop: true
+    trainshed: false
+  - crs: WRP
+    name: Warwick Parkway
+    stop: true
+    trainshed: false
+  - crs: SOL
+    name: Solihull
+    stop: true
+    trainshed: false
+  - crs: BMO
+    name: Birmingham Moor Street
+    stop: true
+    trainshed: true
+  timetable:
+    source: yaml
+    departure: 09:00
+    calls:
+      MYB: 09:00
+      HWY: 09:23
+      BCS: 09:44
+      BAN: '10:00'
+      LMS: '10:18'
+      WRP: '10:25'
+      SOL: '10:41'
+      BMO: '10:55'
+    dwell_s: 90

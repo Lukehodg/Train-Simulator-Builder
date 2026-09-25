@@ -1,0 +1,56 @@
+route:
+  id: geml_lst_nrw
+  name: Great Eastern Main Line
+  country: GB
+  operator: Greater Anglia
+  direction: northbound
+  origin_crs: LST
+  destination_crs: NRW
+  stations:
+  - crs: LST
+    name: London Liverpool Street
+    stop: true
+    trainshed: true
+  - crs: SRA
+    name: Stratford
+    stop: false
+    trainshed: false
+  - crs: CHM
+    name: Chelmsford
+    stop: false
+    trainshed: false
+  - crs: COL
+    name: Colchester
+    stop: true
+    trainshed: false
+  - crs: MNG
+    name: Manningtree
+    stop: false
+    trainshed: false
+  - crs: IPS
+    name: Ipswich
+    stop: true
+    trainshed: false
+  - crs: SMK
+    name: Stowmarket
+    stop: true
+    trainshed: false
+  - crs: DIS
+    name: Diss
+    stop: true
+    trainshed: false
+  - crs: NRW
+    name: Norwich
+    stop: true
+    trainshed: true
+  timetable:
+    source: yaml
+    departure: 09:00
+    calls:
+      LST: 09:00
+      COL: 09:50
+      IPS: '10:08'
+      SMK: '10:20'
+      DIS: '10:34'
+      NRW: '10:52'
+    dwell_s: 90

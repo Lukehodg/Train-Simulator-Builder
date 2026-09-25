@@ -1,0 +1,29 @@
+satcom:
+  providers:
+    - id: starlink
+      name: Starlink
+      enabled: true
+      terminal: performance          # performance | standard | flat_high_performance | mini (EDGE Mini integrates a Starlink Mini)
+      service_area:
+        countries: [GB]              # Land Mobility availability is a country/region eligibility, not RF telemetry
+      mode: predictive_obstruction   # predictive_obstruction | telemetry_calibrated
+      # Terminal field of view drives the horizon mask: sky below this elevation angle does not count.
+      min_elevation_deg: {performance: 20, standard: 25, flat_high_performance: 20, mini: 35}   # Mini has a ~110° field of view
+      capacity_prior_mbps: {performance: 220, standard: 150, flat_high_performance: 220, mini: 100}
+      latency_prior_ms: {base: 28, obstruction_penalty: 35}
+      # Statistical availability model P(link) = f(sky_visibility, obstruction, speed, weather)
+      availability:
+        sky_threshold: 0.35          # below this the terminal cannot hold a session (tunnel/canopy/deep cutting)
+        speed_penalty_per_100kph: 0.02
+        weather:
+          nominal: {sky_penalty: 0.0,  capacity_factor: 1.0}
+          rain:    {sky_penalty: 0.05, capacity_factor: 0.8}
+          storm:   {sky_penalty: 0.12, capacity_factor: 0.6}
+      # Stage 2: calibrate from terminal telemetry (starlink-grpc-tools history export). Replaces the priors
+      # above with route-specific empirical distributions when a telemetry file is provided.
+      telemetry:
+        file: null                   # data/raw/starlink/history.csv
+        fields: {time: timestamp, obstruction: fraction_obstructed, downlink_bps: downlink_throughput_bps, ping_ms: pop_ping_latency_ms, drop_rate: pop_ping_drop_rate}
+      orbital_layer:
+        enabled: false               # visualisation only; never used to claim which satellite serves the terminal
+        tle_source: https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle

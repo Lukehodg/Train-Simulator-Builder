@@ -1,0 +1,63 @@
+route:
+  id: mml_stp_shf
+  name: Midland Main Line
+  country: GB
+  operator: East Midlands Railway
+  direction: northbound
+  origin_crs: STP
+  destination_crs: SHF
+  stations:
+  - crs: STP
+    name: London St Pancras
+    stop: true
+    trainshed: true
+  - crs: LUT
+    name: Luton
+    stop: false
+    trainshed: false
+  - crs: BDM
+    name: Bedford
+    stop: false
+    trainshed: false
+  - crs: KET
+    name: Kettering
+    stop: false
+    trainshed: false
+  - crs: MHR
+    name: Market Harborough
+    stop: false
+    trainshed: false
+  - crs: LEI
+    name: Leicester
+    stop: true
+    trainshed: false
+  - crs: LBO
+    name: Loughborough
+    stop: false
+    trainshed: false
+  - crs: EMD
+    name: East Midlands Parkway
+    stop: false
+    trainshed: false
+  - crs: DBY
+    name: Derby
+    stop: true
+    trainshed: false
+  - crs: CHD
+    name: Chesterfield
+    stop: true
+    trainshed: false
+  - crs: SHF
+    name: Sheffield
+    stop: true
+    trainshed: true
+  timetable:
+    source: yaml
+    departure: 09:00
+    calls:
+      STP: 09:00
+      LEI: '10:05'
+      DBY: '10:36'
+      CHD: '11:00'
+      SHF: '11:16'
+    dwell_s: 90

@@ -1,0 +1,53 @@
+# Terrestrial providers for the selected route. Add/remove operators freely; nothing downstream is hard-coded.
+
+cellular:
+  operators:
+    - id: ee
+      name: EE
+      mcc: 234
+      mnc: [30, 31, 32, 33, 34]        # OpenCellID "net" codes attributed to EE (incl. legacy Orange/T-Mobile)
+      ofcom_key: EE                   # Ofcom API field Mc_EE
+      capacity_prior_mbps: {4G: 110, 5G: 260, blend: 170}   # p50 usable throughput at excellent signal, rooftop antenna; blend = Ofcom's merged 4G/5G level
+    - id: o2
+      name: O2
+      mcc: 234
+      mnc: [10, 11]
+      ofcom_key: O2                   # Mc_O2
+      capacity_prior_mbps: {4G: 70, 5G: 170, blend: 110}
+    - id: vodafone
+      name: Vodafone
+      mcc: 234
+      mnc: [15, 91]
+      ofcom_key: VO                   # Mc_VO
+      capacity_prior_mbps: {4G: 85, 5G: 200, blend: 130}
+    - id: three
+      name: Three
+      mcc: 234
+      mnc: [20, 94]                   # 234-20 Three UK, 234-94 legacy 3G
+      ofcom_key: TH                   # Mc_TH
+      capacity_prior_mbps: {4G: 80, 5G: 240, blend: 145}   # widest 5G holding (100 MHz n78) lifts the 5G/blend prior
+
+  # Ofcom Mobile Checker UPRN Coverage API (June 2025 methodology): one blended 4G+5G level per MNO.
+  #   0 poor/none · 1 variable (outdoor only) · 2 good (outdoor only) · 3 variable in-home, good outdoor · 4 good in-home & outdoor
+  # A rooftop train antenna is an outdoor user, so 2 already means "good"; 3-4 add margin. Do not invent RSRP from
+  # these; the score is a prior that measured data later calibrates.
+  ofcom_api_url: "https://apim-cnapi-shared-prod.azure-api.net/mobilechecker/UPRN/{postcode}"
+  ofcom_api_key_header: Ocp-Apim-Subscription-Key
+  ofcom_level_to_score: {0: 0.05, 1: 0.32, 2: 0.58, 3: 0.72, 4: 0.85}
+  ofcom_uprn_aggregate: median # median | mean | max | min over the UPRNs returned for a postcode
+
+  # Connected Nations postcode open data (no key). Percent of premises with outdoor 4G/5G per operator.
+  connected_nations:
+    enabled: true
+    url: https://www.ofcom.org.uk/siteassets/resources/documents/research-and-data/multi-sector/infrastructure-research/connected-nations-2024/data-downloads/mobile-postcode-data.zip
+    column_pattern: "{gen}_prem_out_{op}"   # e.g. 4G_prem_out_EE
+
+opencellid:
+  # Bulk download per MCC is the reliable path (getInArea is capped and rate-limited).
+  bulk_url: "https://opencellid.org/ocid/downloads?token={token}&type=mcc&file={mcc}.csv.gz"
+  area_url: "https://opencellid.org/cell/getInArea?key={token}&BBOX={bbox}&format=json"
+  radios: [LTE, NR, UMTS, GSM]
+  min_samples: 2               # drop cells with fewer community observations
+  candidate_radius_m: 12000
+  candidates_per_sample: 5
+  attribution: "OpenCellID (CC BY-SA 4.0) - community contributed; a missing cell does not mean no service."

@@ -1,0 +1,81 @@
+"""Shared plumbing for source adapters: cached HTTP, provenance records, offline guard."""
+from __future__ import annotations
+
+import hashlib
+import json
+import time
+from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import requests
+from rich.console import Console
+
+console = Console(stderr=True)
+USER_AGENT = "train-connectivity-sim/0.1 (+https://github.com/; research tool)"
+
+
+class SourceUnavailable(RuntimeError):
+    """Raised when a live source cannot be used (no key, offline, HTTP failure). Callers fall back."""
+
+
+@dataclass
+class Provenance:
+    source: str
+    url: str | None
+    fetched_at: str
+    version: str | None = None
+    notes: str | None = None
+    synthetic: bool = False
+
+    def write(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(asdict(self), fh, indent=2)
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def cache_path(raw_dir: Path, name: str, key: str, ext: str) -> Path:
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
+    return raw_dir / name / f"{digest}.{ext}"
+
+
+def http_get(url: str, *, raw_dir: Path, name: str, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None,
+             data: str | dict | None = None, ext: str = "bin", timeout: int = 120, retries: int = 3, offline: bool = False, ttl_days: float = 30) -> Path:
+    """GET/POST with on-disk cache under data/raw/<route>/<name>/. Returns the cached file path."""
+    key = json.dumps({"url": url, "params": params, "data": data}, sort_keys=True)
+    path = cache_path(raw_dir, name, key, ext)
+    if path.exists() and (time.time() - path.stat().st_mtime) < ttl_days * 86400:
+        return path
+    if offline:
+        raise SourceUnavailable(f"offline mode and no cached copy for {name}")
+    headers = {"User-Agent": USER_AGENT, **(headers or {})}   # overpass-api.de rejects anonymous default agents (406)
+    last_err: Exception | None = None
+    for attempt in range(retries):
+        try:
+            console.log(f"[dim]{name}[/dim] fetching {url[:90]}…")
+            if data is not None:
+                r = requests.post(url, data=data, headers=headers, timeout=timeout)
+            else:
+                r = requests.get(url, params=params, headers=headers, timeout=timeout, stream=True)
+            if r.status_code == 429:
+                time.sleep(5 * (attempt + 1))
+                continue
+            # 4xx other than rate limiting is permanent (e.g. the Ofcom checker has no UPRNs for a postcode):
+            # retrying just burns the backoff budget, so fail fast and let the caller record the gap.
+            if 400 <= r.status_code < 500:
+                raise SourceUnavailable(f"{name}: HTTP {r.status_code} for {url}")
+            r.raise_for_status()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "wb") as fh:
+                for chunk in r.iter_content(1 << 20):
+                    fh.write(chunk)
+            return path
+        except requests.RequestException as exc:  # pragma: no cover - network
+            last_err = exc
+            time.sleep(2 * (attempt + 1))
+    raise SourceUnavailable(f"{name}: {last_err}")

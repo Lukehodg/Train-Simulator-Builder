@@ -1,0 +1,109 @@
+{
+ "app": "motion-applied-train-studio",
+ "version": 1,
+ "project": {
+  "renderedView": true,
+  "wiringColour": "#277f8d",
+  "title": "Azuma 5-car \u00b7 EDGE Rail",
+  "slideNo": "01",
+  "cars": [
+   {
+    "id": "c1",
+    "type": "cabL",
+    "aps": 1,
+    "sw": true,
+    "edge": 1,
+    "fleet": true,
+    "custom": {
+     "t-mini": true,
+     "t-core": true
+    },
+    "mounts": {},
+    "showMounting": true,
+    "rackU": 6
+   },
+   {
+    "id": "c2",
+    "type": "mid",
+    "aps": 2,
+    "sw": true,
+    "edge": 0,
+    "fleet": false,
+    "custom": {},
+    "mounts": {},
+    "showMounting": true,
+    "rackU": 6
+   },
+   {
+    "id": "c3",
+    "type": "mid",
+    "aps": 2,
+    "sw": true,
+    "edge": 1,
+    "fleet": false,
+    "custom": {},
+    "mounts": {},
+    "showMounting": true,
+    "rackU": 6
+   },
+   {
+    "id": "c4",
+    "type": "mid",
+    "aps": 2,
+    "sw": true,
+    "edge": 0,
+    "fleet": false,
+    "custom": {},
+    "mounts": {},
+    "showMounting": true,
+    "rackU": 6
+   },
+   {
+    "id": "c5",
+    "type": "cabR",
+    "aps": 1,
+    "sw": true,
+    "edge": 1,
+    "fleet": false,
+    "custom": {},
+    "mounts": {},
+    "showMounting": true,
+    "rackU": 6
+   }
+  ],
+  "cards": [],
+  "types": [
+   {
+    "id": "t-mini",
+    "slug": "edge-mini",
+    "name": "EDGE Mini",
+    "short": "MINI",
+    "color": "#1b7a8c",
+    "placement": "roof",
+    "link": true,
+    "hardwareKind": "satcom",
+    "presetId": "edge-mini"
+   },
+   {
+    "id": "t-core",
+    "slug": "edge-core",
+    "name": "EDGE Core",
+    "short": "CORE",
+    "color": "#333f48",
+    "placement": "rack",
+    "link": true,
+    "hardwareKind": "router",
+    "presetId": "edge-core"
+   }
+  ],
+  "threeD": true,
+  "showNumbers": true,
+  "showLegend": true,
+  "showFleetConnect": true,
+  "conceptView": false,
+  "techView": false,
+  "techMode": "topology",
+  "artRows": "auto",
+  "coverageOverlay": false
+ }
+}

@@ -1,0 +1,69 @@
+route:
+  id: tfw_cdf_man
+  name: Marches Line Cardiff - Manchester
+  country: GB
+  operator: Transport for Wales
+  direction: northbound
+  origin_crs: CDF
+  destination_crs: MAN
+  stations:
+  - crs: CDF
+    name: Cardiff Central
+    stop: true
+    trainshed: true
+  - crs: NWP
+    name: Newport
+    stop: true
+    trainshed: false
+  - crs: CWM
+    name: Cwmbran
+    stop: true
+    trainshed: false
+  - crs: AGV
+    name: Abergavenny
+    stop: true
+    trainshed: false
+  - crs: HFD
+    name: Hereford
+    stop: true
+    trainshed: false
+  - crs: LUD
+    name: Ludlow
+    stop: true
+    trainshed: false
+  - crs: SHR
+    name: Shrewsbury
+    stop: true
+    trainshed: false
+  - crs: CRE
+    name: Crewe
+    stop: true
+    trainshed: false
+  - crs: WML
+    name: Wilmslow
+    stop: true
+    trainshed: false
+  - crs: SPT
+    name: Stockport
+    stop: true
+    trainshed: false
+  - crs: MAN
+    name: Manchester Piccadilly
+    stop: true
+    trainshed: true
+  timetable:
+    source: yaml
+    departure: 09:00
+    calls:
+      CDF: 09:00
+      NWP: 09:14
+      CWM: 09:24
+      AGV: 09:40
+      HFD: '10:05'
+      LUD: '10:30'
+      SHR: '11:00'
+      CRE: '11:35'
+      WML: '11:52'
+      SPT: '12:02'
+      MAN: '12:15'
+    dwell_s: 90

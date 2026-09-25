@@ -1,0 +1,86 @@
+# Route configuration. The simulator treats the railway as configuration, not hard-coded geography:
+# swap this file for any other service / country and the pipeline + renderer are unchanged.
+
+route:
+  id: ecml_kgx_edb
+  name: East Coast Main Line
+  country: GB
+  operator: LNER
+  service_id: 1S07            # optional, informational
+  direction: northbound
+  origin_crs: KGX
+  destination_crs: EDB
+  sample_spacing_m: 50        # 25-100 m; 50 m matches the Ofcom prediction grid
+  corridor_m: 2500            # half-width of the corridor used for cell-site and postcode extraction
+
+  # Geometry source. "osm" routes the shortest path through the OSM rail network between the stations
+  # below (in order), which yields a true centreline and carries tunnel/cutting/embankment/bridge tags.
+  # Alternatives: geojson / gpx / geopackage / geoparquet (path) or "synthetic" (offline stand-in).
+  geometry:
+    source: osm
+    file: null
+    overpass_timeout_s: 180
+
+  # Ordered station sequence. CRS codes are resolved to coordinates from OSM (ref:crs) or NaPTAN.
+  # stop: true = calling point with dwell; trainshed: true = covered station (satcom canopy mask).
+  stations:
+    - {crs: KGX, name: "London King's Cross", stop: true,  trainshed: true}
+    - {crs: SVG, name: "Stevenage",           stop: false, trainshed: false}
+    - {crs: PBO, name: "Peterborough",        stop: true,  trainshed: false}
+    - {crs: GRA, name: "Grantham",            stop: false, trainshed: false}
+    - {crs: NNG, name: "Newark North Gate",   stop: false, trainshed: false}
+    - {crs: RET, name: "Retford",             stop: false, trainshed: false}
+    - {crs: DON, name: "Doncaster",           stop: false, trainshed: false}
+    - {crs: YRK, name: "York",                stop: true,  trainshed: true}
+    - {crs: NTR, name: "Northallerton",       stop: false, trainshed: false}
+    - {crs: DAR, name: "Darlington",          stop: true,  trainshed: true}
+    - {crs: DHM, name: "Durham",              stop: false, trainshed: false}
+    - {crs: NCL, name: "Newcastle",           stop: true,  trainshed: true}
+    - {crs: MPT, name: "Morpeth",             stop: false, trainshed: false}
+    - {crs: ALM, name: "Alnmouth",            stop: false, trainshed: false}
+    - {crs: BWK, name: "Berwick-upon-Tweed",  stop: true,  trainshed: false}
+    - {crs: DUN, name: "Dunbar",              stop: false, trainshed: false}
+    - {crs: EDB, name: "Edinburgh Waverley",  stop: true,  trainshed: true}
+
+  # Timetable. Version 1 interpolates between these times with accel/decel curves and line-speed caps.
+  # Replace with a CIF schedule (tcs fetch-timetable --cif <file>) when available.
+  timetable:
+    source: yaml
+    departure: "09:00"
+    calls:                    # hh:mm at calling points; passing stations are timed by the speed model
+      KGX: "09:00"
+      PBO: "09:47"
+      YRK: "10:52"
+      DAR: "11:19"
+      NCL: "11:49"
+      BWK: "12:32"
+      EDB: "13:20"
+    dwell_s: 120
+
+  # Line speed caps (km/h) by distance from origin, used when no linespeed dataset is loaded.
+  line_speed_kph:
+    default: 200
+    restrictions:
+      - {from_km: 0,   to_km: 3,   kph: 50}
+      - {from_km: 3,   to_km: 12,  kph: 110}
+      - {from_km: 12,  to_km: 30,  kph: 160}
+      - {from_km: 33,  to_km: 38,  kph: 130}
+      - {from_km: 120, to_km: 125, kph: 110}
+      - {from_km: 190, to_km: 196, kph: 140}
+      - {from_km: 248, to_km: 252, kph: 100}
+      - {from_km: 300, to_km: 306, kph: 80}
+      - {from_km: 374, to_km: 378, kph: 100}
+      - {from_km: 409, to_km: 414, kph: 110}
+      - {from_km: 428, to_km: 436, kph: 60}
+      - {from_km: 539, to_km: 544, kph: 90}
+      - {from_km: 610, to_km: 626, kph: 130}
+      - {from_km: 626, to_km: 640, kph: 60}
+  accel_mps2: 0.5
+  decel_mps2: 0.7
+
+terrain:
+  source: os_terrain50        # os_terrain50 (GB, 50 m, OS OpenData zip in data/raw/<route_id>/os_terrain50/) | copernicus_glo30 (keyless, global)
+  os_terrain50_folder: data/raw/shared/os_terrain50   # shared across routes (relative to the repo root)
+  horizon_azimuths: 16        # rays cast per sample for the sky-visibility model
+  horizon_reach_m: 3000
+  horizon_step_m: 50

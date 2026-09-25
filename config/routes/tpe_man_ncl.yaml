@@ -1,0 +1,61 @@
+route:
+  id: tpe_man_ncl
+  name: TransPennine North
+  country: GB
+  operator: TransPennine Express
+  direction: eastbound
+  origin_crs: MAN
+  destination_crs: NCL
+  stations:
+  - crs: MAN
+    name: Manchester Piccadilly
+    stop: true
+    trainshed: true
+  - crs: SYB
+    name: Stalybridge
+    stop: false
+    trainshed: false
+  - crs: HUD
+    name: Huddersfield
+    stop: true
+    trainshed: false
+  - crs: DEW
+    name: Dewsbury
+    stop: false
+    trainshed: false
+  - crs: LDS
+    name: Leeds
+    stop: true
+    trainshed: true
+  - crs: YRK
+    name: York
+    stop: true
+    trainshed: true
+  - crs: NTR
+    name: Northallerton
+    stop: false
+    trainshed: false
+  - crs: DAR
+    name: Darlington
+    stop: true
+    trainshed: true
+  - crs: DHM
+    name: Durham
+    stop: true
+    trainshed: false
+  - crs: NCL
+    name: Newcastle
+    stop: true
+    trainshed: true
+  timetable:
+    source: yaml
+    departure: 09:00
+    calls:
+      MAN: 09:00
+      HUD: 09:30
+      LDS: 09:56
+      YRK: '10:22'
+      DAR: '10:52'
+      DHM: '11:10'
+      NCL: '11:26'
+    dwell_s: 90

@@ -1,0 +1,68 @@
+route:
+  id: gwml_pad_swa
+  name: Great Western Main Line
+  country: GB
+  operator: Great Western Railway
+  direction: westbound
+  origin_crs: PAD
+  destination_crs: SWA
+  stations:
+  - crs: PAD
+    name: London Paddington
+    stop: true
+    trainshed: true
+  - crs: RDG
+    name: Reading
+    stop: true
+    trainshed: false
+  - crs: DID
+    name: Didcot Parkway
+    stop: false
+    trainshed: false
+  - crs: SWI
+    name: Swindon
+    stop: true
+    trainshed: false
+  - crs: BPW
+    name: Bristol Parkway
+    stop: true
+    trainshed: false
+  - crs: NWP
+    name: Newport
+    stop: true
+    trainshed: false
+  - crs: CDF
+    name: Cardiff Central
+    stop: true
+    trainshed: true
+  - crs: BGN
+    name: Bridgend
+    stop: true
+    trainshed: false
+  - crs: PTA
+    name: Port Talbot Parkway
+    stop: true
+    trainshed: false
+  - crs: NTH
+    name: Neath
+    stop: true
+    trainshed: false
+  - crs: SWA
+    name: Swansea
+    stop: true
+    trainshed: true
+  timetable:
+    source: yaml
+    departure: 09:00
+    calls:
+      PAD: 09:00
+      RDG: 09:26
+      SWI: 09:53
+      BPW: '10:15'
+      NWP: '10:38'
+      CDF: '10:55'
+      BGN: '11:16'
+      PTA: '11:31'
+      NTH: '11:40'
+      SWA: '11:55'
+    dwell_s: 90

@@ -1,0 +1,44 @@
+route:
+  id: hs1_stp_dvp
+  name: HS1 / Kent High Speed
+  country: GB
+  operator: Southeastern
+  direction: eastbound
+  origin_crs: STP
+  destination_crs: DVP
+  stations:
+  - crs: STP
+    name: London St Pancras
+    stop: true
+    trainshed: true
+  - crs: SFA
+    name: Stratford International
+    stop: true
+    trainshed: false
+  - crs: EBD
+    name: Ebbsfleet International
+    stop: true
+    trainshed: false
+  - crs: AFK
+    name: Ashford International
+    stop: true
+    trainshed: false
+  - crs: FKC
+    name: Folkestone Central
+    stop: true
+    trainshed: false
+  - crs: DVP
+    name: Dover Priory
+    stop: true
+    trainshed: false
+  timetable:
+    source: yaml
+    departure: 09:00
+    calls:
+      STP: 09:00
+      SFA: 09:07
+      EBD: 09:17
+      AFK: 09:38
+      FKC: 09:52
+      DVP: '10:05'
+    dwell_s: 90

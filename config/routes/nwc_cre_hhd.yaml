@@ -1,0 +1,59 @@
+route:
+  id: nwc_cre_hhd
+  name: North Wales Coast Line
+  country: GB
+  operator: Transport for Wales / Avanti
+  direction: westbound
+  origin_crs: CRE
+  destination_crs: HHD
+  stations:
+  - crs: CRE
+    name: Crewe
+    stop: true
+    trainshed: false
+  - crs: CTR
+    name: Chester
+    stop: true
+    trainshed: true
+  - crs: FLN
+    name: Flint
+    stop: true
+    trainshed: false
+  - crs: PRT
+    name: Prestatyn
+    stop: true
+    trainshed: false
+  - crs: RHL
+    name: Rhyl
+    stop: true
+    trainshed: false
+  - crs: CWB
+    name: Colwyn Bay
+    stop: true
+    trainshed: false
+  - crs: LLJ
+    name: Llandudno Junction
+    stop: true
+    trainshed: false
+  - crs: BNG
+    name: Bangor
+    stop: true
+    trainshed: false
+  - crs: HHD
+    name: Holyhead
+    stop: true
+    trainshed: true
+  timetable:
+    source: yaml
+    departure: 09:00
+    calls:
+      CRE: 09:00
+      CTR: 09:22
+      FLN: 09:38
+      PRT: 09:52
+      RHL: 09:58
+      CWB: '10:09'
+      LLJ: '10:15'
+      BNG: '10:35'
+      HHD: '11:05'
+    dwell_s: 90

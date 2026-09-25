@@ -1,0 +1,51 @@
+route:
+  id: bml_vic_btn
+  name: Brighton Main Line
+  country: GB
+  operator: Southern / Thameslink
+  direction: southbound
+  origin_crs: VIC
+  destination_crs: BTN
+  stations:
+  - crs: VIC
+    name: London Victoria
+    stop: true
+    trainshed: true
+  - crs: CLJ
+    name: Clapham Junction
+    stop: false
+    trainshed: false
+  - crs: ECR
+    name: East Croydon
+    stop: true
+    trainshed: false
+  - crs: GTW
+    name: Gatwick Airport
+    stop: true
+    trainshed: false
+  - crs: TBD
+    name: Three Bridges
+    stop: false
+    trainshed: false
+  - crs: HHE
+    name: Haywards Heath
+    stop: true
+    trainshed: false
+  - crs: BUG
+    name: Burgess Hill
+    stop: false
+    trainshed: false
+  - crs: BTN
+    name: Brighton
+    stop: true
+    trainshed: true
+  timetable:
+    source: yaml
+    departure: 09:00
+    calls:
+      VIC: 09:00
+      ECR: 09:15
+      GTW: 09:30
+      HHE: 09:44
+      BTN: '10:02'
+    dwell_s: 90

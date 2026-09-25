@@ -1,0 +1,100 @@
+route:
+  id: wcml_eus_glc
+  name: West Coast Main Line
+  country: GB
+  operator: Avanti West Coast
+  direction: northbound
+  origin_crs: EUS
+  destination_crs: GLC
+  stations:
+  - crs: EUS
+    name: London Euston
+    stop: true
+    trainshed: true
+  - crs: WFJ
+    name: Watford Junction
+    stop: false
+    trainshed: false
+  - crs: MKC
+    name: Milton Keynes Central
+    stop: true
+    trainshed: false
+  - crs: RUG
+    name: Rugby
+    stop: false
+    trainshed: false
+  - crs: NUN
+    name: Nuneaton
+    stop: false
+    trainshed: false
+  - crs: TAM
+    name: Tamworth
+    stop: false
+    trainshed: false
+  - crs: LTV
+    name: Lichfield Trent Valley
+    stop: false
+    trainshed: false
+  - crs: STA
+    name: Stafford
+    stop: false
+    trainshed: false
+  - crs: CRE
+    name: Crewe
+    stop: true
+    trainshed: false
+  - crs: WBQ
+    name: Warrington Bank Quay
+    stop: true
+    trainshed: false
+  - crs: WGN
+    name: Wigan North Western
+    stop: false
+    trainshed: false
+  - crs: PRE
+    name: Preston
+    stop: true
+    trainshed: true
+  - crs: LAN
+    name: Lancaster
+    stop: true
+    trainshed: false
+  - crs: OXN
+    name: Oxenholme Lake District
+    stop: true
+    trainshed: false
+  - crs: PNR
+    name: Penrith North Lakes
+    stop: true
+    trainshed: false
+  - crs: CAR
+    name: Carlisle
+    stop: true
+    trainshed: true
+  - crs: LOC
+    name: Lockerbie
+    stop: false
+    trainshed: false
+  - crs: MTH
+    name: Motherwell
+    stop: false
+    trainshed: false
+  - crs: GLC
+    name: Glasgow Central
+    stop: true
+    trainshed: true
+  timetable:
+    source: yaml
+    departure: 09:30
+    calls:
+      EUS: 09:30
+      MKC: '10:01'
+      CRE: '11:02'
+      WBQ: '11:22'
+      PRE: '11:46'
+      LAN: '12:03'
+      OXN: '12:19'
+      PNR: '12:40'
+      CAR: '12:58'
+      GLC: '14:02'
+    dwell_s: 90

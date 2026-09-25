@@ -1,0 +1,54 @@
+route:
+  id: hml_edb_inv
+  name: Highland Main Line
+  country: GB
+  operator: ScotRail
+  direction: northbound
+  origin_crs: EDB
+  destination_crs: INV
+  stations:
+  - crs: EDB
+    name: Edinburgh Waverley
+    stop: true
+    trainshed: true
+  - crs: HYM
+    name: Haymarket
+    stop: true
+    trainshed: false
+  - crs: STG
+    name: Stirling
+    stop: true
+    trainshed: false
+  - crs: PTH
+    name: Perth
+    stop: true
+    trainshed: true
+  - crs: PIT
+    name: Pitlochry
+    stop: true
+    trainshed: false
+  - crs: KIN
+    name: Kingussie
+    stop: true
+    trainshed: false
+  - crs: AVM
+    name: Aviemore
+    stop: true
+    trainshed: false
+  - crs: INV
+    name: Inverness
+    stop: true
+    trainshed: true
+  timetable:
+    source: yaml
+    departure: 09:00
+    calls:
+      EDB: 09:00
+      HYM: 09:04
+      STG: 09:38
+      PTH: '10:12'
+      PIT: '10:46'
+      KIN: '11:35'
+      AVM: '11:48'
+      INV: '12:30'
+    dwell_s: 90

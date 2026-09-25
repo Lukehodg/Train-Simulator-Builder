@@ -1,0 +1,315 @@
+"""Command line: `tcs run --offline` builds everything; individual steps are exposed for iteration."""
+from __future__ import annotations
+
+import json
+import shutil
+from pathlib import Path
+
+import pandas as pd
+import typer
+from rich.console import Console
+from rich.table import Table
+
+from .config import ROOT, list_routes, load_settings
+
+app = typer.Typer(add_completion=False, help="Train Route 3D Connectivity Simulation pipeline")
+console = Console()
+
+
+def _interim(settings) -> Path:
+    return settings.paths()["interim"]
+
+
+@app.command()
+def run(offline: bool = typer.Option(False, help="Use cached/synthetic sources only (no network, no keys)"),
+        route: str | None = typer.Option(None, help="Route id from config/routes (default: config/route.yaml)"),
+        weather: str = typer.Option("nominal"), policy: str | None = typer.Option(None), limit_postcodes: int | None = typer.Option(None, help="Dev: cap Ofcom API calls"),
+        copy_to_web: bool = typer.Option(True, help="Copy the web bundle into web/public/data/"),
+        train: Path | None = typer.Option(None, help="Train Studio project (*.train.json) describing the onboard architecture"),
+        preset: str | None = typer.Option(None, help="Scenario preset from simulation.yaml `presets` (e.g. edge_rail_fleet_connect)")):
+    """Full pipeline: route -> terrain -> coverage -> cells -> movement -> simulate -> export."""
+    run_pipeline(offline=offline, route=route, weather=weather, policy=policy, limit_postcodes=limit_postcodes, copy_to_web=copy_to_web, train=train, preset=preset)
+
+
+def run_pipeline(offline: bool = False, route: str | None = None, weather: str = "nominal", policy: str | None = None, limit_postcodes: int | None = None,
+                 copy_to_web: bool = True, train: Path | None = None, preset: str | None = None):
+    from .model import calibration
+    from .model.simulate import simulate
+    from .pipeline.export import export_all
+    from .pipeline.join_cells import candidate_cells, corridor_cells, serving_cells
+    from .pipeline.join_coverage import coverage_prior
+    from .pipeline.movement import movement
+    from .pipeline.obstruction import enrich_terrain
+    from .pipeline.sample_route import build_route, save_bundle
+
+    s = load_settings(offline=offline, route_id=route)
+    interim = _interim(s)
+    console.rule(f"[bold]{s.route['name']} · {s.route['origin_crs']} → {s.route['destination_crs']}")
+    if preset:
+        pr = s.sim.get("presets", {}).get(preset)
+        if pr is None:
+            raise typer.BadParameter(f"unknown preset '{preset}'; available: {', '.join(s.sim.get('presets', {}))}")
+        if pr.get("vehicle_profile"):
+            s.sim["vehicle"]["profile"] = pr["vehicle_profile"]
+        if pr.get("policy"):
+            s.sim["wan"]["policy"] = pr["policy"]
+        if pr.get("bonding_efficiency"):
+            s.sim["wan"]["bonding_efficiency"] = float(pr["bonding_efficiency"])
+        if "satcom_enabled" in pr:
+            s.sim["satcom_enabled"] = bool(pr["satcom_enabled"])
+        s.sim["active_preset"] = preset
+        console.log(f"preset: {pr.get('label', preset)}")
+    design_path = train or (Path(s.sim.get("train", {}).get("design_file")) if s.sim.get("train", {}).get("design_file") else None)
+    if design_path:
+        from .sources.train_studio import apply_to_settings, load_design
+
+        design = load_design(design_path, s)
+        apply_to_settings(s, design)
+        console.log(f"train design '{design.title}': {len(design.carriages)} carriages · {design.cellular_units} cellular units · "
+                    f"{design.satcom_units} satcom ({design.satcom_terminal or '-'}) · {design.aps_connected}/{design.aps_total} APs connected · "
+                    f"{design.passengers} seats · policy {design.policy}")
+        for w in design.warnings:
+            console.log(f"[yellow]{w}")
+    b = build_route(s)
+    console.log(f"route: {len(b.samples)} samples at {s.spacing_m:.0f} m, {b.samples['distance_m'].max() / 1000:.1f} km, geometry={b.geometry_source}")
+    for w in b.warnings:
+        console.log(f"[yellow]{w}")
+    b.samples = enrich_terrain(s, b)
+    prior, b.samples = coverage_prior(s, b, limit=limit_postcodes)
+    cells = corridor_cells(s, b, b.samples)
+    cand = candidate_cells(s, b.samples, cells)
+    serving = serving_cells(s, b.samples, cand)
+    b.samples, stations = movement(s, b.samples, b.stations)
+    b.stations = stations
+    save_bundle(b, interim)
+    prior.to_parquet(interim / "coverage_prior.parquet", index=False)
+    cells.to_parquet(interim / "cells.parquet", index=False)
+    serving.to_parquet(interim / "serving.parquet", index=False)
+    cal = calibration.load(interim / "calibration.json")
+    obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, policy=policy)
+    written = export_all(s, b, b.samples, stations, cells, obs, rc, prior)
+    if copy_to_web:
+        dest = ROOT / "web" / "public" / "data" / s.route_id
+        dest.mkdir(parents=True, exist_ok=True)
+        for f in ("route.arrow", "cells.arrow", "meta.json"):
+            shutil.copy(s.paths()["web"] / f, dest / f)
+        console.log(f"web bundle -> {dest}")
+        write_index()
+    _summary(rc, obs)
+    for k, v in written.items():
+        console.log(f"[dim]{k}[/dim] {v}")
+
+
+def _summary(rc: pd.DataFrame, obs: pd.DataFrame) -> None:
+    t = Table(title="Predicted onboard Wi-Fi by service class (share of route)")
+    t.add_column("class"), t.add_column("share", justify="right")
+    for cls, share in rc["service_class"].value_counts(normalize=True).sort_index().items():
+        t.add_row(cls, f"{share:.1%}")
+    console.print(t)
+    t2 = Table(title="Per-link availability / median capacity")
+    t2.add_column("link"), t2.add_column("available", justify="right"), t2.add_column("p50 Mbps", justify="right"), t2.add_column("mean confidence", justify="right")
+    for pid, g in obs.groupby("provider_id"):
+        t2.add_row(pid, f"{g['available'].mean():.1%}", f"{g.loc[g['available'], 'capacity_mbps'].median():.0f}", f"{g['confidence'].mean():.2f}")
+    console.print(t2)
+
+
+def write_index() -> Path:
+    """Catalogue of built bundles for the viewer's route picker: web/public/data/index.json."""
+    root = ROOT / "web" / "public" / "data"
+    items = []
+    for meta in sorted(root.glob("*/meta.json")):
+        try:
+            m = json.loads(meta.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        st = m.get("stations", [])
+        items.append({"id": m["route"]["id"], "name": m["route"].get("name"), "operator": m["route"].get("operator"), "origin": st[0]["name"] if st else None,
+                      "destination": st[-1]["name"] if st else None, "length_km": round(m.get("length_m", 0) / 1000, 1), "duration_min": round(m.get("duration_s", 0) / 60),
+                      "geometry_source": m.get("geometry_source"), "terrain_source": m.get("terrain_source"), "n_samples": m.get("n_samples")})
+    out = root / "index.json"
+    out.write_text(json.dumps({"routes": items}, indent=1), encoding="utf-8")
+    return out
+
+
+@app.command()
+def serve(port: int = typer.Option(8000, help="Preferred port (the next free one is used if taken)"),
+          built: bool = typer.Option(False, help="Serve web/dist (a production build) instead of the source bundles"),
+          open_browser: bool = typer.Option(True, "--open/--no-open")):
+    """Serve the viewer locally over HTTP (the page fetches Arrow bundles, so file:// will not work)."""
+    from .serve import serve as _serve
+
+    root = ROOT / "web" / ("dist" if built else "public")
+    if built and not (root / "index.html").exists():
+        raise typer.BadParameter("web/dist is empty - run `tcs package --no-zip` or `npm run build` in web/ first")
+    if not built:
+        # Source mode needs the built JS too; without it, tell the user rather than serving a blank page.
+        if not (root / "index.html").exists():
+            raise typer.BadParameter("serve --built, or run `npm run dev` in web/ for live editing")
+    console.log(f"serving {root}")
+    url, _ = _serve(root, port=port, open_browser=open_browser)
+    console.log(f"[bold]{url}[/bold]  (Ctrl+C to stop)")
+
+
+@app.command()
+def package(out: Path | None = typer.Option(None, help="Output folder (default: dist/)"),
+            zip_it: bool = typer.Option(True, "--zip/--no-zip"), reports: bool = typer.Option(True, "--reports/--no-reports"),
+            skip_build: bool = typer.Option(False, help="Reuse an existing web/dist instead of running npm build")):
+    """Package the viewer, the Train Builder and every built route into a zip that runs with nothing installed."""
+    from .package import package as _package
+
+    _package(out_dir=out, include_reports=reports, zip_it=zip_it, skip_build=skip_build)
+
+
+@app.command()
+def routes():
+    """List the route catalogue (config/routes) and which ones have a built bundle."""
+    built = {p.parent.name for p in (ROOT / "web" / "public" / "data").glob("*/meta.json")}
+    t = Table(title="Routes")
+    t.add_column("id"), t.add_column("name"), t.add_column("from → to"), t.add_column("built")
+    for r in list_routes():
+        t.add_row(r["id"], r["name"] or "", f"{r['origin']} → {r['destination']}", "yes" if r["id"] in built else "-")
+    console.print(t)
+
+
+@app.command("build-all")
+def build_all(offline: bool = typer.Option(False), only: str | None = typer.Option(None, help="Comma-separated route ids"), skip_built: bool = typer.Option(False)):
+    """Run the pipeline for every route in the catalogue (continues past failures; writes index.json)."""
+    ids = [r["id"] for r in list_routes()]
+    if only:
+        ids = [i for i in ids if i in {x.strip() for x in only.split(",")}]
+    built = {p.parent.name for p in (ROOT / "web" / "public" / "data").glob("*/meta.json")}
+    failures = []
+    for rid in ids:
+        if skip_built and rid in built:
+            console.log(f"[dim]{rid}: already built, skipping")
+            continue
+        try:
+            run_pipeline(offline=offline, route=rid)
+        except Exception as exc:  # noqa: BLE001 - keep going, report at the end
+            console.log(f"[red]{rid} failed: {exc}")
+            failures.append((rid, str(exc)))
+    write_index()
+    console.rule("build-all")
+    console.log(f"{len(ids) - len(failures)}/{len(ids)} routes built" + (f"; failed: {', '.join(f for f, _ in failures)}" if failures else ""))
+
+
+@app.command()
+def report(route: str | None = typer.Option(None, help="Route id (default: config/route.yaml)"), preset: str | None = typer.Option(None, help="Scenario preset, e.g. edge_rail_fleet_connect"),
+           train: Path | None = typer.Option(None, help="Train Studio project (*.train.json)"), policy: str | None = typer.Option(None), weather: str = typer.Option("nominal"),
+           out: Path | None = typer.Option(None, help="Output folder (default data/processed/<route>/reports)")):
+    """Tender evidence pack: Word report + Excel appendix for one route and scenario (re-simulates from the cached route data)."""
+    from .model import calibration
+    from .model.simulate import simulate
+    from .pipeline.sample_route import load_bundle
+    from .report import build_report
+
+    s = load_settings(route_id=route)
+    interim, processed = _interim(s), s.paths()["processed"]
+    if not (interim / "samples.parquet").exists():
+        raise typer.BadParameter(f"route '{s.route_id}' has not been built yet: run `tcs run --route {s.route_id}` first")
+    label_parts = []
+    if preset:
+        pr = s.sim.get("presets", {}).get(preset)
+        if pr is None:
+            raise typer.BadParameter(f"unknown preset '{preset}'")
+        if pr.get("vehicle_profile"):
+            s.sim["vehicle"]["profile"] = pr["vehicle_profile"]
+        if pr.get("policy"):
+            s.sim["wan"]["policy"] = pr["policy"]
+        if pr.get("bonding_efficiency"):
+            s.sim["wan"]["bonding_efficiency"] = float(pr["bonding_efficiency"])
+        if "satcom_enabled" in pr:
+            s.sim["satcom_enabled"] = bool(pr["satcom_enabled"])
+        s.sim["active_preset"] = preset
+        label_parts.append(pr.get("label", preset))
+    if train:
+        from .sources.train_studio import apply_to_settings, load_design
+
+        d = load_design(train, s)
+        apply_to_settings(s, d)
+        label_parts.append(f"train design '{d.title}'")
+    if policy:
+        s.sim["wan"]["policy"] = policy
+    if weather != "nominal":
+        label_parts.append(f"weather {weather}")
+    if not label_parts:
+        label_parts.append("baseline configuration")
+    label = " · ".join(label_parts) + f" · policy {s.sim['wan']['policy'].lower().replace('_', ' ')} · {s.sim['vehicle']['profile'].lower().replace('_', ' ')}"
+    b = load_bundle(interim, s.route["country"])
+    prior = pd.read_parquet(interim / "coverage_prior.parquet")
+    serving = pd.read_parquet(interim / "serving.parquet")
+    stations = pd.read_parquet(processed / "stations.parquet")
+    cal = calibration.load(interim / "calibration.json")
+    obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather)
+    meta = json.loads((processed / "web" / "meta.json").read_text(encoding="utf-8"))
+    meta["model_version"] = s.sim["model_version"]
+    vpath = processed / "validation_by_section.csv"
+    validation = pd.read_csv(vpath) if vpath.exists() else None
+    written = build_report(s, meta, b.samples, obs, rc, stations, out or (processed / "reports"), label, validation)
+    for k, v in written.items():
+        console.log(f"[bold]{k}[/bold] {v}")
+
+
+@app.command("probe-ofcom")
+def probe_ofcom(postcode: str = typer.Argument("N1C4TB")):
+    """Print the raw Ofcom mobile coverage payload for a postcode (to confirm field names)."""
+    from .sources.ofcom_coverage import probe
+
+    s = load_settings()
+    console.print_json(json.dumps(probe(postcode, s, s.paths()["raw"])))
+
+
+@app.command()
+def calibrate(measurements: Path = typer.Argument(..., help="CSV file"), preset: str = typer.Option("network_survey", help="network_survey|ofcom_drive|modem_log"),
+              max_distance_m: float = typer.Option(250.0)):
+    """Fit score->RSRP and per-operator bias from measurements attached to the route; saves calibration.json."""
+    from .model import calibration
+    from .pipeline.sample_route import load_bundle
+    from .sources.measurements import attach_to_route, load_measurements
+
+    s = load_settings()
+    interim = _interim(s)
+    b = load_bundle(interim, s.route["country"])
+    meas = load_measurements(measurements, preset, s.operators)
+    meas = attach_to_route(meas, b.samples, b.proj, max_distance_m=max_distance_m)
+    obs = pd.read_parquet(s.paths()["processed"] / "provider_observation.parquet").merge(b.samples[["sample_id", "distance_m"]], on="sample_id")
+    r = s.sim["cellular"]["rsrp_dbm"]
+    cal = calibration.fit(obs, meas, nominal_rsrp=(float(r["at_zero"]), float(r["at_one"])))
+    calibration.save(cal, interim / "calibration.json")
+    console.print_json(json.dumps(cal))
+    console.log("re-run `tcs run` to apply the calibration")
+
+
+@app.command()
+def validate(measurements: Path = typer.Argument(...), preset: str = typer.Option("network_survey"), section_km: float = typer.Option(10.0)):
+    """Predicted-vs-observed metrics by route section (MAE/RMSE, outage precision/recall, classification accuracy)."""
+    from .pipeline.sample_route import load_bundle
+    from .sources.measurements import attach_to_route, load_measurements
+    from .validate.metrics import report
+
+    s = load_settings()
+    b = load_bundle(_interim(s), s.route["country"])
+    meas = attach_to_route(load_measurements(measurements, preset, s.operators), b.samples, b.proj)
+    obs = pd.read_parquet(s.paths()["processed"] / "provider_observation.parquet").merge(b.samples[["sample_id", "distance_m"]], on="sample_id")
+    rep = report(obs, meas, section_km=section_km)
+    console.print(rep.to_string())
+    rep.to_csv(s.paths()["processed"] / "validation_by_section.csv", index=False)
+
+
+@app.command()
+def sources():
+    """Show which live sources are configured (keys present) and which will fall back."""
+    s = load_settings()
+    t = Table(title="Data sources")
+    t.add_column("source"), t.add_column("status"), t.add_column("fallback")
+    t.add_row("OSM Overpass (route, stations, tunnels/cuttings)", "keyless", "synthetic spline (offline)")
+    t.add_row("Copernicus DEM GLO-30 (terrain, horizon)", "keyless", "procedural terrain")
+    t.add_row("OS Code-Point Open (corridor postcodes)", "keyless", "-")
+    t.add_row("Ofcom API mobile coverage", "key set" if s.key("OFCOM_API_KEY") else "[yellow]OFCOM_API_KEY missing", "Connected Nations open data → synthetic prior")
+    t.add_row("OpenCellID bulk", "token set" if s.key("OPENCELLID_TOKEN") else "[yellow]OPENCELLID_TOKEN missing", "synthetic cell sites")
+    t.add_row("Starlink telemetry", "file" if s.satcom_providers and s.satcom_providers[0]["telemetry"].get("file") else "predictive only", "-")
+    console.print(t)
+
+
+if __name__ == "__main__":
+    app()

@@ -1,0 +1,160 @@
+import { fmtHM, type Store } from '../state'
+import { CLASS_NAMES, CLASS_VARS, WIFI_CLASSES, classOf, cssVar, qClass } from '../sim/classify'
+
+const $ = (id: string) => document.getElementById(id)!
+const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
+
+export function envText(store: Store, i: number): string {
+  const d = store.state.data
+  if (d.inTunnel[i]) return `${d.tunnelName[i] && d.tunnelName[i] !== 'tunnel' ? d.tunnelName[i] : 'Tunnel'}`
+  if (d.canopy[i] >= 0.9) return 'Station canopy'
+  if (d.cutting[i] > 8) return `Cutting · ${d.cutting[i].toFixed(0)} m`
+  if (d.sky[i] < 0.6) return `Terrain shadow · sky ${(d.sky[i] * 100).toFixed(0)} %`
+  if (d.urban[i] > 0.5) return 'Urban'
+  return 'Open country'
+}
+
+export function initInspector(store: Store) {
+  const tabs = document.querySelectorAll<HTMLButtonElement>('.tab')
+  tabs.forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab!)))
+  const s = store.state
+  const host = $('liveLinks'); host.innerHTML = ''
+  const rows: Record<string, { nm: HTMLElement; cls: HTMLElement; fill: HTMLElement; val: HTMLElement }> = {}
+  for (const p of s.data.meta.providers) {
+    const nm = document.createElement('div'); nm.className = 'nm'; nm.innerHTML = `<i></i>${esc(p.name)}`
+    const cls = document.createElement('span'); cls.className = 'cls'
+    const bar = document.createElement('div'); bar.className = 'bar'; const fill = document.createElement('i'); bar.appendChild(fill)
+    const val = document.createElement('div'); val.className = 'val'
+    host.append(nm, cls, bar, val); rows[p.id] = { nm, cls, fill, val }
+  }
+  renderSources(store)
+  store.on((st, changed) => { if (changed.has('selected') && st.selected != null) { renderSample(store, st.selected); showTab('sample') } if (changed.has('theme')) renderSources(store) })
+
+  return {
+    update(i: number) {
+      const st = store.state, d = st.data, r = st.sim
+      $('lvSpeed').textContent = String(Math.round(d.speed[i]))
+      $('lvDist').textContent = `${(d.distance[i] / 1000).toFixed(1)} km`
+      const nxt = d.nextStation[i]; const stn = nxt ? d.meta.stations.find(x => x.crs === nxt) : null
+      $('lvNext').textContent = stn ? stn.name : 'terminus'
+      $('lvEta').textContent = stn ? fmtHM(d.meta.departure, d.t[i] + d.ttn[i]) : '—'
+      $('lvEnv').textContent = envText(store, i)
+      d.meta.providers.forEach((p, k) => {
+        const L = r.links[p.id], row = rows[p.id], on = (r.active[i] & (1 << k)) !== 0, c = classOf('quality', p.id, i, d, r)
+        row.cls.textContent = CLASS_NAMES[c]; row.cls.style.borderLeftColor = cssVar(CLASS_VARS[c])
+        row.fill.style.width = `${Math.min(100, L.cap[i] / 250 * 100)}%`; row.fill.style.background = cssVar(CLASS_VARS[c])
+        row.val.textContent = L.avail[i] ? `${Math.round(L.cap[i])} Mbps · ${Math.round(L.lat[i])} ms` : L.reason[i].replace(/_/g, ' ').toLowerCase()
+        row.nm.classList.toggle('active', on)
+        for (const el of Object.values(row)) el.classList.toggle('off', !st.linkVisible[p.id])
+      })
+      const act = d.meta.providers.filter((_, k) => r.active[i] & (1 << k)).map(p => p.name)
+      $('wanActive').textContent = act.length ? act.join(' + ') : 'none'
+      $('wanCap').textContent = act.length ? `${Math.round(r.bonded[i])} Mbps` : '—'
+      $('wanLat').textContent = act.length ? `${Math.round(r.lat[i])} ms · ${r.loss[i].toFixed(1)} %` : '—'
+      $('wanUser').textContent = act.length ? `${r.perUser[i].toFixed(1)} Mbps × ${Math.round(r.activeUsers[i])} users` : '—'
+      $('wifiScore').textContent = String(Math.round(r.wifi[i]))
+      const wc = r.wifiClass[i]; const pill = $('wifiClass'); pill.textContent = WIFI_CLASSES[wc]; pill.style.borderLeftColor = cssVar(CLASS_VARS[wc <= 1 ? 0 : wc - 1])
+      $('wanConf').textContent = r.conf[i].toFixed(2)
+    },
+  }
+}
+
+export function showTab(name: string) {
+  document.querySelectorAll<HTMLButtonElement>('.tab').forEach(t => t.classList.toggle('on', t.dataset.tab === name))
+  for (const id of ['live', 'sample', 'train', 'sources']) (document.getElementById(`tab-${id}`) as HTMLElement).hidden = id !== name
+}
+
+function renderSample(store: Store, i: number) {
+  const st = store.state, d = st.data, r = st.sim, sim = d.meta.sim
+  const kv = (k: string, v: string) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`
+  let h = ''
+
+  // context card
+  h += `<section class="card"><h4>Sample ${i} · ${(d.distance[i] / 1000).toFixed(2)} km${d.stationNear[i] ? ' · ' + esc(d.stationNear[i]!) : ''}</h4>`
+  h += kv('Position', `${d.lat[i].toFixed(5)}, ${d.lon[i].toFixed(5)}`)
+    + kv('Railhead / terrain', `${d.elev[i].toFixed(0)} / ${d.terrain[i].toFixed(0)} m`)
+    + kv('Environment', esc(envText(store, i)))
+    + kv('Sky visibility', `${(d.sky[i] * 100).toFixed(0)} %`)
+    + kv('Time · speed', `${fmtHM(d.meta.departure, d.t[i])} · ${Math.round(d.speed[i])} km/h`) + `</section>`
+
+  // one card per link, with its reasoning inline
+  const cfg = sim.cellular, vprof = sim.vehicle.profiles[st.scenario.vehicle]
+  for (const p of d.meta.providers) {
+    const L = r.links[p.id], b = d.base[p.id], c = classOf('quality', p.id, i, d, r)
+    h += `<div class="lcard"><div class="lcard-head"><i style="background:${cssVar(CLASS_VARS[c])}"></i><b>${esc(p.name)}</b><em>${CLASS_NAMES[c]}</em></div>`
+    if (p.type === 'cellular') {
+      const cell = b.cell[i] ? d.cellIndex.get(b.cell[i]!) : null
+      h += kv('Quality', L.q[i].toFixed(2))
+        + kv('RSRP (modelled)', `${L.rsrp[i].toFixed(0)} dBm`)
+        + kv('Capacity / latency', `${Math.round(L.cap[i])} Mbps / ${Math.round(L.lat[i])} ms`)
+        + kv('Serving cell', cell ? `${(b.celld[i] / 1000).toFixed(1)} km · ${esc(cell.radio)}` : '—')
+        + kv('Technology · confidence', `${esc(b.tech[i] ?? '—')} · ${b.conf[i].toFixed(2)}`)
+    } else {
+      h += kv('Sky visibility', L.q[i].toFixed(2))
+        + kv('Available', L.avail[i] ? 'yes' : `no · ${L.reason[i].toLowerCase().replace(/_/g, ' ')}`)
+        + kv('Capacity / latency', `${Math.round(L.cap[i])} Mbps / ${Math.round(L.lat[i])} ms`)
+        + kv('Confidence', b.conf[i].toFixed(2))
+    }
+    // reasoning terms
+    const rows: [string, string][] = []
+    if (p.type === 'cellular') {
+      rows.push(['coverage prior + terrain + cell distance', b.qb[i].toFixed(2)])
+      const cut = Math.min(1, d.cutting[i] / cfg.terrain.cutting_full_depth_m) * cfg.terrain.cutting_penalty_max
+      if (cut > 0.005) rows.push([`cutting ${d.cutting[i].toFixed(0)} m`, `−${cut.toFixed(2)}`])
+      const dk = b.celld[i] / 1000, dp = Number.isNaN(dk) ? 0 : Math.max(0, dk - cfg.cell_distance.free_km) * cfg.cell_distance.penalty_per_km
+      if (dp > 0.005) rows.push([`cell ${dk.toFixed(1)} km away`, `−${dp.toFixed(2)}`])
+      if (vprof.score_offset) rows.push([vprof.score_offset < 0 ? 'carriage penetration loss' : `active antenna (+${vprof.db_offset} dB)`, `${vprof.score_offset > 0 ? '+' : ''}${vprof.score_offset.toFixed(2)}`])
+      if (vprof.capacity_factor && vprof.capacity_factor !== 1) rows.push(['antenna / MIMO factor', `×${vprof.capacity_factor}`])
+      if (cfg.units_capacity_factor && cfg.units_capacity_factor !== 1) rows.push(['roof units aggregation', `×${Number(cfg.units_capacity_factor).toFixed(2)}`])
+      if (d.inTunnel[i]) rows.push(['tunnel', L.q[i] > 0.1 ? `in-tunnel coverage assumed → ${cfg.tunnels.das_score}` : `no coverage → ${cfg.tunnels.default_score}`])
+      if (b.hp[i] > 0) rows.push(['handover', `+${cfg.handover.latency_spike_ms} ms · ×${cfg.handover.capacity_factor}`])
+    } else {
+      rows.push(['sky visibility (DEM horizon)', b.qb[i].toFixed(2)])
+      if (d.canopy[i] > 0) rows.push(['station canopy', `−${(0.85 * d.canopy[i]).toFixed(2)}`])
+      if (d.cutting[i] > 0.5) rows.push([`cutting horizon ${d.cutting[i].toFixed(0)} m`, `−${Math.min(0.55, d.cutting[i] / 22).toFixed(2)}`])
+      if (d.urban[i] > 0.01) rows.push(['urban obstruction', `−${(0.18 * d.urban[i] * (1 - d.canopy[i])).toFixed(2)}`])
+      if (st.scenario.weather !== 'nominal') rows.push([`weather · ${st.scenario.weather}`, `sky −${p.availability!.weather[st.scenario.weather].sky_penalty}`])
+      rows.push(['reason code', L.reason[i]])
+    }
+    rows.push(['source', esc(b.src[i] ?? '')])
+    h += `<div class="why">${rows.map(([k, v]) => `<div class="row"><span>${k}</span><code>${v}</code></div>`).join('')}</div></div>`
+  }
+
+  // combined WAN card
+  const act = d.meta.providers.filter((_, k) => r.active[i] & (1 << k)).map(p => p.name).join(' + ') || 'none'
+  h += `<section class="card"><h4>Onboard WAN · ${esc(st.scenario.policy.toLowerCase().replace(/_/g, ' '))}</h4>`
+  h += kv('Active links', esc(act))
+    + kv('Bonded', `${Math.round(r.bonded[i])} Mbps`)
+    + kv('Latency · loss', `${Number.isNaN(r.lat[i]) ? '—' : Math.round(r.lat[i]) + ' ms'} · ${r.loss[i].toFixed(1)} %`)
+    + kv('Wi-Fi score', `${Math.round(r.wifi[i])} · ${WIFI_CLASSES[r.wifiClass[i]]}`)
+    + kv('Confidence', r.conf[i].toFixed(2))
+    + kv('Model', esc(d.meta.model_version)) + `</section>`
+
+  $('sampleHint').hidden = true
+  $('sampleBody').innerHTML = h
+}
+
+function renderSources(store: Store) {
+  const m = store.state.data.meta
+  const live = (flag: boolean, liveLabel = 'live', synthLabel = 'synthetic') => `<em class="${flag ? 'live' : 'synth'}">${flag ? liveLabel : synthLabel}</em>`
+  const geomLive = m.geometry_source === 'osm' || m.geometry_source === 'file'
+  const terrLive = m.terrain_source !== 'synthetic_terrain'
+  const covLive = m.coverage_sources.some(s => s.startsWith('ofcom'))
+  const cellLive = m.cell_source === 'opencellid'
+  const items = [
+    ['Route geometry', geomLive, m.geometry_source === 'osm' ? 'OpenStreetMap rail network, routed station-to-station (ODbL). Tunnel / cutting / embankment / bridge / maxspeed tags carried per 50 m sample.' : m.geometry_source === 'file' ? 'Infrastructure-manager / curated centreline file.' : 'Spline through approximate station coordinates. Run the pipeline online to fetch the OSM centreline.'],
+    ['Terrain & sky visibility', terrLive, terrLive ? `${m.terrain_source}: 30 m DEM, 16-ray horizon per sample, solid-angle sky fraction above the terminal's minimum elevation.` : 'Procedural terrain. 3D terrain rendering is disabled until real elevation is available.'],
+    ['Cellular coverage prior', covLive, covLive ? `${m.coverage_sources.join(', ')} — operator predictions on Ofcom's 50 m grid mapped to a model score; never presented as measured RSRP.` : 'Synthetic prior (noise field). Set OFCOM_API_KEY, or enable Connected Nations open data, to replace it.'],
+    ['Cell sites', cellLive, cellLive ? 'OpenCellID corridor extract (CC BY-SA 4.0). Logical cells; top-5 candidates per sample; serving cell with hysteresis.' : 'Synthetic site layout. Set OPENCELLID_TOKEN to use the community database.'],
+    ['Satcom', false, `Predictive obstruction model (${m.providers.find(p => p.type === 'satcom')?.terminal ?? 'performance'} terminal). No public route-level Starlink RF telemetry exists; confidence capped at 0.35 until terminal telemetry is ingested.`, 'predictive'],
+    ['Calibration', false, 'No measurements loaded. `tcs calibrate <csv>` fits score→RSRP and per-operator bias from Ofcom drive tests, the Ofcom train study or Network Survey logs.', 'none'],
+  ] as [string, boolean, string, string?][]
+  let h = `<div class="src-list">`
+  for (const [title, ok, text, alt] of items) h += `<div class="src"><h5>${title}${live(ok, 'live', alt ?? 'synthetic')}</h5><p>${text}</p></div>`
+  h += `<div class="src"><h5>Model ${m.model_version}</h5><p>${m.n_samples.toLocaleString()} samples at ${m.route.sample_spacing_m} m · ${(m.length_m / 1000).toFixed(1)} km · scenario switching runs the same link-manager and Wi-Fi model in the browser.</p></div>`
+  if (m.warnings?.length) h += `<div class="src"><h5>Warnings</h5><p>${m.warnings.map(esc).join('<br>')}</p></div>`
+  h += `</div>`
+  $('sourcesBody').innerHTML = h
+}
+
+export { qClass }

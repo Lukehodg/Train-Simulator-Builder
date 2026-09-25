@@ -1,0 +1,142 @@
+"""Train Studio (Train Diagram Builder) project files -> onboard architecture parameters.
+
+The builder saves `<title>.train.json`:
+  {"app": "motion-applied-train-studio", "version": 1, "project": {
+      "title": str, "cars": [{"id", "type": "cabL"|"mid"|"cabR", "aps": int, "sw": bool, "edge": int, "fleet": bool,
+                              "custom": {typeId: bool}, "mounts": {...}}],
+      "types": [{"id", "slug", "name", "placement": "roof"|"ceiling"|"rack", "link": bool,
+                 "hardwareKind": "satcom"|"router"|"product"|None, "presetId": "starlink"|"oneweb"|"satcom"|"edge-path"|"edge-mini"|"edge-core"|None}],
+      ...}}
+
+We read the consist and derive what the connectivity model needs (all mappings live in simulation.yaml `train:`):
+  cellular units   EDGE Rail roof units (+ custom roof "product" items flagged as cellular) -> capacity aggregation factor
+  satcom           EDGE Mini (integrated Starlink Mini), Starlink/OneWeb/SATCOM types -> satcom enabled + terminal class
+  access points    per carriage, only counted when the carriage has a switch (the builder flags "needs switch")
+  passengers       seats per carriage type
+  vehicle profile  EDGE Rail active antenna when any roof unit exists, otherwise passenger handset
+  link policy      Fleet Connect present -> bonding; absent -> failover
+"""
+from __future__ import annotations
+
+import json
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any
+
+APP_ID = "motion-applied-train-studio"
+
+
+@dataclass
+class Carriage:
+    index: int
+    type: str
+    aps: int
+    switch: bool
+    cellular_units: int
+    fleet_connect: bool
+    satcom_units: int
+    custom: list[str]
+    aps_connected: int
+
+
+@dataclass
+class TrainDesign:
+    title: str
+    carriages: list[Carriage]
+    cellular_units: int
+    satcom_units: int
+    satcom_terminal: str | None
+    aps_total: int
+    aps_connected: int
+    fleet_connect: bool
+    passengers: int
+    vehicle_profile: str
+    policy: str
+    units_capacity_factor: float
+    ap_capacity_mbps: float
+    warnings: list[str] = field(default_factory=list)
+    source_file: str | None = None
+
+    def summary(self) -> dict[str, Any]:
+        d = asdict(self)
+        d["n_carriages"] = len(self.carriages)
+        return d
+
+
+def load_project(path: Path) -> dict:
+    with open(path, "r", encoding="utf-8") as fh:
+        doc = json.load(fh)
+    if doc.get("app") != APP_ID or doc.get("version") != 1 or "project" not in doc:
+        raise ValueError(f"{path.name} is not a Train Studio v1 project")
+    return doc["project"]
+
+
+def derive(project: dict, tcfg: dict, satcom_cfg: dict | None = None) -> TrainDesign:
+    """Map a project onto model parameters using the `train:` section of simulation.yaml."""
+    seats = tcfg.get("seats", {"cabL": 56, "mid": 76, "cabR": 56})
+    types = {t["id"]: t for t in project.get("types", [])}
+    sat_kind = tcfg.get("satcom_terminal_by_preset", {"edge-mini": "mini", "starlink": "performance", "oneweb": "performance", "satcom": "performance"})
+    cars: list[Carriage] = []
+    warnings: list[str] = []
+    sat_units, sat_terminal = 0, None
+    for i, c in enumerate(project.get("cars", [])):
+        custom_on = [tid for tid, on in (c.get("custom") or {}).items() if on and tid in types]
+        sat_here = 0
+        for tid in custom_on:
+            t = types[tid]
+            is_sat = t.get("hardwareKind") == "satcom" or t.get("presetId") in ("starlink", "oneweb", "satcom", "edge-mini") \
+                or str(t.get("name", "")).strip().lower() in ("starlink", "oneweb", "satcom")
+            if is_sat:
+                sat_here += 1
+                term = sat_kind.get(t.get("presetId") or str(t.get("name", "")).lower(), tcfg.get("default_satcom_terminal", "performance"))
+                sat_terminal = sat_terminal or term
+        aps = int(c.get("aps", 0))
+        sw = bool(c.get("sw", False))
+        links_need_switch = aps > 0 or int(c.get("edge", 0)) > 0 or bool(c.get("fleet")) or any(types[t].get("link") for t in custom_on)
+        if links_need_switch and not sw:
+            warnings.append(f"carriage {i + 1}: equipment present but no switch — its {aps} access point(s) are not counted")
+        cars.append(Carriage(index=i, type=c.get("type", "mid"), aps=aps, switch=sw, cellular_units=int(c.get("edge", 0)), fleet_connect=bool(c.get("fleet")),
+                             satcom_units=sat_here, custom=[types[t]["name"] for t in custom_on], aps_connected=aps if sw else 0))
+        sat_units += sat_here
+    cell_units = sum(c.cellular_units for c in cars)
+    decay = float(tcfg.get("unit_capacity_decay", 0.85))
+    units_factor = sum(decay ** k for k in range(cell_units)) if cell_units else 0.0
+    fleet = any(c.fleet_connect for c in cars)
+    aps_connected = sum(c.aps_connected for c in cars)
+    passengers = sum(int(seats.get(c.type, seats.get("mid", 76))) for c in cars)
+    design = TrainDesign(
+        title=project.get("title", "Train Studio project"), carriages=cars, cellular_units=cell_units, satcom_units=sat_units,
+        satcom_terminal=sat_terminal if sat_units else None, aps_total=sum(c.aps for c in cars), aps_connected=aps_connected, fleet_connect=fleet,
+        passengers=passengers, vehicle_profile=tcfg.get("edge_rail_profile", "EDGE_RAIL_ACTIVE_ANTENNA") if cell_units > 0 else "PASSENGER_HANDSET_INSIDE_CARRIAGE",
+        policy=tcfg.get("fleet_connect_policy", "PACKET_BONDING") if fleet else tcfg.get("no_fleet_connect_policy", "FAILOVER"),
+        units_capacity_factor=round(units_factor, 4), ap_capacity_mbps=float(tcfg.get("ap_capacity_mbps_each", 120)) * aps_connected, warnings=warnings,
+    )
+    if cell_units == 0:
+        design.warnings.append("no EDGE Rail units: cellular modelled as passenger handsets inside the carriage")
+    if sat_units == 0:
+        design.warnings.append("no SATCOM terminal: satellite link disabled")
+    if aps_connected == 0:
+        design.warnings.append("no connected access points: passenger Wi-Fi capacity is zero")
+    return design
+
+
+def apply_to_settings(settings, design: TrainDesign) -> None:
+    """Override the simulation config in place so every model stage sees the designed train."""
+    sim = settings.sim
+    sim["vehicle"]["profile"] = design.vehicle_profile
+    sim["wan"]["policy"] = design.policy
+    sim["cellular"]["units_capacity_factor"] = design.units_capacity_factor if design.cellular_units else 1.0
+    sim["passenger_wifi"]["passengers"] = design.passengers
+    sim["passenger_wifi"]["ap_capacity_mbps"] = max(0.0, design.ap_capacity_mbps)
+    sim["satcom_enabled"] = design.satcom_units > 0
+    for p in settings.starlink["satcom"]["providers"]:
+        p["enabled"] = design.satcom_units > 0
+        if design.satcom_terminal and design.satcom_terminal in p.get("capacity_prior_mbps", {}):
+            p["terminal"] = design.satcom_terminal
+    sim["train"] = {**sim.get("train", {}), "design": design.summary()}
+
+
+def load_design(path: Path, settings) -> TrainDesign:
+    design = derive(load_project(path), settings.sim.get("train", {}), settings.starlink)
+    design.source_file = str(path)
+    return design

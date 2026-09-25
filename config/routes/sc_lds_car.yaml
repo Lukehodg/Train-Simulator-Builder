@@ -1,0 +1,59 @@
+route:
+  id: sc_lds_car
+  name: Settle - Carlisle
+  country: GB
+  operator: Northern
+  direction: northbound
+  origin_crs: LDS
+  destination_crs: CAR
+  stations:
+  - crs: LDS
+    name: Leeds
+    stop: true
+    trainshed: true
+  - crs: SHY
+    name: Shipley
+    stop: true
+    trainshed: false
+  - crs: KEI
+    name: Keighley
+    stop: true
+    trainshed: false
+  - crs: SKI
+    name: Skipton
+    stop: true
+    trainshed: false
+  - crs: SET
+    name: Settle
+    stop: true
+    trainshed: false
+  - crs: RHD
+    name: Ribblehead
+    stop: true
+    trainshed: false
+  - crs: KSW
+    name: Kirkby Stephen
+    stop: true
+    trainshed: false
+  - crs: APP
+    name: Appleby
+    stop: true
+    trainshed: false
+  - crs: CAR
+    name: Carlisle
+    stop: true
+    trainshed: true
+  timetable:
+    source: yaml
+    departure: 09:00
+    calls:
+      LDS: 09:00
+      SHY: 09:15
+      KEI: 09:26
+      SKI: 09:40
+      SET: '10:00'
+      RHD: '10:20'
+      KSW: '10:45'
+      APP: '10:58'
+      CAR: '11:42'
+    dwell_s: 90

@@ -1,0 +1,100 @@
+# Every numerical assumption lives here and is versioned with model_version.
+model_version: "0.1.0"
+
+vehicle:
+  profile: EXTERNAL_ROOFTOP_ANTENNA     # EXTERNAL_ROOFTOP_ANTENNA | PASSENGER_HANDSET_INSIDE_CARRIAGE
+  profiles:
+    EXTERNAL_ROOFTOP_ANTENNA:          {score_offset: 0.00,  db_offset: 0,   capacity_factor: 1.00}   # passive roof antenna, coax to a rack router
+    PASSENGER_HANDSET_INSIDE_CARRIAGE: {score_offset: -0.18, db_offset: -18, capacity_factor: 1.00}   # coated glass, ~15-25 dB penetration loss
+    # Motion Applied EDGE Rail: 5G active antenna with the modem (Sierra EM9291, 4x4 MIMO, LTE Cat 20) inside the
+    # radome - no RF cables or splitters. Assumptions (editable): +6 dB link budget from removing coax/splitter
+    # losses and 4x4 diversity, and a 1.35x throughput factor for 4x4 MIMO vs a 2x2 passive installation.
+    # Manufacturer claims (5x downloads, 10x uploads, 80% fewer blackspots) are shown in the UI as claims, not modelled.
+    EDGE_RAIL_ACTIVE_ANTENNA:          {score_offset: 0.08,  db_offset: 6,   capacity_factor: 1.35}
+
+cellular:
+  # Level A: coverage prior + adjustments (score space 0..1)
+  terrain:
+    cutting_penalty_max: 0.28
+    cutting_full_depth_m: 10
+  cell_distance:
+    free_km: 3.0
+    penalty_per_km: 0.06
+  tunnels:
+    default_score: 0.04                 # no dedicated infrastructure
+    das_score: 0.52                     # tunnels tagged with in-tunnel coverage (config/route overrides)
+    das_tunnels: ["km:0-2.5", "km:632-640"]   # names or km ranges; London approach + Edinburgh approach tunnels assumed covered
+  units_capacity_factor: 1.0          # set from the Train Studio design: sum(decay^k) over roof cellular units
+  # score -> radio metric mapping (flagged synthetic unless calibrated against measurements)
+  rsrp_dbm: {at_zero: -120, at_one: -74}
+  sinr_db:  {at_zero: -5,   at_one: 25}
+  throughput:
+    score_floor: 0.12                   # below this no usable data session
+    curve_exponent: 1.0
+  latency_ms: {base: 24, at_zero_extra: 110}
+  packet_loss_pct: [[0.15, 6.0], [0.30, 2.5], [0.50, 0.8], [1.01, 0.2]]   # [score_upper, loss]
+  handover:
+    hysteresis_ratio: 0.78              # switch when candidate distance < serving distance * ratio
+    max_serving_distance_km: 9
+    duration_samples: 6                 # ~300 m at 50 m spacing
+    latency_spike_ms: 80
+    packet_loss_pct: 2.0
+    capacity_factor: 0.6
+
+wan:
+  policy: PACKET_BONDING                # FAILOVER | WEIGHTED_LOAD_BALANCING | PACKET_BONDING | CELLULAR_PRIMARY_STARLINK_BACKUP | STARLINK_PRIMARY_CELLULAR_BACKUP | POLICY_BASED
+  bonding_efficiency: 0.82
+  congestion_factor: 0.9
+  load_balancing_efficiency: 0.78
+  minimum_link_score: 0.25
+  score_weights: {capacity: 0.35, latency: 0.25, packet_loss: 0.20, stability: 0.10, confidence: 0.10}
+  normalisation: {capacity_mbps: 250, latency_ms: 200, packet_loss_pct: 10}
+
+passenger_wifi:
+  passengers: 420
+  load_factor_range: [0.55, 0.90]
+  active_share: 0.35
+  per_user_demand_mbps: 1.5
+  per_user_cap_mbps: 3.75
+  ap_capacity_mbps: 300
+  score_weights: {per_user: 0.55, latency: 0.25, loss: 0.20}
+  per_user_target_mbps: 3
+  classes: {EXCELLENT: 80, GOOD: 60, USABLE: 40, POOR: 15}   # lower bounds; below POOR = OUTAGE
+
+confidence:
+  # 0.90-1.00 measured/validated · 0.70-0.89 strong source + calibrated · 0.40-0.69 prediction with partial
+  # infrastructure support · 0.10-0.39 sparse/synthetic · 0.00 unknown
+  synthetic_prior: 0.25
+  ofcom_prior: 0.55
+  ofcom_prior_with_cells: 0.65
+  calibrated_bonus: 0.15
+  measured_within_m: 250
+  measured: 0.92
+  tunnel_deterministic: 0.90
+  starlink_predictive: 0.35
+  starlink_telemetry: 0.85
+
+# Train Studio (Train Diagram Builder) project -> onboard architecture. `tcs run --train <file.train.json>` or set
+# design_file. Every mapping is an assumption you can tune; the design summary is exported into meta.json.
+train:
+  design_file: null
+  seats: {cabL: 56, mid: 76, cabR: 56}          # passengers per carriage type (used for the Wi-Fi demand model)
+  ap_capacity_mbps_each: 120                     # usable throughput per connected access point
+  unit_capacity_decay: 0.85                      # 2nd, 3rd... EDGE Rail unit adds 0.85, 0.72... of one unit's capacity per operator
+  satcom_terminal_by_preset: {edge-mini: mini, starlink: performance, oneweb: performance, satcom: performance}
+  default_satcom_terminal: performance
+  edge_rail_profile: EDGE_RAIL_ACTIVE_ANTENNA    # vehicle profile when the design has EDGE Rail units
+  fleet_connect_policy: PACKET_BONDING           # Fleet Connect present -> multi-WAN bonding
+  no_fleet_connect_policy: FAILOVER              # no link manager -> single best link
+
+# Named scenario presets (CLI: `tcs run --preset edge_rail_fleet_connect`; viewer: Scenario preset control).
+presets:
+  baseline:
+    label: "Baseline (config defaults)"
+  edge_rail_fleet_connect:
+    label: "EDGE Rail 5G active antenna + Fleet Connect"
+    vehicle_profile: EDGE_RAIL_ACTIVE_ANTENNA
+    policy: PACKET_BONDING           # Fleet Connect aggregates every cellular network and the satcom link at once
+    bonding_efficiency: 0.85         # assumption for Fleet Connect's aggregation vs the generic 0.82
+    satcom_enabled: true
+    claims: ["5x faster downloads", "10x faster uploads", "80% reduced blackspots"]   # Motion Applied marketing figures, not used by the model

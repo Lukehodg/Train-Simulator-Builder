@@ -1,0 +1,69 @@
+route:
+  id: xc_bri_yrk
+  name: CrossCountry Bristol - York
+  country: GB
+  operator: CrossCountry
+  direction: northbound
+  origin_crs: BRI
+  destination_crs: YRK
+  stations:
+  - crs: BRI
+    name: Bristol Temple Meads
+    stop: true
+    trainshed: true
+  - crs: BPW
+    name: Bristol Parkway
+    stop: true
+    trainshed: false
+  - crs: CNM
+    name: Cheltenham Spa
+    stop: true
+    trainshed: false
+  - crs: BHM
+    name: Birmingham New Street
+    stop: true
+    trainshed: true
+  - crs: BUT
+    name: Burton-on-Trent
+    stop: true
+    trainshed: false
+  - crs: DBY
+    name: Derby
+    stop: true
+    trainshed: false
+  - crs: CHD
+    name: Chesterfield
+    stop: true
+    trainshed: false
+  - crs: SHF
+    name: Sheffield
+    stop: true
+    trainshed: true
+  - crs: WKF
+    name: Wakefield Westgate
+    stop: true
+    trainshed: false
+  - crs: LDS
+    name: Leeds
+    stop: true
+    trainshed: true
+  - crs: YRK
+    name: York
+    stop: true
+    trainshed: true
+  timetable:
+    source: yaml
+    departure: 09:00
+    calls:
+      BRI: 09:00
+      BPW: 09:11
+      CNM: 09:47
+      BHM: '10:32'
+      BUT: '10:58'
+      DBY: '11:11'
+      CHD: '11:35'
+      SHF: '11:50'
+      WKF: '12:15'
+      LDS: '12:30'
+      YRK: '12:55'
+    dwell_s: 90

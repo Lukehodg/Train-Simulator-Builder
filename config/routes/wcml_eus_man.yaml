@@ -1,0 +1,44 @@
+route:
+  id: wcml_eus_man
+  name: West Coast Main Line (Manchester)
+  country: GB
+  operator: Avanti West Coast
+  direction: northbound
+  origin_crs: EUS
+  destination_crs: MAN
+  stations:
+  - crs: EUS
+    name: London Euston
+    stop: true
+    trainshed: true
+  - crs: MKC
+    name: Milton Keynes Central
+    stop: true
+    trainshed: false
+  - crs: SOT
+    name: Stoke-on-Trent
+    stop: true
+    trainshed: false
+  - crs: MAC
+    name: Macclesfield
+    stop: true
+    trainshed: false
+  - crs: SPT
+    name: Stockport
+    stop: true
+    trainshed: false
+  - crs: MAN
+    name: Manchester Piccadilly
+    stop: true
+    trainshed: true
+  timetable:
+    source: yaml
+    departure: 09:00
+    calls:
+      EUS: 09:00
+      MKC: 09:31
+      SOT: '10:24'
+      MAC: '10:41'
+      SPT: '10:58'
+      MAN: '11:08'
+    dwell_s: 90

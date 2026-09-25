@@ -1,0 +1,73 @@
+route:
+  id: swml_wat_wey
+  name: South Western Main Line
+  country: GB
+  operator: South Western Railway
+  direction: westbound
+  origin_crs: WAT
+  destination_crs: WEY
+  stations:
+  - crs: WAT
+    name: London Waterloo
+    stop: true
+    trainshed: true
+  - crs: CLJ
+    name: Clapham Junction
+    stop: false
+    trainshed: false
+  - crs: WOK
+    name: Woking
+    stop: true
+    trainshed: false
+  - crs: BSK
+    name: Basingstoke
+    stop: true
+    trainshed: false
+  - crs: WIN
+    name: Winchester
+    stop: true
+    trainshed: false
+  - crs: SOU
+    name: Southampton Central
+    stop: true
+    trainshed: false
+  - crs: BCU
+    name: Brockenhurst
+    stop: true
+    trainshed: false
+  - crs: BMH
+    name: Bournemouth
+    stop: true
+    trainshed: false
+  - crs: POO
+    name: Poole
+    stop: true
+    trainshed: false
+  - crs: WRM
+    name: Wareham
+    stop: true
+    trainshed: false
+  - crs: DCH
+    name: Dorchester South
+    stop: true
+    trainshed: false
+  - crs: WEY
+    name: Weymouth
+    stop: true
+    trainshed: false
+  timetable:
+    source: yaml
+    departure: 09:00
+    calls:
+      WAT: 09:00
+      WOK: 09:26
+      BSK: 09:48
+      WIN: '10:05'
+      SOU: '10:22'
+      BCU: '10:39'
+      BMH: '10:58'
+      POO: '11:10'
+      WRM: '11:22'
+      DCH: '11:38'
+      WEY: '11:50'
+    dwell_s: 90
