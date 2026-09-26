@@ -196,6 +196,8 @@ def build_all(offline: bool = typer.Option(False), only: str | None = typer.Opti
     write_index()
     console.rule("build-all")
     console.log(f"{len(ids) - len(failures)}/{len(ids)} routes built" + (f"; failed: {', '.join(f for f, _ in failures)}" if failures else ""))
+    if failures:
+        raise typer.Exit(code=1)
 
 
 @app.command()

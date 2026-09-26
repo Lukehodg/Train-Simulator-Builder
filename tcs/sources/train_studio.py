@@ -19,11 +19,52 @@ We read the consist and derive what the connectivity model needs (all mappings l
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 APP_ID = "motion-applied-train-studio"
+MAX_PROJECT_BYTES = 5 * 1024 * 1024
+
+
+def validate_project(project: Any) -> dict:
+    """Validate imported designs before arithmetic or iteration; ignore unrelated editor fields."""
+    if not isinstance(project, dict):
+        raise ValueError("project must be an object")
+    if not isinstance(project.get("title", ""), str) or len(project.get("title", "")) > 512:
+        raise ValueError("project title must be text of at most 512 characters")
+    cars, types = project.get("cars"), project.get("types", [])
+    if not isinstance(cars, list) or not 1 <= len(cars) <= 100:
+        raise ValueError("project must contain between 1 and 100 carriages")
+    if not isinstance(types, list) or len(types) > 256:
+        raise ValueError("project types must be an array of at most 256 entries")
+    ids = set()
+    for item in types:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not item["id"] or item["id"] in ids:
+            raise ValueError("equipment types require unique non-empty text ids")
+        ids.add(item["id"])
+        for key in ("name", "presetId", "hardwareKind"):
+            if item.get(key) is not None and not isinstance(item[key], str):
+                raise ValueError(f"equipment {key} must be text")
+        if not isinstance(item.get("name"), str):
+            raise ValueError("equipment name must be text")
+        if "link" in item and not isinstance(item["link"], bool):
+            raise ValueError("equipment link must be boolean")
+    for car in cars:
+        if not isinstance(car, dict) or car.get("type", "mid") not in ("cabL", "mid", "cabR"):
+            raise ValueError("carriage type must be cabL, mid or cabR")
+        for key in ("aps", "edge"):
+            value = car.get(key, 0)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 1000 or int(value) != value:
+                raise ValueError(f"carriage {key} must be an integer from 0 to 1000")
+        for key in ("sw", "fleet"):
+            if key in car and not isinstance(car[key], bool):
+                raise ValueError(f"carriage {key} must be boolean")
+        custom = car.get("custom", {})
+        if not isinstance(custom, dict) or any(not isinstance(v, bool) for v in custom.values()):
+            raise ValueError("carriage custom equipment must be an object of booleans")
+    return project
 
 
 @dataclass
@@ -64,15 +105,18 @@ class TrainDesign:
 
 
 def load_project(path: Path) -> dict:
+    if path.stat().st_size > MAX_PROJECT_BYTES:
+        raise ValueError("Train Studio project exceeds the 5 MiB limit")
     with open(path, "r", encoding="utf-8") as fh:
         doc = json.load(fh)
-    if doc.get("app") != APP_ID or doc.get("version") != 1 or "project" not in doc:
+    if not isinstance(doc, dict) or doc.get("app") != APP_ID or type(doc.get("version")) is not int or doc.get("version") != 1 or "project" not in doc:
         raise ValueError(f"{path.name} is not a Train Studio v1 project")
-    return doc["project"]
+    return validate_project(doc["project"])
 
 
 def derive(project: dict, tcfg: dict, satcom_cfg: dict | None = None) -> TrainDesign:
     """Map a project onto model parameters using the `train:` section of simulation.yaml."""
+    validate_project(project)
     seats = tcfg.get("seats", {"cabL": 56, "mid": 76, "cabR": 56})
     types = {t["id"]: t for t in project.get("types", [])}
     sat_kind = tcfg.get("satcom_terminal_by_preset", {"edge-mini": "mini", "starlink": "performance", "oneweb": "performance", "satcom": "performance"})
@@ -100,7 +144,9 @@ def derive(project: dict, tcfg: dict, satcom_cfg: dict | None = None) -> TrainDe
         sat_units += sat_here
     cell_units = sum(c.cellular_units for c in cars)
     decay = float(tcfg.get("unit_capacity_decay", 0.85))
-    units_factor = sum(decay ** k for k in range(cell_units)) if cell_units else 0.0
+    if not math.isfinite(decay) or not 0 <= decay <= 1:
+        raise ValueError("unit_capacity_decay must be between 0 and 1")
+    units_factor = float(cell_units) if decay == 1 else (1 - decay ** cell_units) / (1 - decay)
     fleet = any(c.fleet_connect for c in cars)
     aps_connected = sum(c.aps_connected for c in cars)
     passengers = sum(int(seats.get(c.type, seats.get("mid", 76))) for c in cars)

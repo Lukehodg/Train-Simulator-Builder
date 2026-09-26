@@ -1,4 +1,4 @@
-"""Expected outputs for the browser-model parity check (web/tests/model-parity.mjs).
+"""Expected outputs for the browser-model parity check (web/tests/route-parity.mjs).
 
 Re-simulates a built route with the Python model (tcs/model/*) for every link policy x vehicle profile x weather and
 writes the per-sample results that web/src/sim/model.ts must reproduce from the exported bundle. Build the route with a

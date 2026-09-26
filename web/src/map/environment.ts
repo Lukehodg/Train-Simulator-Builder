@@ -53,13 +53,15 @@ export function setBuildings(map: MLMap, on: boolean, theme: 'light' | 'dark') {
 
 // ---------------------------------------------------------------- track: rails, ballast, catenary
 const GAUGE_HALF = 0.72
-let trackCache: { i0: number; i1: number; useTerrain: boolean; layers: Layer[] } | null = null
+let trackCache: { data: State['data']; theme: State['theme']; i0: number; i1: number; useTerrain: boolean; layers: Layer[] } | null = null
 
 export function trackLayers(s: State, head: number, useTerrain: boolean): Layer[] {
   const R = s.data
   const win = Math.round(2500 / R.meta.route.sample_spacing_m)
   const i0 = Math.max(0, head - win), i1 = Math.min(R.n - 1, head + win)
-  if (trackCache && trackCache.useTerrain === useTerrain && head - trackCache.i0 > win * 0.4 && trackCache.i1 - head > win * 0.4) return trackCache.layers
+  if (trackCache && trackCache.data === R && trackCache.theme === s.theme && trackCache.useTerrain === useTerrain
+    && (trackCache.i0 === 0 || head - trackCache.i0 > win * 0.4)
+    && (trackCache.i1 === R.n - 1 || trackCache.i1 - head > win * 0.4)) return trackCache.layers
   const zOf = (i: number) => (useTerrain ? R.elev[i] * CONFIG.terrain.exaggeration : 0)
   const ballast: [number, number, number][] = [], railL: [number, number, number][] = [], railR: [number, number, number][] = [], wire: [number, number, number][] = []
   const masts: { position: [number, number, number]; yaw: number }[] = []
@@ -78,7 +80,7 @@ export function trackLayers(s: State, head: number, useTerrain: boolean): Layer[
     new SimpleMeshLayer({ id: 'catenary-masts', data: masts, mesh: MAST as any, getPosition: (m: any) => m.position, getOrientation: (m: any) => [0, m.yaw, 0], getColor: [255, 255, 255, 255], sizeScale: 1 }),
     new PathLayer({ id: 'catenary-wire', data: [{ path: wire }], getPath: (d: any) => d.path, widthUnits: 'meters', getWidth: 0.08, widthMinPixels: 1, getColor: [120, 124, 128, 200] }),
   ]
-  trackCache = { i0, i1, useTerrain, layers }
+  trackCache = { data: R, theme: s.theme, i0, i1, useTerrain, layers }
   return layers
 }
 
@@ -100,9 +102,10 @@ export function treeLayer(s: State, map: MLMap, head: number, useTerrain: boolea
   if (!s.layers.trees) return []
   const R = s.data
   const key = `${Math.round(head / 8)}:${useTerrain}:${map.getZoom() < 13 ? 'far' : 'near'}`
-  if (treeCache.key === key || now - treeCache.at < 1500) return treeCache.layer ? [treeCache.layer] : []
+  if (now - treeCache.at < 1500) return treeCache.layer ? [treeCache.layer] : []
   treeCache.at = now
   if (map.getZoom() < 13) { treeCache = { key, layer: null, at: now }; return [] }
+  if (!map.getLayer('landcover')) { treeCache = { key, layer: null, at: now }; return [] }
   const feats = map.queryRenderedFeatures(undefined, { layers: ['landcover'] } as any).filter(f => f.properties?.class === 'wood')
   const trees: Tree[] = []
   const cLon = R.lon[head], cLat = R.lat[head], mPerDegLat = 110540, mPerDegLon = 111320 * Math.cos(cLat * Math.PI / 180)
@@ -127,7 +130,7 @@ export function treeLayer(s: State, map: MLMap, head: number, useTerrain: boolea
       const gx = stepM / mPerDegLon, gy = stepM / mPerDegLat
       const nx = Math.ceil((maxx - minx) / gx), ny = Math.ceil((maxy - miny) / gy)
       if (nx * ny > 40000) continue   // huge forest: only its near edge would matter, skip rather than stall
-      for (let iy = 0; iy < ny; iy++) for (let ix = 0; ix < nx; ix++) {
+      for (let iy = 0; iy < ny && trees.length < CAP; iy++) for (let ix = 0; ix < nx && trees.length < CAP; ix++) {
         const h1 = hash(seed + ix * 73 + iy * 151), h2 = hash(seed + ix * 37 + iy * 97 + 11)
         const x = minx + (ix + 0.15 + 0.7 * h1) * gx, y = miny + (iy + 0.15 + 0.7 * h2) * gy
         if (!pointInRing(x, y, ring)) continue

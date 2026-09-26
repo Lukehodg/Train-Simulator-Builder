@@ -22,7 +22,7 @@ def passenger_wifi(settings: Settings, samples: pd.DataFrame, wan: pd.DataFrame)
     loss = wan["packet_loss_pct"].values
     w = cfg["score_weights"]
     score = 100 * (w["per_user"] * np.clip(per_user / cfg["per_user_target_mbps"], 0, 1) + w["latency"] * np.clip(1 - lat / 250, 0, 1) + w["loss"] * np.clip(1 - loss / 8, 0, 1))
-    score = np.where(wan["bonded_capacity_mbps"].values < 1, 0.0, score)
+    score = np.where(wan_cap < 1, 0.0, score)
     th = cfg["classes"]
     cls = np.where(score >= th["EXCELLENT"], "EXCELLENT", np.where(score >= th["GOOD"], "GOOD", np.where(score >= th["USABLE"], "USABLE", np.where(score >= th["POOR"], "POOR", "OUTAGE"))))
     streaming = np.clip((per_user - 1.5) / 2.0, 0, 1)

@@ -1,6 +1,7 @@
 import io
 
 import numpy as np
+import pandas as pd
 import pytest
 import requests
 from rich.console import Console
@@ -12,9 +13,8 @@ from tcs.sources import base
 from tcs.sources.base import SourceUnavailable, http_get, redact
 from tcs.sources.measurements import PRESETS
 from tcs.sources.ofcom_coverage import _aggregate, _parse_payload
-from tcs.sources.timetable import _hhmm, schedule_seconds
 from tcs.sources.terrain import SyntheticDEM, sky_visibility
-import pandas as pd
+from tcs.sources.timetable import _hhmm, schedule_seconds
 
 
 def test_local_crs():
@@ -100,7 +100,7 @@ def test_http_get_never_exposes_token(tmp_path, monkeypatch, failure):
     def fake_get(url, **kw):
         if failure == "connection_error":
             raise requests.ConnectionError(f"Max retries exceeded with url: {url[url.index('/ocid'):]}")
-        return type("Resp", (), {"status_code": 403})()
+        return type("Resp", (), {"status_code": 403, "close": lambda self: None})()
 
     log = io.StringIO()
     monkeypatch.setattr(base, "console", Console(file=log, width=400))

@@ -12,14 +12,45 @@ export interface TrainDesign {
 }
 
 const SAT_PRESETS = new Set(['starlink', 'oneweb', 'satcom', 'edge-mini'])
+export const MAX_PROJECT_BYTES = 5 * 1024 * 1024
+const object = (value: any) => value !== null && typeof value === 'object' && !Array.isArray(value)
+
+export function validateProject(project: any): void {
+  if (!object(project)) throw new Error('project must be an object')
+  if ('title' in project && (typeof project.title !== 'string' || project.title.length > 512)) throw new Error('project title must be text of at most 512 characters')
+  if (!Array.isArray(project.cars) || project.cars.length < 1 || project.cars.length > 100) throw new Error('project must contain between 1 and 100 carriages')
+  const types = 'types' in project ? project.types : []
+  if (!Array.isArray(types) || types.length > 256) throw new Error('project types must be an array of at most 256 entries')
+  const ids = new Set<string>()
+  for (const item of types) {
+    if (!object(item) || typeof item.id !== 'string' || !item.id || ids.has(item.id)) throw new Error('equipment types require unique non-empty text ids')
+    ids.add(item.id)
+    for (const key of ['name', 'presetId', 'hardwareKind']) if (item[key] != null && typeof item[key] !== 'string') throw new Error(`equipment ${key} must be text`)
+    if (typeof item.name !== 'string') throw new Error('equipment name must be text')
+    if ('link' in item && typeof item.link !== 'boolean') throw new Error('equipment link must be boolean')
+  }
+  for (const car of project.cars) {
+    if (!object(car) || !['cabL', 'mid', 'cabR'].includes('type' in car ? car.type : 'mid')) throw new Error('carriage type must be cabL, mid or cabR')
+    for (const key of ['aps', 'edge']) {
+      const value = key in car ? car[key] : 0
+      if (!Number.isInteger(value) || value < 0 || value > 1000) throw new Error(`carriage ${key} must be an integer from 0 to 1000`)
+    }
+    for (const key of ['sw', 'fleet']) if (key in car && typeof car[key] !== 'boolean') throw new Error(`carriage ${key} must be boolean`)
+    const custom = 'custom' in car ? car.custom : {}
+    if (!object(custom) || Object.values(custom).some(v => typeof v !== 'boolean')) throw new Error('carriage custom equipment must be an object of booleans')
+  }
+}
 
 export function parseProject(text: string): any {
+  if (new TextEncoder().encode(text).byteLength > MAX_PROJECT_BYTES) throw new Error('Train Studio project exceeds the 5 MiB limit')
   const doc = JSON.parse(text)
   if (doc?.app !== 'motion-applied-train-studio' || doc?.version !== 1 || !doc.project) throw new Error('Not a Train Studio v1 project file (*.train.json).')
+  validateProject(doc.project)
   return doc.project
 }
 
 export function derive(project: any, tcfg: any): TrainDesign {
+  validateProject(project)
   const seats: Record<string, number> = tcfg?.seats ?? { cabL: 56, mid: 76, cabR: 56 }
   const satKind: Record<string, string> = tcfg?.satcom_terminal_by_preset ?? { 'edge-mini': 'mini', starlink: 'performance', oneweb: 'performance', satcom: 'performance' }
   const types: Record<string, any> = Object.fromEntries((project.types ?? []).map((t: any) => [t.id, t]))
@@ -42,7 +73,8 @@ export function derive(project: any, tcfg: any): TrainDesign {
   })
   const cellUnits = cars.reduce((a, c) => a + c.cellular_units, 0)
   const decay = Number(tcfg?.unit_capacity_decay ?? 0.85)
-  let unitsFactor = 0; for (let k = 0; k < cellUnits; k++) unitsFactor += Math.pow(decay, k)
+  if (!Number.isFinite(decay) || decay < 0 || decay > 1) throw new Error('unit_capacity_decay must be between 0 and 1')
+  const unitsFactor = decay === 1 ? cellUnits : (1 - Math.pow(decay, cellUnits)) / (1 - decay)
   const fleet = cars.some(c => c.fleet_connect)
   const apsConnected = cars.reduce((a, c) => a + c.aps_connected, 0)
   const d: TrainDesign = {
@@ -71,6 +103,7 @@ export function applyDesign(meta: Meta, d: TrainDesign | null, baseline: Meta): 
   m.sim.satcom_enabled = d.satcom_units > 0
   for (const p of m.providers) {
     if (p.type !== 'satcom') continue
+    p.enabled = d.satcom_units > 0
     if (d.satcom_terminal && p.capacity_priors && p.capacity_priors[d.satcom_terminal] != null) { p.terminal = d.satcom_terminal; p.capacity_prior_mbps = p.capacity_priors[d.satcom_terminal] }
   }
   m.sim.train = { ...(m.sim.train ?? {}), design: { ...d, n_carriages: d.carriages.length } }

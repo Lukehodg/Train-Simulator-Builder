@@ -13,7 +13,9 @@ def _classify(x: np.ndarray, edges: list[float]) -> np.ndarray:
 
 
 def report(obs: pd.DataFrame, meas: pd.DataFrame, section_km: float = 10.0) -> pd.DataFrame:
-    m = meas[(meas["kind"] == "point") & meas["provider_id"].notna()]
+    if not np.isfinite(section_km) or section_km <= 0:
+        raise ValueError("section_km must be positive and finite")
+    m = meas[(meas["kind"] == "point") & meas["provider_id"].notna() & np.isfinite(meas["rsrp_dbm"])]
     j = m.merge(obs, on=["sample_id", "provider_id"], how="inner", suffixes=("_obs", ""))
     if j.empty:
         return pd.DataFrame(columns=["provider_id", "section", "n", "rsrp_mae", "rsrp_rmse", "class_acc", "outage_precision", "outage_recall", "avail_err_pp"])
@@ -42,5 +44,10 @@ def handover_position_error(pred_handovers_m: np.ndarray, observed_changes_m: np
     """Metres between each observed serving-cell change and the nearest predicted handover."""
     if len(pred_handovers_m) == 0 or len(observed_changes_m) == 0:
         return {"n": 0}
-    d = np.abs(observed_changes_m[:, None] - pred_handovers_m[None, :]).min(axis=1)
+    predicted = np.sort(np.asarray(pred_handovers_m, dtype=float))
+    observed = np.asarray(observed_changes_m, dtype=float)
+    right = np.searchsorted(predicted, observed)
+    left = np.clip(right - 1, 0, len(predicted) - 1)
+    right = np.clip(right, 0, len(predicted) - 1)
+    d = np.minimum(np.abs(observed - predicted[left]), np.abs(observed - predicted[right]))
     return {"n": int(len(d)), "median_m": float(np.median(d)), "p90_m": float(np.percentile(d, 90))}

@@ -62,7 +62,8 @@ try {
       # Resolve inside the site folder only.
       $target = Join-Path $site ($path.TrimStart('/') -replace '/', '\')
       $full = [System.IO.Path]::GetFullPath($target)
-      if (-not $full.StartsWith([System.IO.Path]::GetFullPath($site))) {
+      $siteBoundary = [System.IO.Path]::GetFullPath($site).TrimEnd('\') + '\'
+      if (-not $full.StartsWith($siteBoundary, [System.StringComparison]::OrdinalIgnoreCase)) {
         Send-Response $stream 403 'Forbidden' ([byte[]]@()) 'text/plain'
       } elseif (Test-Path $full -PathType Leaf) {
         $bytes = [System.IO.File]::ReadAllBytes($full)

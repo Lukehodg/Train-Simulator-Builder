@@ -101,16 +101,21 @@ browser (`web/src/sim/model.ts` mirrors `tcs/model/*` and is parity-checked agai
 
 ## Checks
 
-CI (`.github/workflows/checks.yml`) runs `ruff check`, `pytest`, the viewer typecheck + build, and a parity check:
-the browser model must reproduce the Python model for every link policy × vehicle profile × weather. Locally:
+CI (`.github/workflows/checks.yml`) runs `ruff check` and `pytest` (Python 3.11 and 3.12), the viewer's input-validation
+tests, typecheck + build, Chromium interaction tests (Playwright), and two parity checks between the browser model and
+the Python model: pytest's calibrated/uncalibrated cases on a synthetic fixture, and a full-route check that rebuilds
+ECML offline and requires the exported bundle to reproduce Python for every link policy × vehicle profile × weather.
+Locally:
 
 ```bash
-ruff check . && pytest
-tcs run --offline && python tests/parity_expected.py
-cd web && npm run build && npm run test:parity -- ../data/processed/ecml_kgx_edb/parity_expected.json
+ruff check . && pytest                  # the pytest parity cases need web/node_modules (npm ci), otherwise they skip
+cd web && npm run test:inputs && npm run build
+npx playwright install chromium && npm run test:browser
+cd .. && tcs run --offline && python tests/parity_expected.py
+cd web && npm run test:parity -- ../data/processed/ecml_kgx_edb/parity_expected.json
 ```
 
-A change to either model (or to a parameter only one side reads) fails the parity check until the other side matches.
+A change to either model (or to a parameter only one side reads) fails the parity checks until the other side matches.
 
 ## Layout
 

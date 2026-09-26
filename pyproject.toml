@@ -41,9 +41,10 @@ line-length = 110
 target-version = "py311"
 
 [tool.ruff.lint]
-# Syntax errors + pyflakes (undefined names, unused imports/variables). Pinned so newer ruff releases, whose default
-# rule set is much wider, do not change what CI enforces; the codebase deliberately uses compact one-line statements.
-select = ["E9", "F"]
+# Syntax errors, pyflakes (undefined names, unused imports/variables) and import order. Pinned so newer ruff releases,
+# whose default rule set is much wider, do not change what CI enforces; the codebase deliberately uses compact
+# one-line statements.
+select = ["E9", "F", "I"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
