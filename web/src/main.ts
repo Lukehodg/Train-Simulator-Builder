@@ -13,7 +13,7 @@ import { trapTab } from './ui/a11y'
 import { setSimState } from './ui/status'
 import { initTimeline } from './ui/timeline'
 import { applyDesign, derive, designFromMeta, MAX_PROJECT_BYTES, parseProject, renderDesign, type TrainDesign } from './train'
-import type { Meta, Policy, RouteData, SimResult, Vehicle } from './types'
+import type { CameraMode, Meta, Policy, RouteData, SimResult, Vehicle } from './types'
 
 const $ = (id: string) => document.getElementById(id)!
 
@@ -230,6 +230,7 @@ async function main() {
     else if (e.key === 'Home') { e.preventDefault(); seek(0) }
     else if (e.key === 'End') { e.preventDefault(); seek(meta.duration_s) }
     else if (e.key === 'i' || e.key === 'I') $('btnInspector').click()
+    else if (e.key === 'c' || e.key === 'C') { const views: CameraMode[] = ['chase', 'oblique', 'free', 'route']; store.set({ camera: views[(views.indexOf(store.state.camera) + 1) % views.length] }) }
     else if (e.key === '?') openHelp()
   })
   renderState()
@@ -350,7 +351,7 @@ function renderHelp() {
       <li><b>Train and surroundings</b>: the consist follows the loaded Train Studio design (roof units included); rails, catenary, 3D buildings and woodland trees come from the basemap's own vector tiles, so they are real footprints but schematic heights.</li>
       <li><b>Scenario controls</b> re-run the link manager and Wi-Fi model in the browser; the Python pipeline produced the per-link base estimates.</li>
       <li><b>Confidence</b>: switch the colouring to Confidence to see how much of the route rests on measured, predicted or synthetic inputs.</li>
-      <li><b>Keys</b>: <kbd>Space</kbd> play / pause · <kbd>←</kbd> <kbd>→</kbd> ±1 min (<kbd>Shift</kbd> ±10 min) · <kbd>[</kbd> <kbd>]</kbd> playback rate · <kbd>Home</kbd> <kbd>End</kbd> start / end · <kbd>I</kbd> inspector · <kbd>?</kbd> this help · <kbd>Esc</kbd> close. Drag the map to take the camera.</li>
+      <li><b>Keys</b>: <kbd>Space</kbd> play / pause · <kbd>←</kbd> <kbd>→</kbd> ±1 min (<kbd>Shift</kbd> ±10 min) · <kbd>[</kbd> <kbd>]</kbd> playback rate · <kbd>Home</kbd> <kbd>End</kbd> start / end · <kbd>I</kbd> inspector · <kbd>C</kbd> camera view · <kbd>?</kbd> this help · <kbd>Esc</kbd> close. Drag the map to take the camera.</li>
     </ul>
     <p>Predictions, not measurements. Ofcom coverage is operator-predicted; OpenCellID is community data; Starlink has no public route-level telemetry. See the Sources tab for what is live in this bundle.</p>`
 }

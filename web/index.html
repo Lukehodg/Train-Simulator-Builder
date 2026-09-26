@@ -108,25 +108,29 @@
 
     <section class="panel-section" data-panel="layers">
       <h3 class="h-sec">Layers</h3>
-      <label class="check"><input type="checkbox" id="ly_cells"> Cell sites <small>estimated</small></label>
-      <label class="check"><input type="checkbox" id="ly_sky" checked> Sky window <small>satcom</small></label>
-      <label class="check"><input type="checkbox" id="ly_stations" checked> Stations</label>
-      <label class="check"><input type="checkbox" id="ly_track" checked> Track &amp; catenary</label>
-      <label class="check"><input type="checkbox" id="ly_buildings" checked> 3D buildings</label>
-      <label class="check"><input type="checkbox" id="ly_trees" checked> Trees <small>woodland</small></label>
-      <label class="check"><input type="checkbox" id="ly_terrain" checked> 3D terrain</label>
-      <label class="check"><input type="checkbox" id="ly_labels" checked> Basemap labels</label>
+      <div class="grp" role="group" aria-labelledby="grp-route"><div class="grp-h" id="grp-route">On the route</div>
+        <label class="check"><input type="checkbox" id="ly_stations" checked> Stations</label>
+        <label class="check"><input type="checkbox" id="ly_sky" checked> Sky window <small>satcom</small></label>
+        <label class="check"><input type="checkbox" id="ly_cells"> Cell sites <small>estimated</small></label>
+      </div>
+      <div class="grp" role="group" aria-labelledby="grp-scene"><div class="grp-h" id="grp-scene">Scene</div>
+        <label class="check"><input type="checkbox" id="ly_track" checked> Track &amp; catenary</label>
+        <label class="check"><input type="checkbox" id="ly_buildings" checked> 3D buildings</label>
+        <label class="check"><input type="checkbox" id="ly_trees" checked> Trees <small>woodland</small></label>
+        <label class="check"><input type="checkbox" id="ly_terrain" checked> 3D terrain <small id="ly_terrain_note"></small></label>
+        <label class="check"><input type="checkbox" id="ly_labels" checked> Basemap labels</label>
+      </div>
     </section>
 
     <section class="panel-section" data-panel="camera">
       <h3 class="h-sec">Camera</h3>
-      <div class="seg" id="camSeg">
-        <button data-v="chase" class="on">Chase</button>
-        <button data-v="oblique">Oblique</button>
-        <button data-v="free">Free</button>
-        <button data-v="route">Route</button>
+      <div class="seg" id="camSeg" role="group" aria-label="Camera (C to cycle)" title="Camera (C to cycle)">
+        <button data-v="chase" class="on" aria-pressed="true">Chase</button>
+        <button data-v="oblique" aria-pressed="false">Oblique</button>
+        <button data-v="free" aria-pressed="false">Free</button>
+        <button data-v="route" aria-pressed="false">Route</button>
       </div>
-      <p class="hint">Drag or scroll the map to take control. Chase re-attaches to the train.</p>
+      <p class="hint">Drag or scroll the map to take control; Chase re-attaches to the train. Press <kbd>C</kbd> to cycle views.</p>
     </section>
   </aside>
 

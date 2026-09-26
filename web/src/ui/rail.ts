@@ -38,15 +38,18 @@ export function initRail(store: Store) {
   const list = $('linkList')
   list.innerHTML = ''
   let lane = 1
-  const rows = [{ key: 'wan', label: 'Combined Wi-Fi', sub: 'onboard WAN after policy', tag: 'centre' }]
+  // grouped by what the link is, so the subtitle no longer repeats "cellular" on every operator
+  const rows = [{ group: 'Onboard', key: 'wan', label: 'Combined Wi-Fi', sub: 'after the link policy', tag: 'centre' }]
   for (const p of s.data.meta.providers) {
-    if (p.type === 'cellular') rows.push({ key: p.id, label: p.name, sub: 'cellular', tag: `lane ${lane++}` })
-    else rows.push({ key: p.id, label: p.name, sub: `satcom · ${p.terminal ?? ''}`.trim(), tag: 'sky' })
+    if (p.type === 'cellular') rows.push({ group: 'Cellular', key: p.id, label: p.name, sub: '', tag: `lane ${lane++}` })
+    else rows.push({ group: 'Satellite', key: p.id, label: p.name, sub: p.terminal ? `${p.terminal} terminal` : '', tag: 'sky' })
   }
+  let group = ''
   for (const r of rows) {
+    if (r.group !== group) { group = r.group; const h = document.createElement('div'); h.className = 'grp-h'; h.textContent = group; list.appendChild(h) }
     const el = document.createElement('label')
     el.className = 'link-row'
-    el.innerHTML = `<input type="checkbox" ${s.linkVisible[r.key] ? 'checked' : ''}><span class="name">${r.label}<small>${r.sub}</small></span><span class="lane">${r.tag}</span>`
+    el.innerHTML = `<input type="checkbox" ${s.linkVisible[r.key] ? 'checked' : ''}><span class="name">${r.label}${r.sub ? `<small>${r.sub}</small>` : ''}</span><span class="lane">${r.tag}</span>`
     el.querySelector('input')!.addEventListener('change', e => store.set({ linkVisible: { ...store.state.linkVisible, [r.key]: (e.target as HTMLInputElement).checked } }))
     list.appendChild(el)
   }
@@ -66,6 +69,13 @@ export function initRail(store: Store) {
     el.checked = s.layers[key]
     el.addEventListener('change', () => store.set({ layers: { ...store.state.layers, [key]: el.checked } }))
   }
+  // Synthetic-elevation bundles can't show 3D terrain (the toggle had no effect); say so instead of offering it.
+  if (s.data.meta.terrain_source === 'synthetic_terrain') {
+    const t = $('ly_terrain') as HTMLInputElement
+    t.disabled = true
+    $('ly_terrain_note').textContent = 'needs real elevation'
+    t.closest('label')!.title = 'This route was built with synthetic elevation. Run tcs run online (Copernicus DEM is keyless) to enable 3D terrain.'
+  }
 
   // ---- camera ---------------------------------------------------------------------------------
   $('camSeg').addEventListener('click', e => {
@@ -82,7 +92,7 @@ export function initRail(store: Store) {
 
   store.on((st, changed) => {
     if (changed.has('metric') || changed.has('theme')) { metricSel.value = st.metric; renderLegend(st.metric) }
-    if (changed.has('camera')) for (const b of document.querySelectorAll<HTMLElement>('#camSeg button')) b.classList.toggle('on', b.dataset.v === st.camera)
+    if (changed.has('camera')) for (const b of document.querySelectorAll<HTMLElement>('#camSeg button')) { b.classList.toggle('on', b.dataset.v === st.camera); b.setAttribute('aria-pressed', String(b.dataset.v === st.camera)) }
     if (changed.has('layers')) for (const [id, key] of Object.entries(layerIds)) ($(id) as HTMLInputElement).checked = st.layers[key]
   })
   renderLegend(s.metric)
@@ -97,5 +107,10 @@ function renderLegend(metric: Metric) {
       <p class="hint">${spec.note ?? ''}</p>`
     return
   }
-  el.innerHTML = `<div class="rows">${spec.rows!.map((label, k) => (label ? `<span><i style="background:${cssVar(CLASS_VARS[k])}"></i>${label}</span>` : '')).join('')}</div>`
+  // "Name · threshold" rows show the class name and its threshold separately; plain rows are thresholds on their own
+  el.innerHTML = `<div class="rows">${spec.rows!.map((label, k) => {
+    if (!label) return ''
+    const [name, rule] = label.split(' · ')
+    return `<span><i style="background:${cssVar(CLASS_VARS[k])}"></i>${rule ? `<b>${name}</b><em>${rule}</em>` : `<b>${name}</b>`}</span>`
+  }).join('')}</div>`
 }
