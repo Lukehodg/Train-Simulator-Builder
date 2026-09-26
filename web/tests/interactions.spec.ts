@@ -111,3 +111,18 @@ for (const [label, handle] of [
     await expect(page.locator('#simState')).toHaveAttribute('data-state', 'running')
   })
 }
+
+// Routes built with real elevation switch MapLibre's 3D terrain on, which exercises deck.gl's terrain code path
+// (it used to throw on every render with MapLibre 6). The terrain tiles themselves are blocked here, as offline.
+test('the viewer runs with 3D terrain switched on', async ({ page }) => {
+  const meta = JSON.parse(readFileSync(path.resolve('tests/.generated', 'meta.json'), 'utf-8'))
+  await page.route(url => /\/data\/[^/]+\/meta\.json$/.test(url.pathname), route => route.fulfill({ json: { ...meta, terrain_source: 'copernicus_glo30' } }))
+  await page.reload()
+  await expect(page.locator('#kpis .kpi')).toHaveCount(6)
+  await page.locator('.rail-btn[data-panel="layers"]').click()
+  await expect(page.locator('#ly_terrain')).toBeEnabled()
+  await expect(page.locator('#ly_terrain')).toBeChecked()
+  await page.locator('#play').click()
+  await page.waitForTimeout(1500)                            // several map renders with terrain on; afterEach checks for page errors
+  await expect(page.locator('#simState')).toHaveAttribute('data-state', 'running')
+})

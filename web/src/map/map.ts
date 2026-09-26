@@ -36,6 +36,12 @@ export function createMap(container: HTMLElement, data: RouteData, theme: 'light
     maxPitch: 75, attributionControl: { compact: true }, canvasContextAttributes: { antialias: true },
   })
   map.on('error', e => console.error('[maplibre]', e.error?.message ?? e))
+  // deck.gl's overlay reads map.transform.elevation whenever the map has 3D terrain, but MapLibre 6 no longer exposes
+  // `transform` on the map, so every render threw once a route with real elevation switched terrain on. Give it the
+  // public values it needs.
+  if (!('transform' in map)) {
+    Object.defineProperty(map, 'transform', { configurable: true, get: () => ({ elevation: map.getCenterElevation(), height: map.getCanvas().clientHeight }) })
+  }
 
   // Without its style the map never fires 'style.load', so `ready` (and the whole app) would wait forever.
   // If the style request fails, or hasn't parsed within the timeout, switch to the plain style and carry on.
