@@ -1,10 +1,11 @@
 import * as maplibregl from 'maplibre-gl'
-import { Map as MLMap } from 'maplibre-gl'
+import { Map as MLMap, type StyleSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import { MapboxOverlay } from '@deck.gl/mapbox'
 import { AmbientLight, DirectionalLight, LightingEffect, type Layer, type PickingInfo } from '@deck.gl/core'
 import { CONFIG } from '../config'
+import { cssVar } from '../sim/classify'
 import type { CameraMode, RouteData } from '../types'
 
 maplibregl.setWorkerUrl(workerUrl)
@@ -23,13 +24,34 @@ export interface MapCtx {
   ready: Promise<void>
 }
 
-export function createMap(container: HTMLElement, data: RouteData, theme: 'light' | 'dark', getTooltip: (info: PickingInfo) => any): MapCtx {
+/** Stand-in basemap: just the theme's surface colour. Used when the real style can't be fetched. */
+const plainStyle = (): StyleSpecification => ({ version: 8, sources: {}, layers: [{ id: 'background', type: 'background', paint: { 'background-color': cssVar('--surface-3') } }] })
+
+export function createMap(container: HTMLElement, data: RouteData, theme: 'light' | 'dark', getTooltip: (info: PickingInfo) => any, onBasemapDown?: () => void): MapCtx {
   const bounds = routeBounds(data)
+  const styleUrl = (t: 'light' | 'dark') => (t === 'dark' ? CONFIG.basemap.dark : CONFIG.basemap.light)
+  let pendingStyle = styleUrl(theme)
   const map = new maplibregl.Map({
-    container, style: theme === 'dark' ? CONFIG.basemap.dark : CONFIG.basemap.light, bounds, fitBoundsOptions: { padding: 40 },
+    container, style: pendingStyle, bounds, fitBoundsOptions: { padding: 40 },
     maxPitch: 75, attributionControl: { compact: true }, canvasContextAttributes: { antialias: true },
   })
   map.on('error', e => console.error('[maplibre]', e.error?.message ?? e))
+
+  // Without its style the map never fires 'style.load', so `ready` (and the whole app) would wait forever.
+  // If the style request fails, or hasn't parsed within the timeout, switch to the plain style and carry on.
+  let basemapDown = false
+  const fallBack = () => {
+    if (basemapDown) return
+    basemapDown = true
+    console.warn(`[tls] basemap style unavailable (${pendingStyle}); using a plain map`)
+    map.setStyle(plainStyle(), { diff: false })
+    onBasemapDown?.()
+  }
+  map.on('error', e => {
+    const url = (e.error as { url?: string } | undefined)?.url
+    if (!styleParsed(map) && (url == null || url === pendingStyle)) fallBack()   // a tile or sprite failing is not the style failing
+  })
+  setTimeout(() => { if (!styleParsed(map)) fallBack() }, CONFIG.basemap.timeoutMs)
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')
   map.addControl(new maplibregl.ScaleControl({ maxWidth: 120 }), 'bottom-left')
   const lighting = new LightingEffect({ ambient: new AmbientLight({ color: [255, 255, 255], intensity: 1.5 }), sun: new DirectionalLight({ color: [255, 250, 240], intensity: 1.3, direction: [-1, -2, -2.5] }) })
@@ -42,7 +64,11 @@ export function createMap(container: HTMLElement, data: RouteData, theme: 'light
     map, overlay, terrainOn: false,
     setTerrain(on) { ctx.terrainOn = on; applyTerrain(map, on) },
     setLabels(on) { whenStyleReady(map, () => { for (const l of map.getStyle()?.layers ?? []) if (l.type === 'symbol') map.setLayoutProperty(l.id, 'visibility', on ? 'visible' : 'none') }) },
-    setTheme(t) { map.once('style.load', () => whenStyleReady(map, () => applyTerrain(map, ctx.terrainOn))); map.setStyle(t === 'dark' ? CONFIG.basemap.dark : CONFIG.basemap.light) },
+    setTheme(t) {
+      map.once('style.load', () => whenStyleReady(map, () => applyTerrain(map, ctx.terrainOn)))
+      if (basemapDown) { map.setStyle(plainStyle(), { diff: false }); return }   // don't retry a basemap that already failed
+      pendingStyle = styleUrl(t); map.setStyle(pendingStyle)
+    },
     setLayers(layers) { overlay.setProps({ layers }) },
     fitRoute() { map.fitBounds(bounds, { padding: 60, pitch: 0, bearing: 0, duration: 800 }) },
     onUserInteract(cb) { for (const ev of ['dragstart', 'wheel', 'rotatestart', 'pitchstart'] as const) map.on(ev, (e: any) => { if (e?.originalEvent) cb() }) },

@@ -90,3 +90,24 @@ test('route selection reloads and timeline click inspects a sample', async ({ pa
   await page.locator('#tl').click({ position: { x: 200, y: 20 } })
   await expect(page.locator('#sampleBody')).not.toBeEmpty()
 })
+
+// The basemap is a third-party style. Offline, behind a proxy that blocks it, or during an outage, the viewer
+// must still start on a plain map instead of waiting for it forever.
+for (const [label, handle] of [
+  ['is refused', (route: any) => route.abort()],
+  ['never answers', () => {}],                                        // never answered: the style timeout has to kick in
+] as const) {
+  test(`the viewer starts when the basemap ${label}`, async ({ page }) => {
+    test.setTimeout(60_000)
+    await page.route(url => url.pathname.endsWith('style.json'), handle as any)   // registered last, so it overrides the stub
+    await page.reload()
+    await expect(page.locator('#kpis .kpi')).toHaveCount(6, { timeout: 25_000 })
+    await expect(page.locator('#simState')).toHaveAttribute('data-state', 'paused')
+    await expect(page.locator('#noticeMsg')).toContainText('basemap could not be loaded')
+    await page.locator('#play').click()
+    await expect(page.locator('#simState')).toHaveAttribute('data-state', 'running')
+    await page.locator('#btnTheme').click()                  // a theme switch keeps the plain map rather than retrying the dead basemap
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+    await expect(page.locator('#simState')).toHaveAttribute('data-state', 'running')
+  })
+}

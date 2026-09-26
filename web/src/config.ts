@@ -7,6 +7,8 @@ export const CONFIG = {
     // CARTO basemap styles (free with attribution) - swap for MapTiler/Protomaps/OpenFreeMap as needed.
     light: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
     dark: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+    // If the style hasn't loaded by then (offline, blocked host, provider outage), fall back to a plain map so the simulation still starts.
+    timeoutMs: 10_000,
   },
   terrain: {
     // AWS Terrain Tiles (Terrarium encoding) - open data, no key. Attribution: Mapzen / AWS Open Data.
