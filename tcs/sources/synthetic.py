@@ -10,18 +10,14 @@ from shapely.geometry import LineString
 
 from ..geo import Projector, local_crs
 from .base import Provenance, now_iso
+from .fallback_stations import STATIONS as FALLBACK_STATIONS
 
-# Approximate coordinates for the reference route so offline mode works out of the box.
-FALLBACK_STATIONS = {
-    "KGX": (51.5308, -0.1238), "SVG": (51.9017, -0.2069), "PBO": (52.5746, -0.2500), "GRA": (52.9111, -0.6420),
-    "NNG": (53.0817, -0.7986), "RET": (53.3153, -0.9475), "DON": (53.5220, -1.1400), "YRK": (53.9581, -1.0931),
-    "NTR": (54.3330, -1.4410), "DAR": (54.5205, -1.5474), "DHM": (54.7793, -1.5817), "NCL": (54.9683, -1.6174),
-    "MPT": (55.1622, -1.6828), "ALM": (55.3927, -1.6367), "BWK": (55.7742, -2.0110), "DUN": (55.9985, -2.5139),
-    "EDB": (55.9520, -3.1883),
+# Tunnels on offline geometry, by route id: km from origin, length km, name, dedicated in-tunnel coverage (assumption).
+# Only the reference route has a list; other offline routes get no tunnels rather than ECML's at the same distances.
+FALLBACK_TUNNELS_KM = {
+    "ecml_kgx_edb": [(0.4, 0.8, "Gasworks Tunnel", True), (34.9, 0.5, "Welwyn North Tunnel", False), (36.0, 0.5, "Welwyn South Tunnel", False),
+                     (160.7, 0.9, "Stoke Tunnel", False), (173.9, 0.9, "Peascliffe Tunnel", False), (631.2, 0.6, "Calton Tunnel", True)],
 }
-# km from origin, length km, name, dedicated in-tunnel coverage (assumption)
-FALLBACK_TUNNELS_KM = [(0.4, 0.8, "Gasworks Tunnel", True), (34.9, 0.5, "Welwyn North Tunnel", False), (36.0, 0.5, "Welwyn South Tunnel", False),
-                       (160.7, 0.9, "Stoke Tunnel", False), (173.9, 0.9, "Peascliffe Tunnel", False), (631.2, 0.6, "Calton Tunnel", True)]
 
 
 def _hash(n: np.ndarray) -> np.ndarray:
@@ -62,7 +58,8 @@ def synthetic_route(stations_cfg: list[dict], country: str):
     rows = []
     for s in stations_cfg:
         if s["crs"] not in FALLBACK_STATIONS:
-            raise KeyError(f"offline mode has no coordinates for {s['crs']}; use OSM or supply a route file")
+            raise KeyError(f"offline mode has no coordinates for {s['crs']}: add it to tcs/sources/fallback_stations.py, "
+                           "or run online (OSM) / supply a route file")
         lat, lon = FALLBACK_STATIONS[s["crs"]]
         rows.append({"crs": s["crs"], "name": s["name"], "lat": lat, "lon": lon})
     st = pd.DataFrame(rows)

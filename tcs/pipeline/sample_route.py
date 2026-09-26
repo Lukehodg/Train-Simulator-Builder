@@ -110,7 +110,7 @@ def build_route(settings: Settings) -> RouteBundle:
         maxspeed = seg["maxspeed_kph"].values[idx].astype(np.float32)
     elif geom.source == "synthetic":
         km = samples["distance_m"].values / 1000
-        for start, length, name, _das in synthetic.FALLBACK_TUNNELS_KM:
+        for start, length, name, _das in synthetic.FALLBACK_TUNNELS_KM.get(settings.route_id, []):
             m = (km >= start) & (km <= start + length)
             in_tunnel |= m
             tunnel_name[m] = name
