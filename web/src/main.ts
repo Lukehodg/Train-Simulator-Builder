@@ -3,27 +3,42 @@ import type { PickingInfo } from '@deck.gl/core'
 import { CONFIG } from './config'
 import { indexAtTime, loadRoute } from './data'
 import { createMap } from './map/map'
-import { buildRuns, cellLayers, ribbonLayers, stationLayers, trainLayers, type Run } from './map/layers'
+import { buildRuns, cellLayers, labelFontReady, ribbonLayers, stationLayers, trainLayers, type Run } from './map/layers'
 import { setBuildings, trackLayers, treeLayer } from './map/environment'
 import { parityReport, simulate } from './sim/model'
 import { Store, fmtClock, type State } from './state'
-import { initInspector } from './ui/inspector'
+import { initInspector, showTab } from './ui/inspector'
 import { initRail } from './ui/rail'
+import { trapTab } from './ui/a11y'
+import { setSimState } from './ui/status'
 import { initTimeline } from './ui/timeline'
 import { applyDesign, derive, designFromMeta, MAX_PROJECT_BYTES, parseProject, renderDesign, type TrainDesign } from './train'
-import type { Meta, Policy, RouteData, SimResult, Vehicle } from './types'
+import type { CameraMode, Meta, Policy, RouteData, SimResult, Vehicle } from './types'
 
 const $ = (id: string) => document.getElementById(id)!
 
 async function main() {
   const routeId = new URLSearchParams(location.search).get('route') ?? CONFIG.defaultRoute
-  let data: RouteData
-  try { data = await loadRoute(routeId) } catch (e) { showNotice(String((e as Error).message), true); return }
-  const meta = data.meta
-  const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches
-  let theme: 'light' | 'dark' = prefersDark ? 'dark' : 'light'
+  let theme: 'light' | 'dark' = 'dark'   // pit-wall default; an explicit choice (theme button) is remembered
   try { const saved = localStorage.getItem('tls-theme'); if (saved === 'light' || saved === 'dark') theme = saved } catch {}
   document.documentElement.dataset.theme = theme
+  setSimState('loading')
+  // small-screen layout first, so a load error isn't hidden behind an open panel
+  if (innerWidth < 1100) { $('app').dataset.panel = 'none'; for (const b of document.querySelectorAll('.rail-btn')) b.setAttribute('aria-selected', 'false') }
+  if (innerWidth < 900) { $('app').dataset.inspector = 'closed'; $('btnInspector').setAttribute('aria-pressed', 'false') }
+  let data: RouteData
+  try { data = await loadRoute(routeId) } catch (e) {
+    setSimState('error')
+    $('liveLinks').innerHTML = '<p class="hint" style="margin:0">No route loaded.</p>'   // not a loading skeleton
+    for (const id of ['play', 'btnExport']) ($(id) as HTMLButtonElement).disabled = true
+    const pick = $('routePick') as HTMLSelectElement
+    pick.innerHTML = ''; pick.append(new Option(routeId)); pick.disabled = true
+    const other = routeId !== CONFIG.defaultRoute
+    showNotice(`Could not load the route "${routeId}": its data bundle is missing or unreadable. Build it with tcs run --route ${routeId}${other ? ', or open the default route.' : '.'}`, true,
+      other ? { label: 'Open the default route', href: `?route=${encodeURIComponent(CONFIG.defaultRoute)}` } : undefined, String((e as Error).message))
+    return
+  }
+  const meta = data.meta
   const scenario = { policy: (meta.sim.wan.policy as Policy) ?? 'PACKET_BONDING', vehicle: (meta.sim.vehicle.profile as Vehicle) ?? 'EXTERNAL_ROOFTOP_ANTENNA', weather: 'nominal' }
   const sim = simulate(data, scenario)
   const realTerrain = meta.terrain_source !== 'synthetic_terrain'
@@ -52,7 +67,7 @@ async function main() {
   $('provBadge').title = `Route ${meta.geometry_source} · terrain ${meta.terrain_source} · coverage ${meta.coverage_sources.join(', ') || 'synthetic'} · cells ${meta.cell_source} — click for detail`
   const parity = parityReport(data, sim)
   console.info(`[tls] parity vs Python default scenario: max bonded diff ${parity.maxBondedDiff.toFixed(2)} Mbps, class agreement ${(parity.classAgreement * 100).toFixed(1)} %`)
-  if (!realTerrain) showNotice('3D terrain is off: this bundle was built with synthetic elevation. Run `tcs run` online (Copernicus DEM is keyless) to enable it.')
+  if (!realTerrain) showNotice('3D terrain is off: this route was built with synthetic elevation. Rebuild it with a plain tcs run, without the offline flag (the Copernicus DEM needs no key), to enable it.')
   // ---- scenario: presets, train design, manual overrides -------------------------------------
   // Baseline = pristine simulation.yaml (the bundle may have been produced with a preset or a train design applied).
   const baselineMeta: Meta = JSON.parse(JSON.stringify({ ...meta, sim: meta.sim_defaults ?? meta.sim }))
@@ -98,10 +113,12 @@ async function main() {
     if (sc.weather !== 'nominal') bits.push(sc.weather)
     $('scenarioSummary').textContent = bits.join(' · ')
   }
-  const setPopover = (open: boolean) => {
+  const setPopover = (open: boolean, returnFocus = false) => {
+    if (pop.hidden === !open) return
     pop.hidden = !open
     pill.setAttribute('aria-expanded', String(open))
-    if (open) { const r = pill.getBoundingClientRect(); pop.style.right = `${Math.max(8, innerWidth - r.right)}px` }
+    if (open) { const r = pill.getBoundingClientRect(); pop.style.right = `${Math.max(8, innerWidth - r.right)}px`; ($('preset') as HTMLElement).focus() }
+    else if (returnFocus) pill.focus()
   }
   pill.addEventListener('click', e => { e.stopPropagation(); setPopover(pop.hidden) })
   pop.addEventListener('click', e => e.stopPropagation())
@@ -132,6 +149,7 @@ async function main() {
     } catch (err) { showNotice(String((err as Error).message), true) }
     input.value = ''
   })
+  $('designLoad').addEventListener('click', () => $('designFile').click())   // a real button, so the file picker is reachable by keyboard
   $('designExample').addEventListener('click', async () => {
     try {
       const res = await fetch('examples/azuma-5car.train.json'); if (!res.ok) throw new Error('example design not found')
@@ -152,11 +170,14 @@ async function main() {
   // Any layout change (rail panel, inspector) needs the map and the timeline to re-measure.
   window.addEventListener('tls-layout', () => setTimeout(() => { mapCtx.map.resize(); timeline.redraw() }, 30))
   $('btnTheme').addEventListener('click', () => { const t = store.state.theme === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = t; try { localStorage.setItem('tls-theme', t) } catch {} store.set({ theme: t }) })
-  $('btnHelp').addEventListener('click', () => { renderHelp(); ($('help') as HTMLElement).hidden = false })
-  $('helpClose').addEventListener('click', () => { ($('help') as HTMLElement).hidden = true })
-  $('help').addEventListener('click', e => { if (e.target === $('help')) ($('help') as HTMLElement).hidden = true })
-  if (innerWidth < 1100) { $('app').dataset.panel = 'none'; for (const b of document.querySelectorAll('.rail-btn')) b.setAttribute('aria-selected', 'false') }
-  if (innerWidth < 900) { $('app').dataset.inspector = 'closed'; $('btnInspector').setAttribute('aria-pressed', 'false') }
+  const help = $('help') as HTMLElement
+  let helpReturn: HTMLElement | null = null
+  const openHelp = () => { renderHelp(); helpReturn = document.activeElement as HTMLElement | null; help.hidden = false; ($('helpClose') as HTMLElement).focus() }
+  const closeHelp = () => { if (help.hidden) return; help.hidden = true; helpReturn?.focus() }
+  help.addEventListener('keydown', trapTab(help.querySelector('.modal-card') as HTMLElement))
+  $('btnHelp').addEventListener('click', openHelp)
+  $('helpClose').addEventListener('click', closeHelp)
+  help.addEventListener('click', e => { if (e.target === help) closeHelp() })
 
   // ---- map ------------------------------------------------------------------------------------
   const tooltip = (info: PickingInfo) => {
@@ -180,10 +201,17 @@ async function main() {
   const seek = (t: number) => store.set({ t: Math.max(0, Math.min(meta.duration_s, t)) })
 
   // transport
-  const setPlayIcon = () => $('playIcon').setAttribute('d', store.state.playing ? 'M2 1h3v10H2zM7 1h3v10H7z' : 'M2 1l9 5-9 5z')
+  const setPlayIcon = () => {
+    $('playIcon').setAttribute('d', store.state.playing ? 'M2 1h3v10H2zM7 1h3v10H7z' : 'M2 1l9 5-9 5z')
+    $('play').setAttribute('aria-label', store.state.playing ? 'Pause (Space)' : 'Play (Space)')
+  }
+  const renderState = () => { const st = store.state; setSimState(st.playing ? 'running' : st.t >= meta.duration_s ? 'finished' : 'paused', st.playing ? `${st.speed}×` : '') }
   $('play').addEventListener('click', () => { store.set({ playing: !store.state.playing }); setPlayIcon() })
   setPlayIcon()
-  $('speedSeg').addEventListener('click', e => { const b = (e.target as HTMLElement).closest('button'); if (!b) return; store.set({ speed: Number(b.dataset.v) }); document.querySelectorAll('#speedSeg button').forEach(x => x.classList.toggle('on', x === b)) })
+  const speedBtns = [...document.querySelectorAll<HTMLButtonElement>('#speedSeg button')]
+  const setSpeed = (v: number) => { store.set({ speed: v }); speedBtns.forEach(x => { const on = Number(x.dataset.v) === v; x.classList.toggle('on', on); x.setAttribute('aria-pressed', String(on)) }) }
+  setSpeed(store.state.speed)
+  $('speedSeg').addEventListener('click', e => { const b = (e.target as HTMLElement).closest('button'); if (b) setSpeed(Number(b.dataset.v)) })
   const scrub = $('scrub') as HTMLInputElement
   let scrubbing = false
   scrub.addEventListener('input', () => { scrubbing = true; seek(Number(scrub.value) / 100000 * meta.duration_s) })
@@ -192,16 +220,33 @@ async function main() {
   jump.innerHTML = '<option value="">station…</option>' + meta.stations.map((s, k) => `<option value="${k}">${s.name}</option>`).join('')
   jump.addEventListener('change', () => { const s = meta.stations[Number(jump.value)]; if (s) seek(Math.max(0, data.t[s.sample_id] - 30)); jump.value = '' })
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { ($('help') as HTMLElement).hidden = true; setPopover(false); return }
+    if (e.key === 'Escape') { closeHelp(); setPopover(false, true); return }
+    if (!help.hidden) return                                  // the dialog is modal: no app shortcuts behind it
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
+    if (e.ctrlKey || e.metaKey || e.altKey) return
+    const step = e.shiftKey ? 600 : 60, rates = speedBtns.map(b => Number(b.dataset.v)), k = rates.indexOf(store.state.speed)
     if (e.key === ' ') { e.preventDefault(); store.set({ playing: !store.state.playing }); setPlayIcon() }
-    if (e.key === 'ArrowRight') seek(store.state.t + 60); if (e.key === 'ArrowLeft') seek(store.state.t - 60)
+    else if (e.key === 'ArrowRight') seek(store.state.t + step)
+    else if (e.key === 'ArrowLeft') seek(store.state.t - step)
+    else if (e.key === ']') setSpeed(rates[Math.min(rates.length - 1, k + 1)])
+    else if (e.key === '[') setSpeed(rates[Math.max(0, k - 1)])
+    else if (e.key === 'Home') { e.preventDefault(); seek(0) }
+    else if (e.key === 'End') { e.preventDefault(); seek(meta.duration_s) }
+    else if (e.key === 'i' || e.key === 'I') $('btnInspector').click()
+    else if (e.key === 's' || e.key === 'S') {                 // keyboard route to the Inspect tab (the timeline and ribbons are pointer-only)
+      if ($('app').dataset.inspector === 'closed') $('btnInspector').click()
+      store.set({ selected: indexAtTime(data.t, store.state.t) }); showTab('sample')   // shown even when that sample was already selected
+    }
+    else if (e.key === 'c' || e.key === 'C') { const views: CameraMode[] = ['chase', 'oblique', 'free', 'route']; store.set({ camera: views[(views.indexOf(store.state.camera) + 1) % views.length] }) }
+    else if (e.key === '?') openHelp()
   })
+  renderState()
   renderKpis(store, baselineSim)
 
   // ---- reactive layer rebuilds ---------------------------------------------------------------
   let runs: Run[] = buildRuns(store.state, store.state.layers.terrain)
   let staticLayers = [...ribbonLayers(store.state, runs, i => { store.set({ selected: i, playing: false }); setPlayIcon() }), ...stationLayers(store.state, store.state.layers.terrain)]
+  labelFontReady.then(() => { const st = store.state; staticLayers = [...staticLayers.filter(l => !l.id.startsWith('station')), ...stationLayers(st, st.layers.terrain && realTerrain)] })   // pick up the bundled label face
   store.on((st, changed) => {
     if (changed.has('layers')) { mapCtx.setTerrain(st.layers.terrain && realTerrain); mapCtx.setLabels(st.layers.labels); setBuildings(mapCtx.map, st.layers.buildings, st.theme) }
     if (changed.has('theme')) { mapCtx.setTheme(st.theme); mapCtx.map.once('style.load', () => { mapCtx.setLabels(st.layers.labels); setBuildings(mapCtx.map, st.layers.buildings, st.theme) }) }
@@ -212,6 +257,7 @@ async function main() {
     if (changed.has('sim')) renderKpis(store, baselineSim)
     if (changed.has('camera') && st.camera === 'route') mapCtx.fitRoute()
     if (changed.has('selected') && st.selected != null) timeline.redraw()
+    if (changed.has('playing') || changed.has('t') || changed.has('speed')) renderState()
   })
 
   // ---- frame loop -----------------------------------------------------------------------------
@@ -231,6 +277,7 @@ async function main() {
     if (now - uiAt > 100) {
       uiAt = now
       inspector.update(i)
+      renderState()
       $('clock').textContent = fmtClock(meta.departure, st.t)
       if (!scrubbing) scrub.value = String(Math.round(st.t / meta.duration_s * 100000))
       timeline.draw(i)
@@ -264,7 +311,14 @@ function exportScenario(store: Store) {
 
 function tipStyle() { return { background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: '6px', padding: '6px 8px', fontFamily: 'var(--body)', fontSize: '12px', boxShadow: 'var(--shadow)' } }
 
-function showNotice(msg: string, error = false) { const n = $('notice'); n.textContent = msg; n.hidden = false; n.style.borderLeftColor = error ? 'var(--c-outage)' : 'var(--c-usable)' }
+function showNotice(msg: string, error = false, action?: { label: string; href: string }, detail?: string) {
+  const n = $('notice'), m = $('noticeMsg')
+  m.textContent = msg
+  if (action) { const a = document.createElement('a'); a.className = 'btn'; a.href = action.href; a.textContent = action.label; m.append(document.createElement('br'), a) }
+  if (detail) { const d = document.createElement('small'); d.className = 'detail'; d.textContent = `Details: ${detail}`; m.append(d) }
+  n.classList.toggle('error', error); n.hidden = false
+}
+$('noticeClose').addEventListener('click', () => { $('notice').hidden = true })
 
 function kpiStats(store: Store, sim: SimResult) {
   const { data } = store.state
@@ -282,7 +336,9 @@ function renderKpis(store: Store, baseline?: SimResult) {
   const delta = (v: number, ref: number | undefined, unit: string, lowerIsBetter = false) => {
     if (ref == null || Math.abs(v - ref) < 0.05) return ''
     const d = v - ref; const good = lowerIsBetter ? d < 0 : d > 0
-    return `<small class="${good ? '' : 'neg'}" title="vs baseline">${d > 0 ? '+' : '−'}${Math.abs(d).toFixed(Math.abs(d) < 10 ? 1 : 0)}</small>`
+    const txt = `${d > 0 ? '+' : '−'}${Math.abs(d).toFixed(Math.abs(d) < 10 ? 1 : 0)}`, verdict = good ? 'better' : 'worse'
+    // better / worse is said in words (tooltip + screen reader), not by the tint alone
+    return `<small class="${good ? '' : 'neg'}" title="${txt} vs baseline (${verdict})">${txt}<span class="sr"> vs baseline, ${verdict}</span></small>`
   }
   const tile = (label: string, value: string, unit: string, delta: string) => `<div class="kpi"><span>${label}</span><b>${value}<u>${unit}</u>${delta}</b></div>`
   const kp = [
@@ -293,7 +349,7 @@ function renderKpis(store: Store, baseline?: SimResult) {
     tile('Handovers', String(ho), '', ''),
     tile('Confidence', s.conf.toFixed(2), '', ''),
   ]
-  $('kpis').innerHTML = kp.join('')
+  $('kpis').innerHTML = $('kpisPanel').innerHTML = kp.join('')   // dock strip + the Live-tab copy used on narrower screens
 }
 
 function renderHelp() {
@@ -301,11 +357,11 @@ function renderHelp() {
     <p>A time-aware simulation of onboard connectivity for one train service: every 50 m along the real railway the model estimates each cellular operator and the satcom link, runs the onboard link manager, and predicts the passenger Wi-Fi experience.</p>
     <ul>
       <li><b>Ribbons</b>: centre = combined Wi-Fi after the selected policy; lanes to the right = each cellular operator; the floating lane = satcom. Colour follows the selected metric; class names are always shown in the inspector and tooltips so colour is never the only signal.</li>
-      <li><b>Sky window</b>: the disc above the train scales with the satcom sky-visibility score from the DEM horizon; red means no session (tunnel, canopy, deep cutting).</li>
+      <li><b>Sky window</b>: the disc above the train scales with the satcom sky-visibility score from the DEM horizon; in the outage colour there is no session (tunnel, canopy, deep cutting).</li>
       <li><b>Train and surroundings</b>: the consist follows the loaded Train Studio design (roof units included); rails, catenary, 3D buildings and woodland trees come from the basemap's own vector tiles, so they are real footprints but schematic heights.</li>
       <li><b>Scenario controls</b> re-run the link manager and Wi-Fi model in the browser; the Python pipeline produced the per-link base estimates.</li>
       <li><b>Confidence</b>: switch the colouring to Confidence to see how much of the route rests on measured, predicted or synthetic inputs.</li>
-      <li><b>Keys</b>: space play/pause · ← → ±1 min · drag the map to take the camera.</li>
+      <li><b>Keys</b>: <kbd>Space</kbd> play / pause · <kbd>←</kbd> <kbd>→</kbd> ±1 min (<kbd>Shift</kbd> ±10 min) · <kbd>[</kbd> <kbd>]</kbd> playback rate · <kbd>Home</kbd> <kbd>End</kbd> start / end · <kbd>I</kbd> inspector · <kbd>S</kbd> inspect the sample at the train · <kbd>C</kbd> camera view · <kbd>?</kbd> this help · <kbd>Esc</kbd> close. Drag the map to take the camera.</li>
     </ul>
     <p>Predictions, not measurements. Ofcom coverage is operator-predicted; OpenCellID is community data; Starlink has no public route-level telemetry. See the Sources tab for what is live in this bundle.</p>`
 }

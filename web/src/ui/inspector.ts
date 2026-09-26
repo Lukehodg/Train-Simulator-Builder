@@ -1,5 +1,6 @@
 import { fmtHM, type Store } from '../state'
 import { CLASS_NAMES, CLASS_VARS, WIFI_CLASSES, classOf, cssVar, qClass } from '../sim/classify'
+import { arrowNav } from './a11y'
 
 const $ = (id: string) => document.getElementById(id)!
 const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
@@ -17,18 +18,28 @@ export function envText(store: Store, i: number): string {
 export function initInspector(store: Store) {
   const tabs = document.querySelectorAll<HTMLButtonElement>('.tab')
   tabs.forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab!)))
+  arrowNav([...tabs], 'horizontal', b => showTab(b.dataset.tab!))
   const s = store.state
   const host = $('liveLinks'); host.innerHTML = ''
-  const rows: Record<string, { nm: HTMLElement; cls: HTMLElement; fill: HTMLElement; val: HTMLElement }> = {}
+  // one row per link: name · class · Mbps · ms, with a full-width capacity bar underneath (units live in the header, not every cell)
+  host.insertAdjacentHTML('beforeend', '<div class="lrow lhead" aria-hidden="true"><span>Link</span><span>Class</span><span>Mbps</span><span>ms</span></div>')
+  const rows: Record<string, { row: HTMLElement; nm: HTMLElement; cls: HTMLElement; fill: HTMLElement; cap: HTMLElement; lat: HTMLElement }> = {}
   for (const p of s.data.meta.providers) {
+    const row = document.createElement('div'); row.className = 'lrow'
     const nm = document.createElement('div'); nm.className = 'nm'; nm.innerHTML = `<i></i>${esc(p.name)}`
-    const cls = document.createElement('span'); cls.className = 'cls'
+    const cls = document.createElement('span'); cls.className = 'pill'
+    const cap = document.createElement('span'); cap.className = 'num'
+    const lat = document.createElement('span'); lat.className = 'num'
     const bar = document.createElement('div'); bar.className = 'bar'; const fill = document.createElement('i'); bar.appendChild(fill)
-    const val = document.createElement('div'); val.className = 'val'
-    host.append(nm, cls, bar, val); rows[p.id] = { nm, cls, fill, val }
+    row.append(nm, cls, cap, lat, bar); host.appendChild(row); rows[p.id] = { row, nm, cls, fill, cap, lat }
   }
   renderSources(store)
-  store.on((st, changed) => { if (changed.has('selected') && st.selected != null) { renderSample(store, st.selected); showTab('sample') } if (changed.has('theme')) renderSources(store) })
+  store.on((st, changed) => {
+    if (changed.has('selected') && st.selected != null) { renderSample(store, st.selected); showTab('sample') }
+    // keep an open sample card in step with a re-run scenario or a theme switch (it was left showing the old numbers / colours)
+    else if ((changed.has('sim') || changed.has('theme')) && st.selected != null) renderSample(store, st.selected)
+    if (changed.has('theme')) renderSources(store)
+  })
 
   return {
     update(i: number) {
@@ -43,9 +54,12 @@ export function initInspector(store: Store) {
         const L = r.links[p.id], row = rows[p.id], on = (r.active[i] & (1 << k)) !== 0, c = classOf('quality', p.id, i, d, r)
         row.cls.textContent = CLASS_NAMES[c]; row.cls.style.borderLeftColor = cssVar(CLASS_VARS[c])
         row.fill.style.width = `${Math.min(100, L.cap[i] / 250 * 100)}%`; row.fill.style.background = cssVar(CLASS_VARS[c])
-        row.val.textContent = L.avail[i] ? `${Math.round(L.cap[i])} Mbps · ${Math.round(L.lat[i])} ms` : L.reason[i].replace(/_/g, ' ').toLowerCase()
+        // unavailable links show the reason across both number columns instead of two dashes
+        row.cap.textContent = L.avail[i] ? String(Math.round(L.cap[i])) : L.reason[i].replace(/_/g, ' ').toLowerCase()
+        row.lat.textContent = L.avail[i] ? String(Math.round(L.lat[i])) : ''
+        row.cap.classList.toggle('reason', !L.avail[i]); row.lat.hidden = !L.avail[i]
         row.nm.classList.toggle('active', on)
-        for (const el of Object.values(row)) el.classList.toggle('off', !st.linkVisible[p.id])
+        row.row.classList.toggle('off', !st.linkVisible[p.id])
       })
       const act = d.meta.providers.filter((_, k) => r.active[i] & (1 << k)).map(p => p.name)
       $('wanActive').textContent = act.length ? act.join(' + ') : 'none'
@@ -60,7 +74,10 @@ export function initInspector(store: Store) {
 }
 
 export function showTab(name: string) {
-  document.querySelectorAll<HTMLButtonElement>('.tab').forEach(t => t.classList.toggle('on', t.dataset.tab === name))
+  document.querySelectorAll<HTMLButtonElement>('.tab').forEach(t => {
+    const on = t.dataset.tab === name
+    t.classList.toggle('on', on); t.setAttribute('aria-selected', String(on)); t.tabIndex = on ? 0 : -1
+  })
   for (const id of ['live', 'sample', 'train', 'sources']) (document.getElementById(`tab-${id}`) as HTMLElement).hidden = id !== name
 }
 
@@ -81,7 +98,7 @@ function renderSample(store: Store, i: number) {
   const cfg = sim.cellular, vprof = sim.vehicle.profiles[st.scenario.vehicle]
   for (const p of d.meta.providers) {
     const L = r.links[p.id], b = d.base[p.id], c = classOf('quality', p.id, i, d, r)
-    h += `<div class="lcard"><div class="lcard-head"><i style="background:${cssVar(CLASS_VARS[c])}"></i><b>${esc(p.name)}</b><em>${CLASS_NAMES[c]}</em></div>`
+    h += `<div class="lcard"><div class="lcard-head"><b>${esc(p.name)}</b><span class="pill" style="border-left-color:${cssVar(CLASS_VARS[c])}">${CLASS_NAMES[c]}</span></div>`
     if (p.type === 'cellular') {
       const cell = b.cell[i] ? d.cellIndex.get(b.cell[i]!) : null
       h += kv('Quality', L.q[i].toFixed(2))
@@ -116,8 +133,8 @@ function renderSample(store: Store, i: number) {
       if (st.scenario.weather !== 'nominal') rows.push([`weather · ${st.scenario.weather}`, `sky −${p.availability!.weather[st.scenario.weather].sky_penalty}`])
       rows.push(['reason code', L.reason[i]])
     }
-    rows.push(['source', esc(b.src[i] ?? '')])
-    h += `<div class="why">${rows.map(([k, v]) => `<div class="row"><span>${k}</span><code>${v}</code></div>`).join('')}</div></div>`
+    rows.push(['source', esc(b.src[i] ?? '').replace(/\|/g, '|<wbr>')])   // break long source chains at the separator, not mid-word
+    h += `<div class="why"><div class="why-h">How it was reached</div>${rows.map(([k, v]) => `<div class="row"><span>${k}</span><code>${v}</code></div>`).join('')}</div></div>`
   }
 
   // combined WAN card
@@ -142,12 +159,12 @@ function renderSources(store: Store) {
   const covLive = m.coverage_sources.some(s => s.startsWith('ofcom'))
   const cellLive = m.cell_source === 'opencellid'
   const items = [
-    ['Route geometry', geomLive, m.geometry_source === 'osm' ? 'OpenStreetMap rail network, routed station-to-station (ODbL). Tunnel / cutting / embankment / bridge / maxspeed tags carried per 50 m sample.' : m.geometry_source === 'file' ? 'Infrastructure-manager / curated centreline file.' : 'Spline through approximate station coordinates. Run the pipeline online to fetch the OSM centreline.'],
+    ['Route geometry', geomLive, m.geometry_source === 'osm' ? 'OpenStreetMap rail network, routed station-to-station (ODbL). Tunnel / cutting / embankment / bridge / maxspeed tags carried per 50 m sample.' : m.geometry_source === 'file' ? 'Infrastructure-manager / curated centreline file.' : 'Spline through approximate station coordinates. Run <code>tcs run</code> without <code>--offline</code> to fetch the OSM centreline.'],
     ['Terrain & sky visibility', terrLive, terrLive ? `${m.terrain_source}: 30 m DEM, 16-ray horizon per sample, solid-angle sky fraction above the terminal's minimum elevation.` : 'Procedural terrain. 3D terrain rendering is disabled until real elevation is available.'],
-    ['Cellular coverage prior', covLive, covLive ? `${m.coverage_sources.join(', ')} — operator predictions on Ofcom's 50 m grid mapped to a model score; never presented as measured RSRP.` : 'Synthetic prior (noise field). Set OFCOM_API_KEY, or enable Connected Nations open data, to replace it.'],
-    ['Cell sites', cellLive, cellLive ? 'OpenCellID corridor extract (CC BY-SA 4.0). Logical cells; top-5 candidates per sample; serving cell with hysteresis.' : 'Synthetic site layout. Set OPENCELLID_TOKEN to use the community database.'],
+    ['Cellular coverage prior', covLive, covLive ? `${m.coverage_sources.join(', ')} — operator predictions on Ofcom's 50 m grid mapped to a model score; never presented as measured RSRP.` : 'Synthetic prior (noise field). Set <code>OFCOM_API_KEY</code>, or enable Connected Nations open data, to replace it.'],
+    ['Cell sites', cellLive, cellLive ? 'OpenCellID corridor extract (CC BY-SA 4.0). Logical cells; top-5 candidates per sample; serving cell with hysteresis.' : 'Synthetic site layout. Set <code>OPENCELLID_TOKEN</code> to use the community database.'],
     ['Satcom', false, `Predictive obstruction model (${m.providers.find(p => p.type === 'satcom')?.terminal ?? 'performance'} terminal). No public route-level Starlink RF telemetry exists; confidence capped at 0.35 until terminal telemetry is ingested.`, 'predictive'],
-    ['Calibration', false, 'No measurements loaded. `tcs calibrate <csv>` fits score→RSRP and per-operator bias from Ofcom drive tests, the Ofcom train study or Network Survey logs.', 'none'],
+    ['Calibration', false, 'No measurements loaded. <code>tcs calibrate &lt;csv&gt;</code> fits score→RSRP and per-operator bias from Ofcom drive tests, the Ofcom train study or Network Survey logs.', 'none'],
   ] as [string, boolean, string, string?][]
   let h = `<div class="src-list">`
   for (const [title, ok, text, alt] of items) h += `<div class="src"><h5>${title}${live(ok, 'live', alt ?? 'synthetic')}</h5><p>${text}</p></div>`

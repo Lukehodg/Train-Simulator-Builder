@@ -8,6 +8,12 @@ import { offsetLonLat, offsetRight } from './map'
 import { carriageMesh, edgeRailMesh, satcomMesh, type MeshData } from './train-mesh'
 import { poseAt } from './environment'
 
+// deck.gl builds one glyph atlas per font and caches it, so labels drawn before the bundled face has loaded would keep
+// the fallback for good. Use the system face until IBM Plex Sans is in, then switch (a new font name means a new atlas).
+let labelFont = 'system-ui, sans-serif'
+export const labelFontReady: Promise<void> = (document.fonts?.load('500 12px "IBM Plex Sans"') ?? Promise.resolve([]))
+  .then(() => { labelFont = '"IBM Plex Sans", system-ui, sans-serif' }, () => {})
+
 export interface Run { lane: string; cls: number; i0: number; i1: number; path: [number, number, number][] }
 
 
@@ -82,8 +88,8 @@ export function stationLayers(s: State, useTerrain: boolean): Layer[] {
     new ScatterplotLayer({ id: 'stations', data: st, getPosition: (d: any) => [d.lon, d.lat, d.z], getRadius: (d: any) => (d.stop ? 90 : 60), radiusMinPixels: 3, radiusMaxPixels: 9,
       getFillColor: (d: any) => (d.stop ? [...pal.accent, 255] : [...pal.muted, 255]) as any, getLineColor: [255, 255, 255, 220], lineWidthMinPixels: 1.5, stroked: true, pickable: true }),
     new TextLayer({ id: 'station-labels', data: st, getPosition: (d: any) => [d.lon, d.lat, d.z], getText: (d: any) => `${d.name}${d.scheduled ? '  ' + d.scheduled : ''}`, getSize: 12,
-      getColor: [...pal.text, 255] as any, background: true, getBackgroundColor: s.theme === 'dark' ? [20, 26, 32, 200] : [255, 255, 255, 210], backgroundPadding: [6, 3, 6, 3],
-      getPixelOffset: [0, -16], fontFamily: 'IBM Plex Sans, system-ui, sans-serif', fontWeight: 500, sizeUnits: 'pixels', getTextAnchor: 'middle', getAlignmentBaseline: 'bottom',
+      getColor: [...pal.text, 255] as any, background: true, getBackgroundColor: s.theme === 'dark' ? [15, 18, 21, 215] : [255, 255, 255, 220], backgroundPadding: [6, 3, 6, 3],
+      getPixelOffset: [0, -16], fontFamily: labelFont, fontWeight: 500, sizeUnits: 'pixels', getTextAnchor: 'middle', getAlignmentBaseline: 'bottom',
       characterSet: 'auto', billboard: true, updateTriggers: { getColor: [s.theme], getBackgroundColor: [s.theme] } }),
   ]
 }

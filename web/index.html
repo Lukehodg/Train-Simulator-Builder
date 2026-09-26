@@ -4,18 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Train Link Simulator</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232457d6'/%3E%3Cpath d='M9 8h14v12H9z M11 20l-2 4 M21 20l2 4' stroke='%23fff' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
 </head>
 <body>
+<a class="skip" href="#play">Skip to playback controls</a>
 <div id="app" class="app" data-panel="links" data-inspector="open">
 
   <header class="appbar">
     <div class="brand">
       <span class="brand-mark" aria-hidden="true"></span>
-      <span class="brand-name">Train Link Simulator</span>
+      <span class="brand-name">Train Link <span>Simulator</span></span>
     </div>
     <span class="vr"></span>
     <select id="routePick" class="route-pick" aria-label="Route"><option>Loading…</option></select>
@@ -29,11 +27,17 @@
         <span class="dots" id="provDots"><i></i><i></i><i></i><i></i></span><span id="provText">—</span>
       </button>
       <span class="vr"></span>
-      <button class="btn" id="btnExport" title="Download this scenario as CSV + JSON">Export</button>
-      <a class="btn" id="btnBuilder" href="train-builder/index.html" target="_blank" rel="noopener" title="Open the Train Builder in a new tab">Train Builder ↗</a>
-      <button class="icon-btn" id="btnInspector" aria-pressed="true" title="Toggle the inspector" aria-label="Toggle the inspector">▤</button>
-      <button class="icon-btn" id="btnTheme" title="Light / dark" aria-label="Light or dark theme">◐</button>
-      <button class="icon-btn" id="btnHelp" title="About this simulator" aria-label="About this simulator">?</button>
+      <button class="btn" id="btnExport" title="Download this scenario as CSV + JSON" aria-label="Export scenario as CSV and JSON">
+        <svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M3 13h10"/></svg><span class="btn-label">Export</span></button>
+      <a class="btn" id="btnBuilder" href="train-builder/index.html" target="_blank" rel="noopener" title="Open the Train Builder in a new tab" aria-label="Open the Train Builder in a new tab">
+        <svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 3h4v4M13 3 7.5 8.5M11 9.5V13H3V5h3.5"/></svg><span class="btn-label">Train Builder</span></a>
+      <span class="vr"></span>
+      <button class="icon-btn" id="btnInspector" aria-pressed="true" title="Inspector (I)" aria-label="Toggle the inspector">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1"/><path d="M10 2.5v11"/></svg></button>
+      <button class="icon-btn" id="btnTheme" title="Light / dark theme" aria-label="Switch between light and dark theme">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 2.5v11a5.5 5.5 0 0 0 0-11Z" fill="currentColor"/></svg></button>
+      <button class="icon-btn" id="btnHelp" title="Help and keyboard shortcuts (?)" aria-label="Help and keyboard shortcuts">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M6.4 6.3a1.7 1.7 0 1 1 2.3 1.6c-.5.2-.7.5-.7 1v.4M8 11.2v.1"/></svg></button>
     </div>
 
     <div class="popover" id="scenarioPopover" hidden role="dialog" aria-label="Scenario">
@@ -43,6 +47,7 @@
           <option value="edge_rail_fleet_connect">EDGE Rail 5G + Fleet Connect</option>
           <option value="design">Train design (loaded)</option>
         </select></label>
+      <div class="grp-h">Adjust the preset</div>
       <label class="field"><span>Link policy</span>
         <select class="select" id="policy">
           <option value="PACKET_BONDING">Packet bonding</option>
@@ -63,10 +68,11 @@
           <option value="rain">Heavy rain</option>
           <option value="storm">Storm</option>
         </select></label>
+      <p class="hint pop-foot">Changes re-run the link manager and Wi-Fi model here in the browser. KPI deltas compare against the baseline. <kbd>Esc</kbd> closes.</p>
     </div>
   </header>
 
-  <nav class="iconrail" id="iconRail" role="tablist" aria-label="Panels">
+  <nav class="iconrail" id="iconRail" role="tablist" aria-label="Panels" aria-orientation="vertical">
     <button class="rail-btn" data-panel="links" aria-selected="true" role="tab" aria-label="Links">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7H6a5 5 0 0 0 0 10h3M15 7h3a5 5 0 0 1 0 10h-3M8 12h8"/></svg><span class="tip">Links</span>
     </button>
@@ -104,56 +110,58 @@
 
     <section class="panel-section" data-panel="layers">
       <h3 class="h-sec">Layers</h3>
-      <label class="check"><input type="checkbox" id="ly_cells"> Cell sites <small>estimated</small></label>
-      <label class="check"><input type="checkbox" id="ly_sky" checked> Sky window <small>satcom</small></label>
-      <label class="check"><input type="checkbox" id="ly_stations" checked> Stations</label>
-      <label class="check"><input type="checkbox" id="ly_track" checked> Track &amp; catenary</label>
-      <label class="check"><input type="checkbox" id="ly_buildings" checked> 3D buildings</label>
-      <label class="check"><input type="checkbox" id="ly_trees" checked> Trees <small>woodland</small></label>
-      <label class="check"><input type="checkbox" id="ly_terrain" checked> 3D terrain</label>
-      <label class="check"><input type="checkbox" id="ly_labels" checked> Basemap labels</label>
+      <div class="grp" role="group" aria-labelledby="grp-route"><div class="grp-h" id="grp-route">On the route</div>
+        <label class="check"><input type="checkbox" id="ly_stations" checked> Stations</label>
+        <label class="check"><input type="checkbox" id="ly_sky" checked> Sky window <small>satcom</small></label>
+        <label class="check"><input type="checkbox" id="ly_cells"> Cell sites <small>estimated</small></label>
+      </div>
+      <div class="grp" role="group" aria-labelledby="grp-scene"><div class="grp-h" id="grp-scene">Scene</div>
+        <label class="check"><input type="checkbox" id="ly_track" checked> Track &amp; catenary</label>
+        <label class="check"><input type="checkbox" id="ly_buildings" checked> 3D buildings</label>
+        <label class="check"><input type="checkbox" id="ly_trees" checked> Trees <small>woodland</small></label>
+        <label class="check"><input type="checkbox" id="ly_terrain" checked> 3D terrain <small id="ly_terrain_note"></small></label>
+        <label class="check"><input type="checkbox" id="ly_labels" checked> Basemap labels</label>
+      </div>
     </section>
 
     <section class="panel-section" data-panel="camera">
       <h3 class="h-sec">Camera</h3>
-      <div class="seg" id="camSeg">
-        <button data-v="chase" class="on">Chase</button>
-        <button data-v="oblique">Oblique</button>
-        <button data-v="free">Free</button>
-        <button data-v="route">Route</button>
+      <div class="seg" id="camSeg" role="group" aria-label="Camera (C to cycle)" title="Camera (C to cycle)">
+        <button data-v="chase" class="on" aria-pressed="true">Chase</button>
+        <button data-v="oblique" aria-pressed="false">Oblique</button>
+        <button data-v="free" aria-pressed="false">Free</button>
+        <button data-v="route" aria-pressed="false">Route</button>
       </div>
-      <p class="hint">Drag or scroll the map to take control. Chase re-attaches to the train.</p>
+      <p class="hint">Drag or scroll the map to take control; Chase re-attaches to the train. Press <kbd>C</kbd> to cycle views.</p>
     </section>
   </aside>
 
   <main class="stage">
     <div id="map" class="map"></div>
     <div class="stage-overlay">
-      <div class="notice" id="notice" hidden></div>
+      <div class="hud" id="hud" role="group" aria-label="Live telemetry">
+        <div class="hud-cell hud-speed"><span class="lbl">Speed</span><b><span id="lvSpeed">—</span><u>km/h</u></b></div>
+        <div class="hud-cell hud-pos"><span class="lbl">Position</span><b id="lvDist">—</b></div>
+        <div class="hud-cell hud-next"><span class="lbl">Next stop</span><b id="lvNext">—</b></div>
+        <div class="hud-cell hud-eta"><span class="lbl">Arrives</span><b id="lvEta">—</b></div>
+        <div class="hud-cell hud-env"><span class="lbl">Environment</span><b id="lvEnv">—</b></div>
+      </div>
+      <div class="notice" id="notice" role="status" aria-live="polite" hidden>
+        <span class="msg" id="noticeMsg"></span>
+        <button class="icon-btn" id="noticeClose" type="button" aria-label="Dismiss message" title="Dismiss">✕</button>
+      </div>
     </div>
   </main>
 
   <aside class="inspector" id="inspector">
-    <div class="tabs" role="tablist">
-      <button class="tab on" data-tab="live" role="tab">Live</button>
-      <button class="tab" data-tab="sample" role="tab">Inspect</button>
-      <button class="tab" data-tab="train" role="tab">Train</button>
-      <button class="tab" data-tab="sources" role="tab">Sources</button>
+    <div class="tabs" role="tablist" aria-label="Inspector">
+      <button class="tab on" data-tab="live" role="tab" id="tabbtn-live" aria-controls="tab-live" aria-selected="true">Live</button>
+      <button class="tab" data-tab="sample" role="tab" id="tabbtn-sample" aria-controls="tab-sample" aria-selected="false" tabindex="-1">Inspect</button>
+      <button class="tab" data-tab="train" role="tab" id="tabbtn-train" aria-controls="tab-train" aria-selected="false" tabindex="-1">Train</button>
+      <button class="tab" data-tab="sources" role="tab" id="tabbtn-sources" aria-controls="tab-sources" aria-selected="false" tabindex="-1">Sources</button>
     </div>
 
-    <div class="tabpanel" id="tab-live">
-      <section class="card hero-card">
-        <div class="hero">
-          <div><span class="hero-num" id="lvSpeed">—</span> <span class="hero-unit">km/h</span></div>
-          <div class="hero-side">
-            <div class="kv"><span>at</span><b id="lvDist">—</b></div>
-            <div class="kv"><span>next</span><b id="lvNext">—</b></div>
-            <div class="kv"><span>arrives</span><b id="lvEta">—</b></div>
-          </div>
-        </div>
-        <div class="kv env"><span>Environment</span><b id="lvEnv">—</b></div>
-      </section>
-
+    <div class="tabpanel" id="tab-live" role="tabpanel" aria-labelledby="tabbtn-live" tabindex="0">
       <section class="card">
         <h4>Links</h4>
         <div class="links" id="liveLinks"><div class="sk" style="width:80%"></div><div class="sk" style="width:65%"></div><div class="sk" style="width:72%"></div></div>
@@ -161,30 +169,41 @@
 
       <section class="card">
         <h4>Onboard WAN</h4>
-        <div class="wan">
-          <div class="kv"><span>Active</span><b id="wanActive">—</b></div>
-          <div class="kv"><span>Bonded</span><b id="wanCap">—</b></div>
-          <div class="kv"><span>Latency · loss</span><b id="wanLat">—</b></div>
-          <div class="kv"><span>Per user</span><b id="wanUser">—</b></div>
-        </div>
         <div class="wifi">
-          <div><span class="wifi-score" id="wifiScore">—</span><small>/100</small></div>
+          <div class="wifi-main"><span class="lbl">Passenger Wi-Fi</span><span class="wifi-num"><b class="wifi-score" id="wifiScore">—</b><small>/100</small></span></div>
           <div class="wifi-side">
             <span class="pill" id="wifiClass">—</span>
             <span class="conf">Confidence <i></i><b id="wanConf">—</b></span>
           </div>
         </div>
+        <div class="wan">
+          <div class="kv kv-stack"><span>Active links</span><b id="wanActive">—</b></div>
+          <div class="kv"><span>Bonded</span><b id="wanCap">—</b></div>
+          <div class="kv"><span>Latency · loss</span><b id="wanLat">—</b></div>
+          <div class="kv"><span>Per user</span><b id="wanUser">—</b></div>
+        </div>
+      </section>
+
+      <!-- the KPI tiles the dock has no room for at this width (all of them on tablets); hidden when the dock shows them all -->
+      <section class="card kpi-card">
+        <h4>Whole route</h4>
+        <div class="kpi-grid" id="kpisPanel"></div>
       </section>
     </div>
 
-    <div class="tabpanel" id="tab-sample" hidden>
-      <p class="hint" id="sampleHint">Click any ribbon on the map, or a point on the timeline, to inspect one 50 m sample: carrier values, provenance, candidate cells, satcom obstruction state and the model reasoning behind each number.</p>
+    <div class="tabpanel" id="tab-sample" role="tabpanel" aria-labelledby="tabbtn-sample" tabindex="0" hidden>
+      <div class="empty" id="sampleHint">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5M11 8v6M8 11h6"/></svg>
+        <p><b>No sample selected</b></p>
+        <p>Click a ribbon on the map or a point on the timeline (or press <kbd>S</kbd> for the train's position) to inspect one 50 m sample: each link's values, the estimated serving cell, satellite obstruction, data sources and the reasoning behind every number.</p>
+      </div>
       <div id="sampleBody"></div>
     </div>
 
-    <div class="tabpanel" id="tab-train" hidden>
+    <div class="tabpanel" id="tab-train" role="tabpanel" aria-labelledby="tabbtn-train" tabindex="0" hidden>
       <div class="train-actions">
-        <label class="btn"><input type="file" id="designFile" accept=".json,application/json" hidden>Load .train.json</label>
+        <input type="file" id="designFile" accept=".json,application/json" hidden>
+        <button class="btn" id="designLoad" type="button" title="Load a .train.json saved by the Train Builder">Load .train.json</button>
         <button class="btn" id="designExample" type="button" title="Load the bundled 5-car example design">Example</button>
         <button class="btn" id="designReset" type="button">Reset</button>
       </div>
@@ -192,19 +211,22 @@
       <div class="claims" id="claims" hidden></div>
     </div>
 
-    <div class="tabpanel" id="tab-sources" hidden>
+    <div class="tabpanel" id="tab-sources" role="tabpanel" aria-labelledby="tabbtn-sources" tabindex="0" hidden>
       <div id="sourcesBody"></div>
     </div>
   </aside>
 
   <footer class="dock">
     <div class="transport">
-      <button class="play" id="play" aria-label="Play or pause"><svg width="12" height="12" viewBox="0 0 12 12"><path id="playIcon" d="M2 1l9 5-9 5z" fill="currentColor"/></svg></button>
-      <div class="speeds" id="speedSeg">
+      <div class="transport-group">
+        <button class="play" id="play" aria-label="Play (Space)" title="Play / pause (Space)"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path id="playIcon" d="M2 1l9 5-9 5z" fill="currentColor"/></svg></button>
+        <div class="simstate" id="simState" data-state="loading" role="status" aria-live="polite"><i aria-hidden="true"></i><span id="simStateText">Loading</span><small id="simStateRate"></small></div>
+      </div>
+      <div class="speeds" id="speedSeg" role="group" aria-label="Playback rate ([ and ] to change)" title="Playback rate ([ / ])">
         <button data-v="1">1×</button><button data-v="5">5×</button><button data-v="20" class="on">20×</button><button data-v="100">100×</button><button data-v="400">400×</button>
       </div>
       <div class="clock"><span>Sim clock</span><b id="clock">00:00:00</b></div>
-      <div class="jump"><span>Jump to</span><select class="select" id="jump"></select></div>
+      <label class="jump"><span>Jump to</span><select class="select" id="jump"></select></label>
       <div class="kpis" id="kpis"></div>
     </div>
     <input class="scrub" id="scrub" type="range" min="0" max="100000" value="0" aria-label="Journey scrubber">
@@ -212,8 +234,8 @@
   </footer>
 
   <div class="modal" id="help" hidden>
-    <div class="modal-card">
-      <h2>About this simulator</h2>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+      <h2 id="helpTitle">About this simulator</h2>
       <div id="helpBody"></div>
       <button class="btn close" id="helpClose">Close</button>
     </div>
