@@ -1,0 +1,10 @@
+// The hosted viewer: a Cloudflare Workers static-assets site (Cloudflare Pages now lives inside Workers), published by
+// .github/workflows/publish.yml and locked by a Cloudflare Access application (docs/hosting.md).
+// preview_urls is off so there is no second, per-version address that would sit outside the Access rule.
+{
+  "name": "train-link-simulator",
+  "compatibility_date": "2026-09-01",
+  "assets": { "directory": "./web/dist" },
+  "workers_dev": true,
+  "preview_urls": false
+}

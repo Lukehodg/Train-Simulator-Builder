@@ -32,7 +32,8 @@ cd web && npm install && npm run dev                   # http://localhost:5173  
 ```
 
 Copy `.env.example` to `.env` and add `OFCOM_API_KEY` / `OPENCELLID_TOKEN` to turn the coverage prior and cell
-sites live. `docs/data-sources.md` explains every feed, its adapter, its fallback and what it does to confidence.
+sites live. To host the simulator for colleagues with the live feeds refreshed monthly, see
+[docs/hosting.md](docs/hosting.md). `docs/data-sources.md` explains every feed, its adapter, its fallback and what it does to confidence.
 
 ## What `tcs run` does
 
