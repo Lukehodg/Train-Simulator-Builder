@@ -9,6 +9,7 @@ import { parityReport, simulate } from './sim/model'
 import { Store, fmtClock, type State } from './state'
 import { initInspector } from './ui/inspector'
 import { initRail } from './ui/rail'
+import { setSimState } from './ui/status'
 import { initTimeline } from './ui/timeline'
 import { applyDesign, derive, designFromMeta, MAX_PROJECT_BYTES, parseProject, renderDesign, type TrainDesign } from './train'
 import type { Meta, Policy, RouteData, SimResult, Vehicle } from './types'
@@ -17,13 +18,19 @@ const $ = (id: string) => document.getElementById(id)!
 
 async function main() {
   const routeId = new URLSearchParams(location.search).get('route') ?? CONFIG.defaultRoute
-  let data: RouteData
-  try { data = await loadRoute(routeId) } catch (e) { showNotice(String((e as Error).message), true); return }
-  const meta = data.meta
-  const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches
-  let theme: 'light' | 'dark' = prefersDark ? 'dark' : 'light'
+  let theme: 'light' | 'dark' = 'dark'   // pit-wall default; an explicit choice (theme button) is remembered
   try { const saved = localStorage.getItem('tls-theme'); if (saved === 'light' || saved === 'dark') theme = saved } catch {}
   document.documentElement.dataset.theme = theme
+  setSimState('loading')
+  let data: RouteData
+  try { data = await loadRoute(routeId) } catch (e) {
+    setSimState('error')
+    for (const id of ['play', 'btnExport']) ($(id) as HTMLButtonElement).disabled = true
+    ;($('routePick') as HTMLSelectElement).innerHTML = `<option>${routeId}</option>`
+    showNotice(`Could not load route "${routeId}". ${String((e as Error).message)}`, true)
+    return
+  }
+  const meta = data.meta
   const scenario = { policy: (meta.sim.wan.policy as Policy) ?? 'PACKET_BONDING', vehicle: (meta.sim.vehicle.profile as Vehicle) ?? 'EXTERNAL_ROOFTOP_ANTENNA', weather: 'nominal' }
   const sim = simulate(data, scenario)
   const realTerrain = meta.terrain_source !== 'synthetic_terrain'
@@ -180,10 +187,17 @@ async function main() {
   const seek = (t: number) => store.set({ t: Math.max(0, Math.min(meta.duration_s, t)) })
 
   // transport
-  const setPlayIcon = () => $('playIcon').setAttribute('d', store.state.playing ? 'M2 1h3v10H2zM7 1h3v10H7z' : 'M2 1l9 5-9 5z')
+  const setPlayIcon = () => {
+    $('playIcon').setAttribute('d', store.state.playing ? 'M2 1h3v10H2zM7 1h3v10H7z' : 'M2 1l9 5-9 5z')
+    $('play').setAttribute('aria-label', store.state.playing ? 'Pause (Space)' : 'Play (Space)')
+  }
+  const renderState = () => { const st = store.state; setSimState(st.playing ? 'running' : st.t >= meta.duration_s ? 'finished' : 'paused', st.playing ? `${st.speed}×` : '') }
   $('play').addEventListener('click', () => { store.set({ playing: !store.state.playing }); setPlayIcon() })
   setPlayIcon()
-  $('speedSeg').addEventListener('click', e => { const b = (e.target as HTMLElement).closest('button'); if (!b) return; store.set({ speed: Number(b.dataset.v) }); document.querySelectorAll('#speedSeg button').forEach(x => x.classList.toggle('on', x === b)) })
+  const speedBtns = [...document.querySelectorAll<HTMLButtonElement>('#speedSeg button')]
+  const setSpeed = (v: number) => { store.set({ speed: v }); speedBtns.forEach(x => { const on = Number(x.dataset.v) === v; x.classList.toggle('on', on); x.setAttribute('aria-pressed', String(on)) }) }
+  setSpeed(store.state.speed)
+  $('speedSeg').addEventListener('click', e => { const b = (e.target as HTMLElement).closest('button'); if (b) setSpeed(Number(b.dataset.v)) })
   const scrub = $('scrub') as HTMLInputElement
   let scrubbing = false
   scrub.addEventListener('input', () => { scrubbing = true; seek(Number(scrub.value) / 100000 * meta.duration_s) })
@@ -194,9 +208,19 @@ async function main() {
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') { ($('help') as HTMLElement).hidden = true; setPopover(false); return }
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
+    if (e.ctrlKey || e.metaKey || e.altKey) return
+    const step = e.shiftKey ? 600 : 60, rates = speedBtns.map(b => Number(b.dataset.v)), k = rates.indexOf(store.state.speed)
     if (e.key === ' ') { e.preventDefault(); store.set({ playing: !store.state.playing }); setPlayIcon() }
-    if (e.key === 'ArrowRight') seek(store.state.t + 60); if (e.key === 'ArrowLeft') seek(store.state.t - 60)
+    else if (e.key === 'ArrowRight') seek(store.state.t + step)
+    else if (e.key === 'ArrowLeft') seek(store.state.t - step)
+    else if (e.key === ']') setSpeed(rates[Math.min(rates.length - 1, k + 1)])
+    else if (e.key === '[') setSpeed(rates[Math.max(0, k - 1)])
+    else if (e.key === 'Home') { e.preventDefault(); seek(0) }
+    else if (e.key === 'End') { e.preventDefault(); seek(meta.duration_s) }
+    else if (e.key === 'i' || e.key === 'I') $('btnInspector').click()
+    else if (e.key === '?') { renderHelp(); ($('help') as HTMLElement).hidden = false }
   })
+  renderState()
   renderKpis(store, baselineSim)
 
   // ---- reactive layer rebuilds ---------------------------------------------------------------
@@ -212,6 +236,7 @@ async function main() {
     if (changed.has('sim')) renderKpis(store, baselineSim)
     if (changed.has('camera') && st.camera === 'route') mapCtx.fitRoute()
     if (changed.has('selected') && st.selected != null) timeline.redraw()
+    if (changed.has('playing') || changed.has('t') || changed.has('speed')) renderState()
   })
 
   // ---- frame loop -----------------------------------------------------------------------------
@@ -231,6 +256,7 @@ async function main() {
     if (now - uiAt > 100) {
       uiAt = now
       inspector.update(i)
+      renderState()
       $('clock').textContent = fmtClock(meta.departure, st.t)
       if (!scrubbing) scrub.value = String(Math.round(st.t / meta.duration_s * 100000))
       timeline.draw(i)
@@ -264,7 +290,8 @@ function exportScenario(store: Store) {
 
 function tipStyle() { return { background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: '6px', padding: '6px 8px', fontFamily: 'var(--body)', fontSize: '12px', boxShadow: 'var(--shadow)' } }
 
-function showNotice(msg: string, error = false) { const n = $('notice'); n.textContent = msg; n.hidden = false; n.style.borderLeftColor = error ? 'var(--c-outage)' : 'var(--c-usable)' }
+function showNotice(msg: string, error = false) { const n = $('notice'); $('noticeMsg').textContent = msg; n.classList.toggle('error', error); n.hidden = false }
+$('noticeClose').addEventListener('click', () => { $('notice').hidden = true })
 
 function kpiStats(store: Store, sim: SimResult) {
   const { data } = store.state
@@ -305,7 +332,7 @@ function renderHelp() {
       <li><b>Train and surroundings</b>: the consist follows the loaded Train Studio design (roof units included); rails, catenary, 3D buildings and woodland trees come from the basemap's own vector tiles, so they are real footprints but schematic heights.</li>
       <li><b>Scenario controls</b> re-run the link manager and Wi-Fi model in the browser; the Python pipeline produced the per-link base estimates.</li>
       <li><b>Confidence</b>: switch the colouring to Confidence to see how much of the route rests on measured, predicted or synthetic inputs.</li>
-      <li><b>Keys</b>: space play/pause · ← → ±1 min · drag the map to take the camera.</li>
+      <li><b>Keys</b>: <kbd>Space</kbd> play / pause · <kbd>←</kbd> <kbd>→</kbd> ±1 min (<kbd>Shift</kbd> ±10 min) · <kbd>[</kbd> <kbd>]</kbd> playback rate · <kbd>Home</kbd> <kbd>End</kbd> start / end · <kbd>I</kbd> inspector · <kbd>?</kbd> this help · <kbd>Esc</kbd> close. Drag the map to take the camera.</li>
     </ul>
     <p>Predictions, not measurements. Ofcom coverage is operator-predicted; OpenCellID is community data; Starlink has no public route-level telemetry. See the Sources tab for what is live in this bundle.</p>`
 }

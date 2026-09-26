@@ -36,7 +36,7 @@ test('playback, keyboard, scrubbing and station selection', async ({ page }) => 
   await page.locator('#scrub').fill('20000')
   const scrubbed = await page.locator('#scrub').inputValue()
   expect(scrubbed).toBe('20000')
-  await page.locator('#routeTitle').click()
+  await page.locator('#clock').click()   // move focus off the scrubber so arrow keys reach the app
   const before = await clock.textContent()
   await page.keyboard.press('ArrowRight')
   await expect(clock).not.toHaveText(before!)
