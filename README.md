@@ -99,6 +99,19 @@ panel, a per-sample inspector with model reasoning and provenance, a journey tim
 scenario controls (link policy, vehicle profile, weather) that re-run the link manager and Wi-Fi model in the
 browser (`web/src/sim/model.ts` mirrors `tcs/model/*` and is parity-checked against the Python output at load).
 
+## Checks
+
+CI (`.github/workflows/checks.yml`) runs `ruff check`, `pytest`, the viewer typecheck + build, and a parity check:
+the browser model must reproduce the Python model for every link policy × vehicle profile × weather. Locally:
+
+```bash
+ruff check . && pytest
+tcs run --offline && python tests/parity_expected.py
+cd web && npm run build && npm run test:parity -- ../data/processed/ecml_kgx_edb/parity_expected.json
+```
+
+A change to either model (or to a parameter only one side reads) fails the parity check until the other side matches.
+
 ## Layout
 
 ```
