@@ -110,3 +110,19 @@ def test_http_get_never_exposes_token(tmp_path, monkeypatch, failure):
         http_get(TOKEN_URL, raw_dir=tmp_path, name="opencellid_bulk")
     assert "pk.secret123" not in str(exc.value)
     assert "fetching" in log.getvalue() and "pk.secret123" not in log.getvalue()
+
+
+def test_fallback_coordinates_cover_route_catalogue():
+    """Offline mode needs a coordinate for every station of every route in config/ (a new route file must add its own)."""
+    import yaml
+
+    from tcs.config import list_routes
+    from tcs.sources.fallback_stations import STATIONS
+
+    for r in list_routes():
+        with open(r["file"], encoding="utf-8") as fh:
+            stations = yaml.safe_load(fh)["route"]["stations"]
+        missing = [s["crs"] for s in stations if s["crs"] not in STATIONS]
+        assert not missing, f"{r['id']}: no offline coordinates for {missing}"
+    for crs, (lat, lon) in STATIONS.items():
+        assert 49.8 < lat < 60.9 and -8.7 < lon < 1.8, crs          # Great Britain bounding box

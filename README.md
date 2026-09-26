@@ -17,7 +17,8 @@ config/*.yaml  ──►  tcs run  ──►  data/processed/<route>/{parquet, g
 # Python pipeline (3.11+)
 python -m venv .venv && .venv/Scripts/activate        # or source .venv/bin/activate
 pip install -e ".[dev]"
-tcs run --offline           # synthetic stand-ins, no network: proves the whole chain
+tcs run --offline           # synthetic stand-ins, no network: proves the whole chain (works for any --route,
+                            # and `tcs build-all --offline` builds the whole catalogue)
 tcs run                     # keyless live sources: OSM centreline + terrain + Code-Point postcodes (default route: ECML)
 tcs routes                  # the UK route catalogue (config/routes/*.yaml) and which are built
 tcs run --route wcml_eus_glc

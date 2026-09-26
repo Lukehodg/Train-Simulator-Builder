@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tcs.config import load_settings
+from tcs.config import list_routes, load_settings
 from tcs.model.bonding import POLICIES, link_manager
 from tcs.model.simulate import simulate
 from tcs.pipeline.join_cells import candidate_cells, corridor_cells, serving_cells
@@ -218,3 +218,21 @@ def test_calibration_applies_only_to_calibrated_provider_and_sections(pipeline):
     after = cellular_confidence(s, adjusted)
     assert np.allclose(before[other], after[other])
     assert np.all(after[ee] > before[ee])
+
+
+@pytest.mark.parametrize("route_id", [r["id"] for r in list_routes()])
+def test_offline_geometry_for_every_route(route_id):
+    """`tcs run --offline --route <id>` must build a sensible synthetic geometry for every catalogue route."""
+    from tcs.sources import synthetic
+
+    s = load_settings(offline=True, route_id=route_id)
+    s.route["sample_spacing_m"] = 1000
+    b = build_route(s)
+    assert b.geometry_source == "synthetic"
+    assert not b.warnings, b.warnings                                  # includes "station order ... not monotonic"
+    st = b.stations
+    assert list(st["crs"]) == [x["crs"] for x in s.route["stations"]]
+    assert st["distance_m"].is_monotonic_increasing and st["distance_m"].iloc[0] < 1500
+    assert st["distance_m"].iloc[-1] > b.samples["distance_m"].max() - 1500
+    # Synthetic tunnels belong to the reference route only.
+    assert b.samples["in_tunnel"].any() == bool(synthetic.FALLBACK_TUNNELS_KM.get(route_id))
