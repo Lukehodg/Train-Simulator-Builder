@@ -20,6 +20,11 @@ def _interim(settings) -> Path:
     return settings.paths()["interim"]
 
 
+def _require_built(settings) -> None:
+    if not (_interim(settings) / "samples.parquet").exists():
+        raise typer.BadParameter(f"route '{settings.route_id}' has not been built yet: run `tcs run --route {settings.route_id}` first")
+
+
 @app.command()
 def run(offline: bool = typer.Option(False, help="Use cached/synthetic sources only (no network, no keys)"),
         route: str | None = typer.Option(None, help="Route id from config/routes (default: config/route.yaml)"),
@@ -191,6 +196,8 @@ def build_all(offline: bool = typer.Option(False), only: str | None = typer.Opti
     write_index()
     console.rule("build-all")
     console.log(f"{len(ids) - len(failures)}/{len(ids)} routes built" + (f"; failed: {', '.join(f for f, _ in failures)}" if failures else ""))
+    if failures:
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -204,9 +211,8 @@ def report(route: str | None = typer.Option(None, help="Route id (default: confi
     from .report import build_report
 
     s = load_settings(route_id=route)
+    _require_built(s)
     interim, processed = _interim(s), s.paths()["processed"]
-    if not (interim / "samples.parquet").exists():
-        raise typer.BadParameter(f"route '{s.route_id}' has not been built yet: run `tcs run --route {s.route_id}` first")
     label_parts = []
     if preset:
         pr = s.sim.get("presets", {}).get(preset)
@@ -260,34 +266,41 @@ def probe_ofcom(postcode: str = typer.Argument("N1C4TB")):
 
 
 @app.command()
-def calibrate(measurements: Path = typer.Argument(..., help="CSV file"), preset: str = typer.Option("network_survey", help="network_survey|ofcom_drive|modem_log"),
-              max_distance_m: float = typer.Option(250.0)):
+def calibrate(measurements: Path = typer.Argument(..., help="CSV file"), route: str | None = typer.Option(None, help="Route id (default: config/route.yaml)"),
+              preset: str = typer.Option("network_survey", help="network_survey|ofcom_drive|modem_log"), max_distance_m: float = typer.Option(250.0)):
     """Fit score->RSRP and per-operator bias from measurements attached to the route; saves calibration.json."""
     from .model import calibration
+    from .model.cellular import cellular_observations
     from .pipeline.sample_route import load_bundle
     from .sources.measurements import attach_to_route, load_measurements
 
-    s = load_settings()
+    s = load_settings(route_id=route)
+    _require_built(s)
     interim = _interim(s)
     b = load_bundle(interim, s.route["country"])
     meas = load_measurements(measurements, preset, s.operators)
     meas = attach_to_route(meas, b.samples, b.proj, max_distance_m=max_distance_m)
-    obs = pd.read_parquet(s.paths()["processed"] / "provider_observation.parquet").merge(b.samples[["sample_id", "distance_m"]], on="sample_id")
+    # Fit against the uncalibrated model, not the last run's provider_observation: that already carries any earlier
+    # calibration, so re-fitting it would measure only the residual and saving it would undo the first calibration.
+    obs = cellular_observations(s, b.samples, pd.read_parquet(interim / "coverage_prior.parquet"), pd.read_parquet(interim / "serving.parquet"))
+    obs = obs.merge(b.samples[["sample_id", "distance_m"]], on="sample_id")
     r = s.sim["cellular"]["rsrp_dbm"]
     cal = calibration.fit(obs, meas, nominal_rsrp=(float(r["at_zero"]), float(r["at_one"])))
     calibration.save(cal, interim / "calibration.json")
     console.print_json(json.dumps(cal))
-    console.log("re-run `tcs run` to apply the calibration")
+    console.log(f"re-run `tcs run --route {s.route_id}` to apply the calibration")
 
 
 @app.command()
-def validate(measurements: Path = typer.Argument(...), preset: str = typer.Option("network_survey"), section_km: float = typer.Option(10.0)):
+def validate(measurements: Path = typer.Argument(...), route: str | None = typer.Option(None, help="Route id (default: config/route.yaml)"),
+             preset: str = typer.Option("network_survey"), section_km: float = typer.Option(10.0)):
     """Predicted-vs-observed metrics by route section (MAE/RMSE, outage precision/recall, classification accuracy)."""
     from .pipeline.sample_route import load_bundle
     from .sources.measurements import attach_to_route, load_measurements
     from .validate.metrics import report
 
-    s = load_settings()
+    s = load_settings(route_id=route)
+    _require_built(s)
     b = load_bundle(_interim(s), s.route["country"])
     meas = attach_to_route(load_measurements(measurements, preset, s.operators), b.samples, b.proj)
     obs = pd.read_parquet(s.paths()["processed"] / "provider_observation.parquet").merge(b.samples[["sample_id", "distance_m"]], on="sample_id")

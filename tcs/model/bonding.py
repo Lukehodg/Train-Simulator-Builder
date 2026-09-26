@@ -29,18 +29,17 @@ def link_scores(settings: Settings, obs: pd.DataFrame) -> np.ndarray:
 def link_manager(settings: Settings, obs: pd.DataFrame, policy: str | None = None) -> pd.DataFrame:
     wcfg = settings.sim["wan"]
     policy = policy or wcfg["policy"]
+    if policy not in POLICIES:
+        raise ValueError(f"unknown WAN policy: {policy}")
     obs = obs.copy()
     obs["score"] = link_scores(settings, obs)
     n = int(obs["sample_id"].max()) + 1
     providers = list(obs["provider_id"].unique())
     ptype = obs.drop_duplicates("provider_id").set_index("provider_id")["provider_type"].to_dict()
-    # Wide matrices (samples x providers)
+    # Align providers once, rather than filtering and reindexing for each metric.
+    aligned = [obs[obs["provider_id"] == p].set_index("sample_id").reindex(range(n)) for p in providers]
     def mat(col, fill=0.0):
-        m = np.full((n, len(providers)), fill, dtype=np.float64)
-        for j, p in enumerate(providers):
-            g = obs[obs["provider_id"] == p].set_index("sample_id")[col].reindex(range(n))
-            m[:, j] = g.fillna(fill).values
-        return m
+        return np.column_stack([g[col].fillna(fill).to_numpy(dtype=np.float64) for g in aligned])
     score = mat("score")
     cap = mat("capacity_mbps")
     lat = mat("latency_ms", 999)

@@ -46,7 +46,8 @@ sites live. `docs/data-sources.md` explains every feed, its adapter, its fallbac
 7. **Export** – `route_samples`, long-form `provider_observation`, `route_connectivity` (Parquet), GeoJSON,
    and the web bundle (`route.arrow` + `meta.json`).
 
-Then `tcs calibrate <measurements.csv>` and `tcs validate <measurements.csv>` close the loop with real data.
+Then `tcs calibrate <measurements.csv>` and `tcs validate <measurements.csv>` close the loop with real data (both take
+`--route <route_id>`; the default is `config/route.yaml`).
 
 Two optional inputs shape the onboard side:
 
@@ -97,6 +98,24 @@ basemap's vector tiles, a sky-visibility window, estimated serving cells, statio
 panel, a per-sample inspector with model reasoning and provenance, a journey timeline with per-link strips, and
 scenario controls (link policy, vehicle profile, weather) that re-run the link manager and Wi-Fi model in the
 browser (`web/src/sim/model.ts` mirrors `tcs/model/*` and is parity-checked against the Python output at load).
+
+## Checks
+
+CI (`.github/workflows/checks.yml`) runs `ruff check` and `pytest` (Python 3.11 and 3.12), the viewer's input-validation
+tests, typecheck + build, Chromium interaction tests (Playwright), and two parity checks between the browser model and
+the Python model: pytest's calibrated/uncalibrated cases on a synthetic fixture, and a full-route check that rebuilds
+ECML offline and requires the exported bundle to reproduce Python for every link policy × vehicle profile × weather.
+Locally:
+
+```bash
+ruff check . && pytest                  # the pytest parity cases need web/node_modules (npm ci), otherwise they skip
+cd web && npm run test:inputs && npm run build
+npx playwright install chromium && npm run test:browser
+cd .. && tcs run --offline && python tests/parity_expected.py
+cd web && npm run test:parity -- ../data/processed/ecml_kgx_edb/parity_expected.json
+```
+
+A change to either model (or to a parameter only one side reads) fails the parity checks until the other side matches.
 
 ## Layout
 

@@ -1,13 +1,20 @@
+import io
+
 import numpy as np
+import pandas as pd
+import pytest
+import requests
+from rich.console import Console
 from shapely.geometry import LineString
 
-from tcs.geo import Projector, bearings, local_crs, offset_xy, sample_line
+from tcs.geo import Projector, local_crs, offset_xy, sample_line
 from tcs.model.calibration import fit
+from tcs.sources import base
+from tcs.sources.base import SourceUnavailable, http_get, redact
 from tcs.sources.measurements import PRESETS
 from tcs.sources.ofcom_coverage import _aggregate, _parse_payload
-from tcs.sources.timetable import _hhmm, schedule_seconds
 from tcs.sources.terrain import SyntheticDEM, sky_visibility
-import pandas as pd
+from tcs.sources.timetable import _hhmm, schedule_seconds
 
 
 def test_local_crs():
@@ -77,3 +84,29 @@ def test_calibration_fit_recovers_bias():
 def test_measurement_presets_have_position():
     for k, v in PRESETS.items():
         assert "latitude" in v and "longitude" in v, k
+
+
+TOKEN_URL = "https://opencellid.org/ocid/downloads?token=pk.secret123&type=mcc&file=234.csv.gz"
+
+
+def test_redact_masks_credentials():
+    assert redact(TOKEN_URL) == "https://opencellid.org/ocid/downloads?token=***&type=mcc&file=234.csv.gz"
+    msg = "Max retries exceeded with url: /cell/getInArea?key=abc123&BBOX=1,2,3,4 (Caused by NewConnectionError)"
+    assert "abc123" not in redact(msg) and "BBOX=1,2,3,4" in redact(msg)
+
+
+@pytest.mark.parametrize("failure", ["http_403", "connection_error"])
+def test_http_get_never_exposes_token(tmp_path, monkeypatch, failure):
+    def fake_get(url, **kw):
+        if failure == "connection_error":
+            raise requests.ConnectionError(f"Max retries exceeded with url: {url[url.index('/ocid'):]}")
+        return type("Resp", (), {"status_code": 403, "close": lambda self: None})()
+
+    log = io.StringIO()
+    monkeypatch.setattr(base, "console", Console(file=log, width=400))
+    monkeypatch.setattr(base.requests, "get", fake_get)
+    monkeypatch.setattr(base.time, "sleep", lambda s: None)
+    with pytest.raises(SourceUnavailable) as exc:
+        http_get(TOKEN_URL, raw_dir=tmp_path, name="opencellid_bulk")
+    assert "pk.secret123" not in str(exc.value)
+    assert "fetching" in log.getvalue() and "pk.secret123" not in log.getvalue()

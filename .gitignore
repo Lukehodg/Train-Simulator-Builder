@@ -16,3 +16,6 @@ web/public/data/*
 !web/public/data/.gitkeep
 dist/
 .claude/
+web/test-results/
+web/playwright-report/
+web/tests/.generated/

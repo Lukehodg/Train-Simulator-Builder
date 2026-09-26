@@ -1,0 +1,118 @@
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python lint + tests (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: pip install -e ".[dev]"
+      # pytest's browser-model parity cases (tests/test_pipeline_offline.py) run web/src/sim/model.ts through Node and
+      # the web dependencies; without them those cases skip.
+      - run: npm ci
+        working-directory: web
+      - run: ruff check .
+      - run: pytest -q
+
+  web:
+    name: Viewer input validation + typecheck + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run test:inputs
+      - run: npm run build
+
+  browser:
+    name: Browser interaction tests (Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      # The Playwright global setup builds a synthetic Arrow fixture with the Python pipeline.
+      - run: pip install -e .
+      - run: npm ci
+        working-directory: web
+      - run: npx playwright install --with-deps chromium
+        working-directory: web
+      - run: npm run test:browser
+        working-directory: web
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failure-traces
+          path: web/test-results
+          retention-days: 7
+
+  parity:
+    name: Browser model vs Python parity (full route)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: pip install -e .
+      - run: npm ci
+        working-directory: web
+      - name: Build the reference route offline (synthetic sources, no keys, no network)
+        run: tcs run --offline
+      - name: Python model outputs for every policy x vehicle profile x weather
+        run: python tests/parity_expected.py --out "$RUNNER_TEMP/parity_expected.json"
+      - name: Browser model (web/src/sim/model.ts) must reproduce them from the exported bundle
+        working-directory: web
+        run: npm run test:parity -- "$RUNNER_TEMP/parity_expected.json"

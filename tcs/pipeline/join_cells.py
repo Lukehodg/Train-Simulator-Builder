@@ -58,9 +58,12 @@ def serving_cells(settings: Settings, samples: pd.DataFrame, candidates: pd.Data
     out = []
     for pid, grp in candidates.groupby("provider_id"):
         best = grp.sort_values(["sample_id", "dist_m"]).drop_duplicates("sample_id").set_index("sample_id")
-        nearest_key = best["cell_key"].reindex(range(n))
-        nearest_d = best["dist_m"].reindex(range(n)).values
-        by_sample = {sid: dict(zip(g["cell_key"], g["dist_m"])) for sid, g in grp.groupby("sample_id")}
+        # Plain lists/dicts: per-sample pandas groupby and .iloc inside the loop below dominated the pipeline runtime.
+        nearest_key = best["cell_key"].reindex(range(n)).tolist()
+        nearest_d = best["dist_m"].reindex(range(n)).tolist()
+        by_sample: dict[int, dict] = {}
+        for sid, key, d in zip(grp["sample_id"].tolist(), grp["cell_key"].tolist(), grp["dist_m"].tolist()):
+            by_sample.setdefault(sid, {})[key] = d
         serving = np.full(n, None, dtype=object)
         sdist = np.full(n, np.nan)
         ho = np.zeros(n, dtype=bool)
@@ -73,7 +76,7 @@ def serving_cells(settings: Settings, samples: pd.DataFrame, candidates: pd.Data
                 cd = cands[cur]
             else:
                 cd = np.inf
-            nk, nd = nearest_key.iloc[i], nearest_d[i]
+            nk, nd = nearest_key[i], nearest_d[i]
             if cur is None or (isinstance(nk, str) and nk != cur and (nd < cd * ratio or cd > max_d)):
                 if cur is not None and isinstance(nk, str):
                     ho[i] = True

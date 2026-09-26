@@ -10,7 +10,7 @@ import { Store, fmtClock, type State } from './state'
 import { initInspector } from './ui/inspector'
 import { initRail } from './ui/rail'
 import { initTimeline } from './ui/timeline'
-import { applyDesign, derive, designFromMeta, parseProject, renderDesign, type TrainDesign } from './train'
+import { applyDesign, derive, designFromMeta, MAX_PROJECT_BYTES, parseProject, renderDesign, type TrainDesign } from './train'
 import type { Meta, Policy, RouteData, SimResult, Vehicle } from './types'
 
 const $ = (id: string) => document.getElementById(id)!
@@ -21,7 +21,8 @@ async function main() {
   try { data = await loadRoute(routeId) } catch (e) { showNotice(String((e as Error).message), true); return }
   const meta = data.meta
   const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches
-  let theme: 'light' | 'dark' = (localStorage.getItem('tls-theme') as any) || (prefersDark ? 'dark' : 'light')
+  let theme: 'light' | 'dark' = prefersDark ? 'dark' : 'light'
+  try { const saved = localStorage.getItem('tls-theme'); if (saved === 'light' || saved === 'dark') theme = saved } catch {}
   document.documentElement.dataset.theme = theme
   const scenario = { policy: (meta.sim.wan.policy as Policy) ?? 'PACKET_BONDING', vehicle: (meta.sim.vehicle.profile as Vehicle) ?? 'EXTERNAL_ROOFTOP_ANTENNA', weather: 'nominal' }
   const sim = simulate(data, scenario)
@@ -56,8 +57,9 @@ async function main() {
   // Baseline = pristine simulation.yaml (the bundle may have been produced with a preset or a train design applied).
   const baselineMeta: Meta = JSON.parse(JSON.stringify({ ...meta, sim: meta.sim_defaults ?? meta.sim }))
   for (const p of baselineMeta.providers) if (p.type === 'satcom' && p.terminal_default && p.capacity_priors) { p.terminal = p.terminal_default; p.capacity_prior_mbps = p.capacity_priors[p.terminal_default] }
+  for (const p of baselineMeta.providers) if (p.type === 'satcom') p.enabled = p.enabled_default ?? true
   const baselineScenario = { policy: (baselineMeta.sim.wan.policy as Policy), vehicle: (baselineMeta.sim.vehicle.profile as Vehicle), weather: "nominal" as string }
-  const baselineSim = sim
+  const baselineSim = simulate({ ...data, meta: baselineMeta }, baselineScenario)
   let design: TrainDesign | null = designFromMeta(meta)
   let designLabel = design ? `from pipeline run${design.source_file ? ' · ' + design.source_file.split(/[\\/]/).pop() : ''}` : ''
   const presetSel = $('preset') as HTMLSelectElement
@@ -122,6 +124,7 @@ async function main() {
     const input = e.target as HTMLInputElement
     const f = input.files?.[0]; if (!f) return
     try {
+      if (f.size > MAX_PROJECT_BYTES) throw new Error('Train Studio project exceeds the 5 MiB limit')
       design = derive(parseProject(await f.text()), baselineMeta.sim.train)
       design.source_file = f.name; designLabel = f.name
       presetSel.value = 'design'; applyPreset('design'); renderScenario()
@@ -133,10 +136,10 @@ async function main() {
     try {
       const res = await fetch('examples/azuma-5car.train.json'); if (!res.ok) throw new Error('example design not found')
       design = derive(parseProject(await res.text()), baselineMeta.sim.train); design.source_file = 'azuma-5car.train.json'; designLabel = 'example · azuma-5car.train.json'
-      presetSel.value = 'design'; applyPreset('design')
+      presetSel.value = 'design'; applyPreset('design'); renderScenario()
     } catch (err) { showNotice(String((err as Error).message), true) }
   })
-  $('designReset').addEventListener('click', () => { design = designFromMeta(baselineMeta); designLabel = design ? 'from pipeline run' : ''; presetSel.value = 'baseline'; applyPreset('baseline') })
+  $('designReset').addEventListener('click', () => { design = designFromMeta(baselineMeta); designLabel = design ? 'from pipeline run' : ''; presetSel.value = 'baseline'; applyPreset('baseline'); renderScenario() })
   presetSel.value = meta.sim.active_preset && meta.sim.presets?.[meta.sim.active_preset] ? meta.sim.active_preset : (design ? 'design' : 'baseline')
   renderTrainTab()
   renderScenario()
@@ -189,10 +192,10 @@ async function main() {
   jump.innerHTML = '<option value="">station…</option>' + meta.stations.map((s, k) => `<option value="${k}">${s.name}</option>`).join('')
   jump.addEventListener('change', () => { const s = meta.stations[Number(jump.value)]; if (s) seek(Math.max(0, data.t[s.sample_id] - 30)); jump.value = '' })
   document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { ($('help') as HTMLElement).hidden = true; setPopover(false); return }
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
     if (e.key === ' ') { e.preventDefault(); store.set({ playing: !store.state.playing }); setPlayIcon() }
     if (e.key === 'ArrowRight') seek(store.state.t + 60); if (e.key === 'ArrowLeft') seek(store.state.t - 60)
-    if (e.key === 'Escape') ($('help') as HTMLElement).hidden = true
   })
   renderKpis(store, baselineSim)
 
@@ -266,7 +269,7 @@ function showNotice(msg: string, error = false) { const n = $('notice'); n.textC
 function kpiStats(store: Store, sim: SimResult) {
   const { data } = store.state
   const share = [0, 0, 0, 0, 0]; let outageM = 0, bonded = 0
-  for (let i = 0; i < data.n; i++) { share[sim.wifiClass[i]]++; if (sim.bonded[i] < 1) outageM += data.meta.route.sample_spacing_m; bonded += sim.bonded[i] }
+  for (let i = 0; i < data.n; i++) { share[sim.wifiClass[i]]++; if (sim.wifiClass[i] === 4 && i + 1 < data.n) outageM += data.distance[i + 1] - data.distance[i]; bonded += sim.bonded[i] }
   return { stream: (share[0] + share[1]) / data.n * 100, usable: (share[0] + share[1] + share[2]) / data.n * 100, outageKm: outageM / 1000, bondedMean: bonded / data.n, conf: sim.conf.reduce((a, b) => a + b, 0) / data.n }
 }
 

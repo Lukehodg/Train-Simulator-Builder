@@ -71,3 +71,43 @@ def test_rejects_foreign_file(tmp_path):
     f.write_text(json.dumps({"app": "other", "version": 1}), encoding="utf-8")
     with pytest.raises(ValueError):
         load_project(f)
+
+
+@pytest.mark.parametrize("value", [-1, 0.5, None, "3", True, 1001, float("inf")])
+def test_rejects_invalid_equipment_count(value):
+    with pytest.raises(ValueError, match="integer"):
+        derive({"cars": [{"aps": value}]}, {})
+
+
+@pytest.mark.parametrize("project", [[], {}, {"cars": {}}, {"cars": []}, {"cars": [{"custom": []}]},
+                                     {"cars": [{}], "types": [{"id": "x", "name": "X"}, {"id": "x", "name": "X"}]}])
+def test_rejects_invalid_structure(project):
+    with pytest.raises(ValueError):
+        derive(project, {})
+
+
+def test_calibration_mapping_does_not_apply_bias_twice():
+    import numpy as np
+    import pandas as pd
+
+    from tcs.model.calibration import fit
+
+    q = np.linspace(0.2, 0.7, 100)
+    obs = pd.DataFrame({"sample_id": range(100), "provider_id": "ee", "quality_score": q, "distance_m": np.arange(100) * 50})
+    meas = pd.DataFrame({"sample_id": range(100), "provider_id": "ee", "rsrp_dbm": -120 + 46 * (q + 0.1), "kind": "point"})
+    cal = fit(obs, meas)
+    mapping = cal["rsrp_map"]["ee"]
+    assert mapping["slope"] == pytest.approx(46)
+    assert mapping["intercept"] == pytest.approx(-120)
+    assert cal["section_km"] == 10
+
+
+@pytest.mark.parametrize("cal", [[], {"bias": []}, {"bias": {"ee": float("inf")}},
+                                 {"section_km": 0}, {"rsrp_map": {"ee": {"slope": -1, "intercept": -120}}}])
+def test_rejects_malformed_calibration(tmp_path, cal):
+    from tcs.model.calibration import load
+
+    path = tmp_path / "calibration.json"
+    path.write_text(json.dumps(cal), encoding="utf-8")
+    with pytest.raises(ValueError):
+        load(path)
