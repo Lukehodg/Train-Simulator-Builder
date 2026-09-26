@@ -7,6 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232457d6'/%3E%3Cpath d='M9 8h14v12H9z M11 20l-2 4 M21 20l2 4' stroke='%23fff' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
 </head>
 <body>
+<a class="skip" href="#play">Skip to playback controls</a>
 <div id="app" class="app" data-panel="links" data-inspector="open">
 
   <header class="appbar">
@@ -69,7 +70,7 @@
     </div>
   </header>
 
-  <nav class="iconrail" id="iconRail" role="tablist" aria-label="Panels">
+  <nav class="iconrail" id="iconRail" role="tablist" aria-label="Panels" aria-orientation="vertical">
     <button class="rail-btn" data-panel="links" aria-selected="true" role="tab" aria-label="Links">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7H6a5 5 0 0 0 0 10h3M15 7h3a5 5 0 0 1 0 10h-3M8 12h8"/></svg><span class="tip">Links</span>
     </button>
@@ -147,14 +148,14 @@
   </main>
 
   <aside class="inspector" id="inspector">
-    <div class="tabs" role="tablist">
-      <button class="tab on" data-tab="live" role="tab">Live</button>
-      <button class="tab" data-tab="sample" role="tab">Inspect</button>
-      <button class="tab" data-tab="train" role="tab">Train</button>
-      <button class="tab" data-tab="sources" role="tab">Sources</button>
+    <div class="tabs" role="tablist" aria-label="Inspector">
+      <button class="tab on" data-tab="live" role="tab" id="tabbtn-live" aria-controls="tab-live" aria-selected="true">Live</button>
+      <button class="tab" data-tab="sample" role="tab" id="tabbtn-sample" aria-controls="tab-sample" aria-selected="false" tabindex="-1">Inspect</button>
+      <button class="tab" data-tab="train" role="tab" id="tabbtn-train" aria-controls="tab-train" aria-selected="false" tabindex="-1">Train</button>
+      <button class="tab" data-tab="sources" role="tab" id="tabbtn-sources" aria-controls="tab-sources" aria-selected="false" tabindex="-1">Sources</button>
     </div>
 
-    <div class="tabpanel" id="tab-live">
+    <div class="tabpanel" id="tab-live" role="tabpanel" aria-labelledby="tabbtn-live" tabindex="0">
       <section class="card">
         <h4>Links</h4>
         <div class="links" id="liveLinks"><div class="sk" style="width:80%"></div><div class="sk" style="width:65%"></div><div class="sk" style="width:72%"></div></div>
@@ -178,12 +179,16 @@
       </section>
     </div>
 
-    <div class="tabpanel" id="tab-sample" hidden>
-      <p class="hint" id="sampleHint">Click any ribbon on the map, or a point on the timeline, to inspect one 50 m sample: carrier values, provenance, candidate cells, satcom obstruction state and the model reasoning behind each number.</p>
+    <div class="tabpanel" id="tab-sample" role="tabpanel" aria-labelledby="tabbtn-sample" tabindex="0" hidden>
+      <div class="empty" id="sampleHint">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5M11 8v6M8 11h6"/></svg>
+        <p><b>No sample selected</b></p>
+        <p>Click a ribbon on the map, or a point on the timeline, to inspect one 50 m sample: each link's values, the estimated serving cell, satellite obstruction, data sources and the reasoning behind every number.</p>
+      </div>
       <div id="sampleBody"></div>
     </div>
 
-    <div class="tabpanel" id="tab-train" hidden>
+    <div class="tabpanel" id="tab-train" role="tabpanel" aria-labelledby="tabbtn-train" tabindex="0" hidden>
       <div class="train-actions">
         <label class="btn"><input type="file" id="designFile" accept=".json,application/json" hidden>Load .train.json</label>
         <button class="btn" id="designExample" type="button" title="Load the bundled 5-car example design">Example</button>
@@ -193,7 +198,7 @@
       <div class="claims" id="claims" hidden></div>
     </div>
 
-    <div class="tabpanel" id="tab-sources" hidden>
+    <div class="tabpanel" id="tab-sources" role="tabpanel" aria-labelledby="tabbtn-sources" tabindex="0" hidden>
       <div id="sourcesBody"></div>
     </div>
   </aside>
@@ -216,8 +221,8 @@
   </footer>
 
   <div class="modal" id="help" hidden>
-    <div class="modal-card">
-      <h2>About this simulator</h2>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+      <h2 id="helpTitle">About this simulator</h2>
       <div id="helpBody"></div>
       <button class="btn close" id="helpClose">Close</button>
     </div>

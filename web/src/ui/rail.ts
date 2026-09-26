@@ -1,6 +1,7 @@
 import type { Store } from '../state'
 import type { CameraMode, Metric } from '../types'
 import { CLASS_VARS, CONF_VARS, cssVar } from '../sim/classify'
+import { arrowNav } from './a11y'
 import { showTab } from './inspector'
 
 const $ = (id: string) => document.getElementById(id)!
@@ -30,6 +31,8 @@ export function initRail(store: Store) {
     for (const sec of document.querySelectorAll<HTMLElement>('.panel-section')) sec.classList.toggle('on', sec.dataset.panel === next)
     window.dispatchEvent(new Event('tls-layout'))
   })
+
+  arrowNav([...document.querySelectorAll<HTMLElement>('.rail-btn')], 'vertical')
 
   // ---- links ---------------------------------------------------------------------------------
   const list = $('linkList')

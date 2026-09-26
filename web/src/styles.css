@@ -78,6 +78,8 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 ::-webkit-scrollbar-thumb { background: var(--surface-4); border: 3px solid transparent; background-clip: content-box; border-radius: var(--r-pill); }
 ::-webkit-scrollbar-thumb:hover { background: var(--line-strong); background-clip: content-box; }
 .num { font-variant-numeric: tabular-nums; }
+.skip { position: fixed; left: var(--s3); top: -48px; z-index: 100; background: var(--accent); color: var(--accent-ink); padding: 8px 12px; border-radius: var(--r-ctl); font-weight: 600; text-decoration: none; transition: top var(--dur); }
+.skip:focus { top: var(--s2); }
 kbd { font: 500 10px/1 var(--mono); padding: 2px 4px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: var(--r-xs); color: var(--muted); background: var(--surface-2); }
 
 /* condensed uppercase is reserved for labels — never for sentences or values */
@@ -214,6 +216,8 @@ h4 { margin: var(--s4) 0 var(--s2); }
   border-left: 3px solid var(--accent); border-radius: var(--r-ctl); padding: 8px 8px 8px 12px; font-size: var(--t-sm); box-shadow: var(--shadow-2); max-width: min(520px, calc(100% - 96px)); }
 .notice.error { border-left-color: var(--danger); }
 .notice .msg { flex: 1; min-width: 0; padding-top: 3px; }
+.notice .msg .btn { margin-top: var(--s2); height: 28px; }
+.notice .msg .detail { display: block; margin-top: var(--s2); color: var(--faint); font: 400 var(--t-micro)/1.4 var(--mono); overflow-wrap: anywhere; }
 .notice .icon-btn { width: 24px; height: 24px; font-size: 12px; }
 
 .maplibregl-ctrl-attrib { font-size: 10px; }
@@ -237,7 +241,9 @@ h4 { margin: var(--s4) 0 var(--s2); }
 .tabpanel .card h4:first-child { margin-top: 0; }
 .empty { text-align: center; padding: var(--s5) var(--s3); color: var(--muted); }
 .empty svg { width: 34px; height: 34px; stroke: var(--line-strong); fill: none; stroke-width: 1.5; margin-bottom: var(--s2); }
-.empty p { margin: 0 0 var(--s2); font-size: var(--t-sm); }
+.empty p { margin: 0 0 var(--s2); font-size: var(--t-sm); max-width: 34ch; margin-inline: auto; }
+.empty p b { color: var(--ink); font-weight: 600; }
+.tabpanel:focus-visible { outline-offset: -2px; }
 
 .kv { display: flex; justify-content: space-between; gap: var(--s3); font-variant-numeric: tabular-nums; padding: 3px 0; }
 .kv span { color: var(--muted); font-size: var(--t-sm); flex: none; }

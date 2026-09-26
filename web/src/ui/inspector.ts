@@ -1,5 +1,6 @@
 import { fmtHM, type Store } from '../state'
 import { CLASS_NAMES, CLASS_VARS, WIFI_CLASSES, classOf, cssVar, qClass } from '../sim/classify'
+import { arrowNav } from './a11y'
 
 const $ = (id: string) => document.getElementById(id)!
 const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
@@ -17,6 +18,7 @@ export function envText(store: Store, i: number): string {
 export function initInspector(store: Store) {
   const tabs = document.querySelectorAll<HTMLButtonElement>('.tab')
   tabs.forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab!)))
+  arrowNav([...tabs], 'horizontal', b => showTab(b.dataset.tab!))
   const s = store.state
   const host = $('liveLinks'); host.innerHTML = ''
   const rows: Record<string, { nm: HTMLElement; cls: HTMLElement; fill: HTMLElement; val: HTMLElement }> = {}
@@ -60,7 +62,10 @@ export function initInspector(store: Store) {
 }
 
 export function showTab(name: string) {
-  document.querySelectorAll<HTMLButtonElement>('.tab').forEach(t => t.classList.toggle('on', t.dataset.tab === name))
+  document.querySelectorAll<HTMLButtonElement>('.tab').forEach(t => {
+    const on = t.dataset.tab === name
+    t.classList.toggle('on', on); t.setAttribute('aria-selected', String(on)); t.tabIndex = on ? 0 : -1
+  })
   for (const id of ['live', 'sample', 'train', 'sources']) (document.getElementById(`tab-${id}`) as HTMLElement).hidden = id !== name
 }
 

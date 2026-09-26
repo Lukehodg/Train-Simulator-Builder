@@ -9,6 +9,7 @@ import { parityReport, simulate } from './sim/model'
 import { Store, fmtClock, type State } from './state'
 import { initInspector } from './ui/inspector'
 import { initRail } from './ui/rail'
+import { trapTab } from './ui/a11y'
 import { setSimState } from './ui/status'
 import { initTimeline } from './ui/timeline'
 import { applyDesign, derive, designFromMeta, MAX_PROJECT_BYTES, parseProject, renderDesign, type TrainDesign } from './train'
@@ -26,8 +27,11 @@ async function main() {
   try { data = await loadRoute(routeId) } catch (e) {
     setSimState('error')
     for (const id of ['play', 'btnExport']) ($(id) as HTMLButtonElement).disabled = true
-    ;($('routePick') as HTMLSelectElement).innerHTML = `<option>${routeId}</option>`
-    showNotice(`Could not load route "${routeId}". ${String((e as Error).message)}`, true)
+    const pick = $('routePick') as HTMLSelectElement
+    pick.innerHTML = ''; pick.append(new Option(routeId)); pick.disabled = true
+    const other = routeId !== CONFIG.defaultRoute
+    showNotice(`Could not load the route "${routeId}": its data bundle is missing or unreadable. Build it with tcs run --route ${routeId}${other ? ', or open the default route.' : '.'}`, true,
+      other ? { label: 'Open the default route', href: `?route=${encodeURIComponent(CONFIG.defaultRoute)}` } : undefined, String((e as Error).message))
     return
   }
   const meta = data.meta
@@ -105,10 +109,12 @@ async function main() {
     if (sc.weather !== 'nominal') bits.push(sc.weather)
     $('scenarioSummary').textContent = bits.join(' · ')
   }
-  const setPopover = (open: boolean) => {
+  const setPopover = (open: boolean, returnFocus = false) => {
+    if (pop.hidden === !open) return
     pop.hidden = !open
     pill.setAttribute('aria-expanded', String(open))
-    if (open) { const r = pill.getBoundingClientRect(); pop.style.right = `${Math.max(8, innerWidth - r.right)}px` }
+    if (open) { const r = pill.getBoundingClientRect(); pop.style.right = `${Math.max(8, innerWidth - r.right)}px`; ($('preset') as HTMLElement).focus() }
+    else if (returnFocus) pill.focus()
   }
   pill.addEventListener('click', e => { e.stopPropagation(); setPopover(pop.hidden) })
   pop.addEventListener('click', e => e.stopPropagation())
@@ -159,9 +165,14 @@ async function main() {
   // Any layout change (rail panel, inspector) needs the map and the timeline to re-measure.
   window.addEventListener('tls-layout', () => setTimeout(() => { mapCtx.map.resize(); timeline.redraw() }, 30))
   $('btnTheme').addEventListener('click', () => { const t = store.state.theme === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = t; try { localStorage.setItem('tls-theme', t) } catch {} store.set({ theme: t }) })
-  $('btnHelp').addEventListener('click', () => { renderHelp(); ($('help') as HTMLElement).hidden = false })
-  $('helpClose').addEventListener('click', () => { ($('help') as HTMLElement).hidden = true })
-  $('help').addEventListener('click', e => { if (e.target === $('help')) ($('help') as HTMLElement).hidden = true })
+  const help = $('help') as HTMLElement
+  let helpReturn: HTMLElement | null = null
+  const openHelp = () => { renderHelp(); helpReturn = document.activeElement as HTMLElement | null; help.hidden = false; ($('helpClose') as HTMLElement).focus() }
+  const closeHelp = () => { if (help.hidden) return; help.hidden = true; helpReturn?.focus() }
+  help.addEventListener('keydown', trapTab(help.querySelector('.modal-card') as HTMLElement))
+  $('btnHelp').addEventListener('click', openHelp)
+  $('helpClose').addEventListener('click', closeHelp)
+  help.addEventListener('click', e => { if (e.target === help) closeHelp() })
   if (innerWidth < 1100) { $('app').dataset.panel = 'none'; for (const b of document.querySelectorAll('.rail-btn')) b.setAttribute('aria-selected', 'false') }
   if (innerWidth < 900) { $('app').dataset.inspector = 'closed'; $('btnInspector').setAttribute('aria-pressed', 'false') }
 
@@ -206,7 +217,8 @@ async function main() {
   jump.innerHTML = '<option value="">station…</option>' + meta.stations.map((s, k) => `<option value="${k}">${s.name}</option>`).join('')
   jump.addEventListener('change', () => { const s = meta.stations[Number(jump.value)]; if (s) seek(Math.max(0, data.t[s.sample_id] - 30)); jump.value = '' })
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { ($('help') as HTMLElement).hidden = true; setPopover(false); return }
+    if (e.key === 'Escape') { closeHelp(); setPopover(false, true); return }
+    if (!help.hidden) return                                  // the dialog is modal: no app shortcuts behind it
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
     if (e.ctrlKey || e.metaKey || e.altKey) return
     const step = e.shiftKey ? 600 : 60, rates = speedBtns.map(b => Number(b.dataset.v)), k = rates.indexOf(store.state.speed)
@@ -218,7 +230,7 @@ async function main() {
     else if (e.key === 'Home') { e.preventDefault(); seek(0) }
     else if (e.key === 'End') { e.preventDefault(); seek(meta.duration_s) }
     else if (e.key === 'i' || e.key === 'I') $('btnInspector').click()
-    else if (e.key === '?') { renderHelp(); ($('help') as HTMLElement).hidden = false }
+    else if (e.key === '?') openHelp()
   })
   renderState()
   renderKpis(store, baselineSim)
@@ -290,7 +302,13 @@ function exportScenario(store: Store) {
 
 function tipStyle() { return { background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: '6px', padding: '6px 8px', fontFamily: 'var(--body)', fontSize: '12px', boxShadow: 'var(--shadow)' } }
 
-function showNotice(msg: string, error = false) { const n = $('notice'); $('noticeMsg').textContent = msg; n.classList.toggle('error', error); n.hidden = false }
+function showNotice(msg: string, error = false, action?: { label: string; href: string }, detail?: string) {
+  const n = $('notice'), m = $('noticeMsg')
+  m.textContent = msg
+  if (action) { const a = document.createElement('a'); a.className = 'btn'; a.href = action.href; a.textContent = action.label; m.append(document.createElement('br'), a) }
+  if (detail) { const d = document.createElement('small'); d.className = 'detail'; d.textContent = `Details: ${detail}`; m.append(d) }
+  n.classList.toggle('error', error); n.hidden = false
+}
 $('noticeClose').addEventListener('click', () => { $('notice').hidden = true })
 
 function kpiStats(store: Store, sim: SimResult) {
@@ -328,7 +346,7 @@ function renderHelp() {
     <p>A time-aware simulation of onboard connectivity for one train service: every 50 m along the real railway the model estimates each cellular operator and the satcom link, runs the onboard link manager, and predicts the passenger Wi-Fi experience.</p>
     <ul>
       <li><b>Ribbons</b>: centre = combined Wi-Fi after the selected policy; lanes to the right = each cellular operator; the floating lane = satcom. Colour follows the selected metric; class names are always shown in the inspector and tooltips so colour is never the only signal.</li>
-      <li><b>Sky window</b>: the disc above the train scales with the satcom sky-visibility score from the DEM horizon; red means no session (tunnel, canopy, deep cutting).</li>
+      <li><b>Sky window</b>: the disc above the train scales with the satcom sky-visibility score from the DEM horizon; in the outage colour there is no session (tunnel, canopy, deep cutting).</li>
       <li><b>Train and surroundings</b>: the consist follows the loaded Train Studio design (roof units included); rails, catenary, 3D buildings and woodland trees come from the basemap's own vector tiles, so they are real footprints but schematic heights.</li>
       <li><b>Scenario controls</b> re-run the link manager and Wi-Fi model in the browser; the Python pipeline produced the per-link base estimates.</li>
       <li><b>Confidence</b>: switch the colouring to Confidence to see how much of the route rests on measured, predicted or synthetic inputs.</li>
