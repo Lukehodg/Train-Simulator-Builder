@@ -6,7 +6,7 @@ import requests
 from rich.console import Console
 from shapely.geometry import LineString
 
-from tcs.geo import Projector, bearings, local_crs, offset_xy, sample_line
+from tcs.geo import Projector, local_crs, offset_xy, sample_line
 from tcs.model.calibration import fit
 from tcs.sources import base
 from tcs.sources.base import SourceUnavailable, http_get, redact

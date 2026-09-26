@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .config import ROOT, Settings
+from .config import Settings
 
 WIFI_CLASSES = ["EXCELLENT", "GOOD", "USABLE", "POOR", "OUTAGE"]
 CLASS_COLORS = {"EXCELLENT": "#1e7d3e", "GOOD": "#3f9a52", "USABLE": "#c9a100", "POOR": "#d6531a", "OUTAGE": "#9c1b2c"}
@@ -211,7 +211,7 @@ def write_docx(path: Path, settings: Settings, meta: dict, k: dict, sec: pd.Data
         return t
 
     route = meta["route"]
-    h = doc.add_heading(f"Onboard connectivity performance evidence", 0)
+    doc.add_heading("Onboard connectivity performance evidence", 0)
     doc.add_paragraph(f"{route['name']} · {meta['stations'][0]['name']} → {meta['stations'][-1]['name']} · {k['route_length_km']} km · {int(k['journey_minutes'])} min")
     p = doc.add_paragraph(); r = p.add_run(f"Scenario: {scenario_label}"); r.bold = True
     doc.add_paragraph(f"Generated {datetime.now(timezone.utc).strftime('%d %B %Y %H:%M UTC')} · model version {meta['model_version']} · sample spacing {route['sample_spacing_m']} m ({meta['n_samples']:,} samples)")

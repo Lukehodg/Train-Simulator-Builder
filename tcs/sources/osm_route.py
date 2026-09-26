@@ -14,7 +14,7 @@ from pathlib import Path
 import networkx as nx
 import numpy as np
 import pandas as pd
-from shapely.geometry import LineString, Point, MultiPoint
+from shapely.geometry import LineString
 
 from ..geo import Projector, local_crs
 from .base import Provenance, SourceUnavailable, http_get, now_iso

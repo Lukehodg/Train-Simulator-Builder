@@ -11,7 +11,6 @@ CLASSES = ["EXCELLENT", "GOOD", "USABLE", "POOR", "OUTAGE"]
 
 def passenger_wifi(settings: Settings, samples: pd.DataFrame, wan: pd.DataFrame) -> pd.DataFrame:
     cfg = settings.sim["passenger_wifi"]
-    n = len(wan)
     km = samples["distance_m"].values / 1000.0
     lo, hi = cfg["load_factor_range"]
     load = lo + (hi - lo) * (0.5 + 0.5 * np.sin(km / 90.0))          # load varies along the journey (boarding/alighting)
