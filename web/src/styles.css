@@ -18,7 +18,7 @@
   /* ---- neutrals (light) */
   --bg: #e8ecf0; --surface: #ffffff; --surface-2: #f4f6f8; --surface-3: #e9eef2; --surface-4: #dde3e9;
   --line: #dde3e9; --line-strong: #c3ccd5;
-  --ink: #0e1318; --muted: #4d5965; --faint: #66727e;
+  --ink: #0e1318; --muted: #4d5965; --faint: #5d6975;
   /* ---- accent: interactive state, focus, the "now" cursor */
   --accent: #00707c; --accent-ink: #ffffff; --accent-soft: #e2f3f4; --accent-line: #9fd3d7;
   --danger: #c42b2b; --danger-soft: #fbe9e9;
@@ -386,9 +386,16 @@ h4 { margin: var(--s4) 0 var(--s2); }
 
 /* ---------------------------------------------------------------------------------------- responsive */
 @media (max-width: 1440px) { .route-meta { display: none; } }
-@media (max-width: 1360px) { .kpi:nth-child(n+5) { display: none; } .hud-env { display: none; } }
-@media (max-width: 1240px) { :root { --inspector-w: 280px; --panel-w: 216px; } .brand-name span { display: none; } .kpi:nth-child(n+4) { display: none; } .scenario-pill { max-width: 280px; } }
+@media (max-width: 1360px) { .kpis .kpi:nth-child(n+5) { display: none; } .hud-env { display: none; } }
+@media (max-width: 1240px) { :root { --inspector-w: 280px; --panel-w: 216px; } .brand-name span { display: none; } .kpis .kpi:nth-child(n+4) { display: none; } .scenario-pill { max-width: 280px; } }
 @media (max-width: 1100px) { .kpis, .jump { display: none; } .btn-label { display: none; } .scenario-pill .k { display: none; } }
+/* Live-tab copy of the KPI tiles: shows exactly the tiles the dock has dropped at this width, so each figure appears once */
+.kpi-card { display: none; }
+.kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+.kpi-grid .kpi { border: none; padding: 0; }
+@media (max-width: 1360px) { .kpi-card { display: block; } .kpi-grid .kpi:nth-child(-n+4) { display: none; } }
+@media (max-width: 1240px) { .kpi-grid .kpi:nth-child(4) { display: block; } }
+@media (max-width: 1100px) { .kpi-grid .kpi:nth-child(-n+3) { display: block; } }
 @media (max-width: 900px) {
   :root { --dock-h: clamp(164px, 20vh, 184px); }   /* no KPI strip here, so the transport row is shorter */
   .app { grid-template-columns: var(--icons-w) minmax(0, 1fr); grid-template-areas: "bar bar" "icons stage" "dock dock"; }

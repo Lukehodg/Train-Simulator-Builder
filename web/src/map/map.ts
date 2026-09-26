@@ -33,7 +33,9 @@ export function createMap(container: HTMLElement, data: RouteData, theme: 'light
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')
   map.addControl(new maplibregl.ScaleControl({ maxWidth: 120 }), 'bottom-left')
   const lighting = new LightingEffect({ ambient: new AmbientLight({ color: [255, 255, 255], intensity: 1.5 }), sun: new DirectionalLight({ color: [255, 250, 240], intensity: 1.3, direction: [-1, -2, -2.5] }) })
-  const overlay = new MapboxOverlay({ interleaved: false, layers: [], getTooltip, effects: [lighting], onError: (e: Error) => console.warn('[deck-error]', e.stack) })
+  const overlay = new MapboxOverlay({ interleaved: false, layers: [], getTooltip, effects: [lighting], onError: (e: Error) => console.warn('[deck-error]', e.stack),
+    // deck.gl makes its canvas a tab stop for its own keyboard controller, but MapLibre owns the camera here: drop the empty, unnamed stop
+    onLoad: () => map.getContainer().querySelector<HTMLElement>('#deckgl-overlay')?.setAttribute('tabindex', '-1') })
   map.addControl(overlay as any)
 
   const ctx: MapCtx = {

@@ -7,7 +7,7 @@ import { buildRuns, cellLayers, labelFontReady, ribbonLayers, stationLayers, tra
 import { setBuildings, trackLayers, treeLayer } from './map/environment'
 import { parityReport, simulate } from './sim/model'
 import { Store, fmtClock, type State } from './state'
-import { initInspector } from './ui/inspector'
+import { initInspector, showTab } from './ui/inspector'
 import { initRail } from './ui/rail'
 import { trapTab } from './ui/a11y'
 import { setSimState } from './ui/status'
@@ -23,9 +23,13 @@ async function main() {
   try { const saved = localStorage.getItem('tls-theme'); if (saved === 'light' || saved === 'dark') theme = saved } catch {}
   document.documentElement.dataset.theme = theme
   setSimState('loading')
+  // small-screen layout first, so a load error isn't hidden behind an open panel
+  if (innerWidth < 1100) { $('app').dataset.panel = 'none'; for (const b of document.querySelectorAll('.rail-btn')) b.setAttribute('aria-selected', 'false') }
+  if (innerWidth < 900) { $('app').dataset.inspector = 'closed'; $('btnInspector').setAttribute('aria-pressed', 'false') }
   let data: RouteData
   try { data = await loadRoute(routeId) } catch (e) {
     setSimState('error')
+    $('liveLinks').innerHTML = '<p class="hint" style="margin:0">No route loaded.</p>'   // not a loading skeleton
     for (const id of ['play', 'btnExport']) ($(id) as HTMLButtonElement).disabled = true
     const pick = $('routePick') as HTMLSelectElement
     pick.innerHTML = ''; pick.append(new Option(routeId)); pick.disabled = true
@@ -174,8 +178,6 @@ async function main() {
   $('btnHelp').addEventListener('click', openHelp)
   $('helpClose').addEventListener('click', closeHelp)
   help.addEventListener('click', e => { if (e.target === help) closeHelp() })
-  if (innerWidth < 1100) { $('app').dataset.panel = 'none'; for (const b of document.querySelectorAll('.rail-btn')) b.setAttribute('aria-selected', 'false') }
-  if (innerWidth < 900) { $('app').dataset.inspector = 'closed'; $('btnInspector').setAttribute('aria-pressed', 'false') }
 
   // ---- map ------------------------------------------------------------------------------------
   const tooltip = (info: PickingInfo) => {
@@ -231,6 +233,10 @@ async function main() {
     else if (e.key === 'Home') { e.preventDefault(); seek(0) }
     else if (e.key === 'End') { e.preventDefault(); seek(meta.duration_s) }
     else if (e.key === 'i' || e.key === 'I') $('btnInspector').click()
+    else if (e.key === 's' || e.key === 'S') {                 // keyboard route to the Inspect tab (the timeline and ribbons are pointer-only)
+      if ($('app').dataset.inspector === 'closed') $('btnInspector').click()
+      store.set({ selected: indexAtTime(data.t, store.state.t) }); showTab('sample')   // shown even when that sample was already selected
+    }
     else if (e.key === 'c' || e.key === 'C') { const views: CameraMode[] = ['chase', 'oblique', 'free', 'route']; store.set({ camera: views[(views.indexOf(store.state.camera) + 1) % views.length] }) }
     else if (e.key === '?') openHelp()
   })
@@ -343,7 +349,7 @@ function renderKpis(store: Store, baseline?: SimResult) {
     tile('Handovers', String(ho), '', ''),
     tile('Confidence', s.conf.toFixed(2), '', ''),
   ]
-  $('kpis').innerHTML = kp.join('')
+  $('kpis').innerHTML = $('kpisPanel').innerHTML = kp.join('')   // dock strip + the Live-tab copy used on narrower screens
 }
 
 function renderHelp() {
@@ -355,7 +361,7 @@ function renderHelp() {
       <li><b>Train and surroundings</b>: the consist follows the loaded Train Studio design (roof units included); rails, catenary, 3D buildings and woodland trees come from the basemap's own vector tiles, so they are real footprints but schematic heights.</li>
       <li><b>Scenario controls</b> re-run the link manager and Wi-Fi model in the browser; the Python pipeline produced the per-link base estimates.</li>
       <li><b>Confidence</b>: switch the colouring to Confidence to see how much of the route rests on measured, predicted or synthetic inputs.</li>
-      <li><b>Keys</b>: <kbd>Space</kbd> play / pause · <kbd>←</kbd> <kbd>→</kbd> ±1 min (<kbd>Shift</kbd> ±10 min) · <kbd>[</kbd> <kbd>]</kbd> playback rate · <kbd>Home</kbd> <kbd>End</kbd> start / end · <kbd>I</kbd> inspector · <kbd>C</kbd> camera view · <kbd>?</kbd> this help · <kbd>Esc</kbd> close. Drag the map to take the camera.</li>
+      <li><b>Keys</b>: <kbd>Space</kbd> play / pause · <kbd>←</kbd> <kbd>→</kbd> ±1 min (<kbd>Shift</kbd> ±10 min) · <kbd>[</kbd> <kbd>]</kbd> playback rate · <kbd>Home</kbd> <kbd>End</kbd> start / end · <kbd>I</kbd> inspector · <kbd>S</kbd> inspect the sample at the train · <kbd>C</kbd> camera view · <kbd>?</kbd> this help · <kbd>Esc</kbd> close. Drag the map to take the camera.</li>
     </ul>
     <p>Predictions, not measurements. Ofcom coverage is operator-predicted; OpenCellID is community data; Starlink has no public route-level telemetry. See the Sources tab for what is live in this bundle.</p>`
 }

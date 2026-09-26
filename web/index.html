@@ -183,13 +183,19 @@
           </div>
         </div>
       </section>
+
+      <!-- the KPI tiles the dock has no room for at this width (all of them on tablets); hidden when the dock shows them all -->
+      <section class="card kpi-card">
+        <h4>Whole route</h4>
+        <div class="kpi-grid" id="kpisPanel"></div>
+      </section>
     </div>
 
     <div class="tabpanel" id="tab-sample" role="tabpanel" aria-labelledby="tabbtn-sample" tabindex="0" hidden>
       <div class="empty" id="sampleHint">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5M11 8v6M8 11h6"/></svg>
         <p><b>No sample selected</b></p>
-        <p>Click a ribbon on the map, or a point on the timeline, to inspect one 50 m sample: each link's values, the estimated serving cell, satellite obstruction, data sources and the reasoning behind every number.</p>
+        <p>Click a ribbon on the map or a point on the timeline (or press <kbd>S</kbd> for the train's position) to inspect one 50 m sample: each link's values, the estimated serving cell, satellite obstruction, data sources and the reasoning behind every number.</p>
       </div>
       <div id="sampleBody"></div>
     </div>

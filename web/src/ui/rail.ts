@@ -29,10 +29,15 @@ export function initRail(store: Store) {
     app.dataset.panel = next
     for (const btn of document.querySelectorAll<HTMLElement>('.rail-btn')) btn.setAttribute('aria-selected', String(btn.dataset.panel === next))
     for (const sec of document.querySelectorAll<HTMLElement>('.panel-section')) sec.classList.toggle('on', sec.dataset.panel === next)
+    rovingTabs()
     window.dispatchEvent(new Event('tls-layout'))
   })
 
-  arrowNav([...document.querySelectorAll<HTMLElement>('.rail-btn')], 'vertical')
+  // one tab stop for the whole rail (the selected icon, or the first when every panel is closed); arrows move within it
+  const railBtns = [...document.querySelectorAll<HTMLElement>('.rail-btn')]
+  const rovingTabs = () => { const sel = railBtns.find(b => b.getAttribute('aria-selected') === 'true') ?? railBtns[0]; railBtns.forEach(b => { b.tabIndex = b === sel ? 0 : -1 }) }
+  arrowNav(railBtns, 'vertical', b => { b.tabIndex = 0; railBtns.forEach(x => { if (x !== b) x.tabIndex = -1 }) })
+  rovingTabs()
 
   // ---- links ---------------------------------------------------------------------------------
   const list = $('linkList')
