@@ -67,12 +67,13 @@ def movement(settings: Settings, samples: pd.DataFrame, stations: pd.DataFrame) 
     next_station = np.full(n, None, dtype=object)
     ttn = np.zeros(n, dtype=np.float32)
     order = stops.sort_values("distance_m")
-    for j in range(n):
-        nxt = order[order["sample_id"] > j]
-        if len(nxt):
-            k = int(nxt.iloc[0]["sample_id"])
-            next_station[j] = nxt.iloc[0]["crs"]
-            ttn[j] = t[k] - t[j]
+    # sample_id is non-decreasing along the sorted stops, so the next stop after sample j is the first with id > j.
+    stop_ids = order["sample_id"].to_numpy(dtype=np.int64)
+    pos = np.searchsorted(stop_ids, np.arange(n), side="right")
+    has_next = pos < len(stop_ids)
+    nxt = pos[has_next]
+    next_station[has_next] = order["crs"].to_numpy()[nxt]
+    ttn[has_next] = t[stop_ids[nxt]] - t[has_next]
     out = samples.copy()
     out["speed_kph"] = (np.minimum(v_eff, vmax) * 3.6).astype(np.float32)
     out["timestamp_sim"] = ts

@@ -92,3 +92,55 @@ def test_handset_profile_is_worse(pipeline):
     a = obs[obs["provider_type"] == "cellular"]["capacity_mbps"].mean()
     b_ = obs2[obs2["provider_type"] == "cellular"]["capacity_mbps"].mean()
     assert b_ < a
+
+
+def test_next_station_is_first_stop_ahead(pipeline):
+    _, b, stations, *_ = pipeline
+    stops = stations[stations["stop"]].sort_values("distance_m")
+    t = b.samples["sim_seconds"].values
+    for j in range(len(b.samples)):
+        ahead = stops[stops["sample_id"] > j]
+        if len(ahead):
+            k = int(ahead.iloc[0]["sample_id"])
+            assert b.samples["next_station"].iat[j] == ahead.iloc[0]["crs"]
+            assert b.samples["time_to_next_station_s"].iat[j] == pytest.approx(t[k] - t[j], rel=1e-6)
+        else:
+            assert pd.isna(b.samples["next_station"].iat[j])
+
+
+def test_calibrate_twice_keeps_calibration(pipeline, tmp_path, monkeypatch):
+    """`tcs calibrate` after a calibrated `tcs run` must reproduce the same fit, not measure (and save) the residual."""
+    from typer.testing import CliRunner
+
+    from tcs import config
+    from tcs.cli import app
+    from tcs.model.calibration import load
+    from tcs.pipeline.sample_route import save_bundle
+
+    s, b, _, prior, serving, obs, _ = pipeline
+    for name in ("RAW", "INTERIM", "PROCESSED"):
+        monkeypatch.setattr(config, name, tmp_path / name.lower())
+    interim, processed = tmp_path / "interim" / s.route_id, tmp_path / "processed" / s.route_id
+    save_bundle(b, interim)
+    prior.to_parquet(interim / "coverage_prior.parquet", index=False)
+    serving.to_parquet(interim / "serving.parquet", index=False)
+    processed.mkdir(parents=True)
+    obs.to_parquet(processed / "provider_observation.parquet", index=False)      # an uncalibrated `tcs run`
+
+    # Survey says EE is 0.1 worse in score space than predicted.
+    ee = obs[(obs["provider_id"] == "ee") & (obs["reason_code"] != "TUNNEL")].merge(b.samples[["sample_id", "latitude", "longitude"]], on="sample_id")
+    r = s.sim["cellular"]["rsrp_dbm"]
+    rsrp = r["at_zero"] + (r["at_one"] - r["at_zero"]) * np.clip(ee["quality_score"] - 0.1, 0, 1)
+    csv = tmp_path / "survey.csv"
+    pd.DataFrame({"latitude": ee["latitude"], "longitude": ee["longitude"], "rsrp": rsrp, "mcc": 234, "mnc": 30}).to_csv(csv, index=False)
+
+    args = ["calibrate", str(csv), "--route", s.route_id]
+    res = CliRunner().invoke(app, args)
+    assert res.exit_code == 0, res.output
+    bias1 = load(interim / "calibration.json")["bias"]["ee"]
+    assert abs(bias1 + 0.1) < 0.02
+    obs_cal, _ = simulate(s, b.samples, prior, serving, calibration=load(interim / "calibration.json"))
+    obs_cal.to_parquet(processed / "provider_observation.parquet", index=False)  # `tcs run` again, now calibrated
+    res = CliRunner().invoke(app, args)
+    assert res.exit_code == 0, res.output
+    assert load(interim / "calibration.json")["bias"]["ee"] == pytest.approx(bias1)

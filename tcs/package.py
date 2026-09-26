@@ -73,11 +73,16 @@ Build: {built}  |  model version {model_version}  |  routes: {routes}
 
 def build_web(web_dir: Path) -> Path:
     """npm run build -> web/dist (includes public/: data bundles, Train Builder, examples)."""
+    # Resolve the executable instead of using shell=True: with a list argv, POSIX shells run a bare `npm` and drop
+    # the arguments. which() finds npm.cmd on Windows, so no shell is needed on any platform.
+    npm = shutil.which("npm")
+    if npm is None:
+        raise RuntimeError("npm not found: install Node.js, or pass --skip-build to package an existing web/dist")
     if not (web_dir / "node_modules").exists():
         console.log("installing web dependencies (npm install)…")
-        subprocess.run(["npm", "install"], cwd=web_dir, check=True, shell=True)
+        subprocess.run([npm, "install"], cwd=web_dir, check=True)
     console.log("building the viewer (npm run build)…")
-    subprocess.run(["npm", "run", "build"], cwd=web_dir, check=True, shell=True)
+    subprocess.run([npm, "run", "build"], cwd=web_dir, check=True)
     dist = web_dir / "dist"
     if not (dist / "index.html").exists():
         raise RuntimeError("web build produced no index.html")

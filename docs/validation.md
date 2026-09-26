@@ -6,6 +6,9 @@ tcs run                                                                  # appli
 tcs validate data/raw/measurements/drive.csv --preset ofcom_drive --section-km 10
 ```
 
+Both commands take `--route <route_id>` (default: `config/route.yaml`). `calibrate` always fits against the
+uncalibrated model, so re-running it on the same measurements reproduces the same `calibration.json`.
+
 Metrics reported per operator and 10 km section (`data/processed/<route>/validation_by_section.csv`):
 
 | metric | definition |

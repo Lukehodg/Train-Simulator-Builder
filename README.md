@@ -46,7 +46,8 @@ sites live. `docs/data-sources.md` explains every feed, its adapter, its fallbac
 7. **Export** – `route_samples`, long-form `provider_observation`, `route_connectivity` (Parquet), GeoJSON,
    and the web bundle (`route.arrow` + `meta.json`).
 
-Then `tcs calibrate <measurements.csv>` and `tcs validate <measurements.csv>` close the loop with real data.
+Then `tcs calibrate <measurements.csv>` and `tcs validate <measurements.csv>` close the loop with real data (both take
+`--route <route_id>`; the default is `config/route.yaml`).
 
 Two optional inputs shape the onboard side:
 
