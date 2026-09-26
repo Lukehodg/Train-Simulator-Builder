@@ -6,7 +6,8 @@ someone is using it. So hosting it "with live feeds" means two pieces:
 - **GitHub Actions** (`.github/workflows/publish.yml`) rebuilds all 18 routes from the live feeds on the 1st of each
   month, or whenever you run it by hand, then publishes the result. Your API keys live only there, as GitHub secrets.
   GitHub's machines have open internet, so OpenStreetMap works and every route gets its exact track line.
-- **Cloudflare Pages** serves the site, and **Cloudflare Access** decides who can open it. Colleagues open the link,
+- **Cloudflare** serves the site (a Workers static-assets site, configured in `wrangler.jsonc`; Cloudflare Pages now
+  lives inside Workers), and **Cloudflare Access** decides who can open it. Colleagues open the link,
   enter their work email and type the one-time code Cloudflare emails them. No company sign-in integration is needed.
 
 Everything below is free: Cloudflare Access for up to 50 users, and a monthly rebuild (about 2-3.5 hours) fits
@@ -17,25 +18,23 @@ dashboard wording from time to time, so a label may differ slightly from what is
 
 ## 1. Create a Cloudflare account and note two values
 
-1. Sign up at <https://dash.cloudflare.com/sign-up> (free plan).
-2. **Account ID:** in the dashboard, open **Workers & Pages**; the Account ID is in the right-hand column
-   (or use the **...** menu next to your account name and choose **Copy account ID**). Keep it for step 4.
-3. **API token:** click your profile icon (top right) → **My Profile** → **API Tokens** → **Create Token** →
-   **Create Custom Token**.
+1. Sign up at <https://dash.cloudflare.com/sign-up> (free plan). Open **Zero Trust** once, pick a team name and
+   the **Free** plan (it may ask for a card; you are not charged for up to 50 users).
+2. **Account ID:** in the dashboard, open **Workers & Pages**; the Account ID is in the right-hand column. Keep it
+   for step 4.
+3. **API token:** **Manage Account** → **Account API Tokens** → **Create Token** → **Custom token**.
    - Token name: `Train Link Simulator publish`
-   - Permissions: **Account** → **Cloudflare Pages** → **Edit**
-   - Account Resources: **Include** → your account
-   - **Continue to summary** → **Create Token**, then copy the token. It is shown only once; keep it for step 4.
+   - Permissions: **Account** → **Workers Scripts** → **Edit** (that is all the monthly publish needs)
+   - Copy the token when it is shown; it is shown only once. Keep it for step 4 and do not paste it anywhere else.
 
-## 2. Create the (empty) site to get its address
+## 2. Create the site with a placeholder to get its address
 
-1. **Workers & Pages** → **Create** → **Pages** → **Upload assets** (direct upload).
-2. Project name: `train-link-simulator`. This must match `PAGES_PROJECT` in the workflow; if you choose another
-   name, change it there too.
-3. Upload a placeholder: on your computer make a folder containing one file called `index.html` with the text
-   `Coming soon`, drag the folder in and click **Deploy site**.
-4. Note the address Cloudflare gives the site, for example `https://train-link-simulator.pages.dev`. If that name
-   was taken, Cloudflare adds a suffix; use whatever address it shows.
+The address is `https://train-link-simulator.<your-workers-subdomain>.workers.dev`. The name comes from
+`wrangler.jsonc`; your workers subdomain is shown under **Workers & Pages** (you choose it the first time).
+
+1. **Workers & Pages** → **Create** → **Upload static files** (or **Start with Hello World** and replace it), and
+   name it exactly `train-link-simulator`. A single `index.html` saying `Coming soon` is enough.
+2. Note the address Cloudflare shows for it.
 
 ## 3. Lock the site to your colleagues (Cloudflare Access)
 
@@ -44,8 +43,9 @@ dashboard wording from time to time, so a label may differ slightly from what is
 2. **Access** → **Applications** → **Add an application** → **Self-hosted**.
 3. Application name: `Train Link Simulator`. Session duration: `1 month` is friendly (colleagues re-enter a code
    once a month), or keep the default 24 hours.
-4. Application domain: the site address from step 2 without `https://`, e.g. `train-link-simulator.pages.dev`.
-   Add a second domain `*.train-link-simulator.pages.dev` so preview copies of the site are locked too.
+4. Application domain: the site address from step 2 without `https://`, e.g.
+   `train-link-simulator.yourname.workers.dev`. (`wrangler.jsonc` switches off Cloudflare's per-version preview
+   addresses, so this one address is the only way in.)
 5. Add a policy:
    - Name: `Colleagues`, Action: **Allow**
    - Include → **Emails ending in** → `@yourcompany.com` (everyone at work), or **Emails** → list specific people
@@ -61,7 +61,7 @@ In the GitHub repository: **Settings** → **Secrets and variables** → **Actio
 |---|---|
 | `OFCOM_API_KEY` | from your `.env` |
 | `OPENCELLID_TOKEN` | from your `.env` |
-| `CLOUDFLARE_API_TOKEN` | the token from step 1 |
+| `CLOUDFLARE_API_TOKEN` | the token from step 1 (Workers Scripts → Edit) |
 | `CLOUDFLARE_ACCOUNT_ID` | the Account ID from step 1 |
 
 Secrets are write-only: nobody, including you, can read them back from GitHub, and they never reach the site.

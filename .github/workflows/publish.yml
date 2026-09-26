@@ -1,11 +1,11 @@
 name: publish
 
-# Rebuilds every route from the live feeds and publishes the viewer to Cloudflare Pages, where Cloudflare Access
-# decides who can open it. Runs on the 1st of each month, and whenever you press "Run workflow" on the Actions tab.
+# Rebuilds every route from the live feeds and publishes the viewer to Cloudflare (a Workers static-assets site,
+# configured in wrangler.jsonc), where a Cloudflare Access application decides who can open it. Runs on the 1st of each month, and whenever you press "Run workflow" on the Actions tab.
 #
 # Needs four repository secrets (Settings -> Secrets and variables -> Actions); docs/hosting.md walks through them:
 #   OFCOM_API_KEY, OPENCELLID_TOKEN       the same keys as your local .env
-#   CLOUDFLARE_API_TOKEN                  a token with Account -> Cloudflare Pages -> Edit
+#   CLOUDFLARE_API_TOKEN                  a token with Account -> Workers Scripts -> Edit
 #   CLOUDFLARE_ACCOUNT_ID                 from the Cloudflare dashboard
 #
 # If any route fails to build, nothing is published and the previous version stays live.
@@ -21,9 +21,6 @@ permissions:
 concurrency:
   group: publish
   cancel-in-progress: false
-
-env:
-  PAGES_PROJECT: train-link-simulator
 
 jobs:
   publish:
@@ -96,11 +93,8 @@ jobs:
           npm ci
           npm run build
 
-      - name: Publish to Cloudflare Pages
+      - name: Publish to Cloudflare
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          # Creates the Pages project on the very first run; afterwards it already exists and this is a no-op.
-          npx --yes wrangler@4 pages project create "$PAGES_PROJECT" --production-branch main >/dev/null 2>&1 || true
-          npx --yes wrangler@4 pages deploy web/dist --project-name "$PAGES_PROJECT" --branch main --commit-dirty=true
+        run: npx --yes wrangler@4 deploy   # uploads web/dist as configured in wrangler.jsonc
