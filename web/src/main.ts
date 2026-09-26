@@ -3,7 +3,7 @@ import type { PickingInfo } from '@deck.gl/core'
 import { CONFIG } from './config'
 import { indexAtTime, loadRoute } from './data'
 import { createMap } from './map/map'
-import { buildRuns, cellLayers, ribbonLayers, stationLayers, trainLayers, type Run } from './map/layers'
+import { buildRuns, cellLayers, labelFontReady, ribbonLayers, stationLayers, trainLayers, type Run } from './map/layers'
 import { setBuildings, trackLayers, treeLayer } from './map/environment'
 import { parityReport, simulate } from './sim/model'
 import { Store, fmtClock, type State } from './state'
@@ -63,7 +63,7 @@ async function main() {
   $('provBadge').title = `Route ${meta.geometry_source} · terrain ${meta.terrain_source} · coverage ${meta.coverage_sources.join(', ') || 'synthetic'} · cells ${meta.cell_source} — click for detail`
   const parity = parityReport(data, sim)
   console.info(`[tls] parity vs Python default scenario: max bonded diff ${parity.maxBondedDiff.toFixed(2)} Mbps, class agreement ${(parity.classAgreement * 100).toFixed(1)} %`)
-  if (!realTerrain) showNotice('3D terrain is off: this bundle was built with synthetic elevation. Run `tcs run` online (Copernicus DEM is keyless) to enable it.')
+  if (!realTerrain) showNotice('3D terrain is off: this route was built with synthetic elevation. Rebuild it with tcs run (without --offline; the Copernicus DEM needs no key) to enable it.')
   // ---- scenario: presets, train design, manual overrides -------------------------------------
   // Baseline = pristine simulation.yaml (the bundle may have been produced with a preset or a train design applied).
   const baselineMeta: Meta = JSON.parse(JSON.stringify({ ...meta, sim: meta.sim_defaults ?? meta.sim }))
@@ -240,6 +240,7 @@ async function main() {
   // ---- reactive layer rebuilds ---------------------------------------------------------------
   let runs: Run[] = buildRuns(store.state, store.state.layers.terrain)
   let staticLayers = [...ribbonLayers(store.state, runs, i => { store.set({ selected: i, playing: false }); setPlayIcon() }), ...stationLayers(store.state, store.state.layers.terrain)]
+  labelFontReady.then(() => { const st = store.state; staticLayers = [...staticLayers.filter(l => !l.id.startsWith('station')), ...stationLayers(st, st.layers.terrain && realTerrain)] })   // pick up the bundled label face
   store.on((st, changed) => {
     if (changed.has('layers')) { mapCtx.setTerrain(st.layers.terrain && realTerrain); mapCtx.setLabels(st.layers.labels); setBuildings(mapCtx.map, st.layers.buildings, st.theme) }
     if (changed.has('theme')) { mapCtx.setTheme(st.theme); mapCtx.map.once('style.load', () => { mapCtx.setLabels(st.layers.labels); setBuildings(mapCtx.map, st.layers.buildings, st.theme) }) }
@@ -329,7 +330,9 @@ function renderKpis(store: Store, baseline?: SimResult) {
   const delta = (v: number, ref: number | undefined, unit: string, lowerIsBetter = false) => {
     if (ref == null || Math.abs(v - ref) < 0.05) return ''
     const d = v - ref; const good = lowerIsBetter ? d < 0 : d > 0
-    return `<small class="${good ? '' : 'neg'}" title="vs baseline">${d > 0 ? '+' : '−'}${Math.abs(d).toFixed(Math.abs(d) < 10 ? 1 : 0)}</small>`
+    const txt = `${d > 0 ? '+' : '−'}${Math.abs(d).toFixed(Math.abs(d) < 10 ? 1 : 0)}`, verdict = good ? 'better' : 'worse'
+    // better / worse is said in words (tooltip + screen reader), not by the tint alone
+    return `<small class="${good ? '' : 'neg'}" title="${txt} vs baseline (${verdict})">${txt}<span class="sr"> vs baseline, ${verdict}</span></small>`
   }
   const tile = (label: string, value: string, unit: string, delta: string) => `<div class="kpi"><span>${label}</span><b>${value}<u>${unit}</u>${delta}</b></div>`
   const kp = [

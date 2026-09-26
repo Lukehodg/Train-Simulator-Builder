@@ -44,7 +44,7 @@
   --r-ctl: var(--r-sm); --r-card: var(--r-md);
   --dur: 120ms;
   /* ---- layout */
-  --bar-h: 44px; --icons-w: 44px; --panel-w: 232px; --inspector-w: 300px; --dock-h: 168px;
+  --bar-h: 44px; --icons-w: 44px; --panel-w: 232px; --inspector-w: 300px; --dock-h: clamp(184px, 22vh, 216px);
   /* aliases kept for code that reads tokens at runtime (charts, deck.gl layers) */
   --text: var(--ink); --border: var(--line); --shadow: var(--shadow-2);
   color-scheme: light;
@@ -68,6 +68,7 @@
 /* ---------------------------------------------------------------------------------------- base */
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }   /* screen-reader-only text */
 html, body { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--ink); font: var(--t-body)/1.45 var(--body); overflow: hidden; -webkit-font-smoothing: antialiased; }
 button, select, input { font: inherit; color: inherit; }
@@ -124,6 +125,8 @@ h4 { margin: var(--s4) 0 var(--s2); }
 .scenario-pill .k { font: 600 var(--t-micro)/1 var(--display); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--muted); flex: none; }
 .scenario-pill .v { font-size: var(--t-sm); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .scenario-pill .chev { color: var(--muted); font-size: 9px; flex: none; }
+.popover .grp-h { margin: var(--s1) 0 0; padding: var(--s3) 0 0; }
+.pop-foot { margin: 0; padding-top: var(--s3); border-top: 1px solid var(--line); font-size: var(--t-micro); }
 .popover { position: absolute; top: calc(var(--bar-h) + 4px); z-index: 60; width: 304px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-card); box-shadow: var(--shadow-2); padding: var(--s4); display: grid; gap: var(--s3); }
 .field { display: grid; gap: 6px; }
 .field > span { font: 600 var(--t-micro)/1 var(--display); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--muted); }
@@ -387,7 +390,7 @@ h4 { margin: var(--s4) 0 var(--s2); }
 @media (max-width: 1240px) { :root { --inspector-w: 280px; --panel-w: 216px; } .brand-name span { display: none; } .kpi:nth-child(n+4) { display: none; } .scenario-pill { max-width: 280px; } }
 @media (max-width: 1100px) { .kpis, .jump { display: none; } .btn-label { display: none; } .scenario-pill .k { display: none; } }
 @media (max-width: 900px) {
-  :root { --dock-h: 150px; }
+  :root { --dock-h: clamp(164px, 20vh, 184px); }   /* no KPI strip here, so the transport row is shorter */
   .app { grid-template-columns: var(--icons-w) minmax(0, 1fr); grid-template-areas: "bar bar" "icons stage" "dock dock"; }
   .app[data-panel="none"], .app[data-inspector="closed"], .app[data-panel="none"][data-inspector="closed"] { grid-template-columns: var(--icons-w) minmax(0, 1fr); }
   .panelhost, .inspector { position: fixed; top: var(--bar-h); bottom: var(--dock-h); width: min(300px, 86vw); z-index: 30; box-shadow: var(--shadow-2); border-left: 1px solid var(--line); }

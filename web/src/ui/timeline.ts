@@ -29,8 +29,10 @@ export function initTimeline(store: Store, onSeek: (i: number) => void) {
     const lanes = lanesOf()
     const top = 6, gap = 2, axis = 15
     const avail = Math.max(40, H - top - axis)
-    const h1 = Math.max(20, Math.min(42, avail * 0.3))
-    const h = Math.max(7, (avail - h1 - gap * lanes.length) / (lanes.length - 1))
+    // the Wi-Fi strip gives up height first, so the per-link lanes keep ~7 px each and never spill onto the axis
+    const n = lanes.length - 1
+    const h1 = Math.max(14, Math.min(42, avail * 0.3, avail - n * (7 + gap) - gap))
+    const h = Math.max(4, (avail - h1 - gap * lanes.length) / n)
     const rows: { key: string; label: string; y: number; h: number }[] = []
     let y = top
     lanes.forEach((l, n) => { const hh = n === 0 ? h1 : h; rows.push({ ...l, y, h: hh }); y += hh + gap })
@@ -56,12 +58,12 @@ export function initTimeline(store: Store, onSeek: (i: number) => void) {
     const c = base.getContext('2d')!
     c.setTransform(DPR, 0, 0, DPR, 0, 0); c.clearRect(0, 0, W, H)
     const { rows, axisY } = geom()
-    const ink = cssVar('--text'), muted = cssVar('--muted'), line = cssVar('--border'), faint = cssVar('--surface-3')
+    const ink = cssVar('--text'), muted = cssVar('--muted'), line = cssVar('--border'), faint = cssVar('--surface-3'), faintInk = cssVar('--faint')
     const cls = CLASS_VARS.map(cssVar), conf = CONF_VARS.map(cssVar)
     const cols = W - GL - GR
     const [m0, m1] = range(), perPx = (m1 - m0) / cols
 
-    c.font = '500 9.5px "IBM Plex Mono", monospace'; c.textBaseline = 'middle'
+    c.font = `500 ${Math.min(10, rows[1]?.h + 2 || 10).toFixed(1)}px "IBM Plex Sans", system-ui, sans-serif`; c.textBaseline = 'middle'   // names, not figures: the sans reads better this small; never taller than a lane
     for (const ln of rows) {
       const vis = st.linkVisible[ln.key]
       c.fillStyle = vis ? muted : faint; c.textAlign = 'right'; c.fillText(ln.label, GL - 9, ln.y + ln.h / 2)
@@ -88,24 +90,28 @@ export function initTimeline(store: Store, onSeek: (i: number) => void) {
       for (let px = 0; px < cols; px++) { const i = indexAtDistance(d.distance, m0 + px * perPx); const y = ln.y + ln.h - 2 - Math.min(1, r.bonded[i] / 300) * (ln.h - 4); px ? c.lineTo(GL + px, y) : c.moveTo(GL + px, y) }
       c.strokeStyle = cssVar('--surface'); c.lineWidth = 3; c.stroke(); c.strokeStyle = ink; c.lineWidth = 1.3; c.stroke() }
 
-    // axis: km ticks, stations, tunnels
+    // axis: stations first (they orient the reader), then km ticks wherever a station code isn't already sitting.
+    // Both share the one label row under the axis, so each km label is skipped if it would overlap a station code.
     c.strokeStyle = line; c.beginPath(); c.moveTo(GL, axisY); c.lineTo(W - GR, axisY); c.stroke()
-    const step = tickStep(m1 - m0)
-    c.font = '500 9px "IBM Plex Mono", monospace'; c.textAlign = 'center'; c.fillStyle = muted
-    for (let m = Math.ceil(m0 / step) * step; m <= m1; m += step) {
-      const x = mToX(m)
-      c.strokeStyle = line; c.beginPath(); c.moveTo(x, axisY); c.lineTo(x, axisY + 3); c.stroke()
-      c.fillStyle = muted; c.fillText(String(Math.round(m / 1000)), x, axisY + 10)
-    }
-    c.textAlign = 'right'; c.fillStyle = muted; c.fillText('km', GL - 9, axisY + 10)
-    c.textAlign = 'center'
+    c.font = '500 9px "IBM Plex Mono", monospace'; c.textAlign = 'center'
+    const taken: [number, number][] = []
     let lastX = -100
     for (const s of d.meta.stations) {
       if (s.distance_m < m0 || s.distance_m > m1) continue
       const x = mToX(s.distance_m)
       c.strokeStyle = s.stop ? line : faint; c.beginPath(); c.moveTo(x, 4); c.lineTo(x, axisY); c.stroke()
-      if (x - lastX > 26) { c.fillStyle = s.stop ? ink : muted; c.fillText(s.crs, x, H - 4); lastX = x }
+      if (x - lastX > 26) { c.fillStyle = s.stop ? ink : muted; c.fillText(s.crs, x, H - 4); const hw = c.measureText(s.crs).width / 2 + 4; taken.push([x - hw, x + hw]); lastX = x }
     }
+    const step = tickStep(m1 - m0)
+    let lastKm = -100
+    for (let m = Math.ceil(m0 / step) * step; m <= m1; m += step) {
+      const x = mToX(m)
+      c.strokeStyle = line; c.beginPath(); c.moveTo(x, axisY); c.lineTo(x, axisY + 3); c.stroke()
+      const label = String(Math.round(m / 1000)), hw = c.measureText(label).width / 2 + 2
+      if (x - hw < lastKm || taken.some(([a, b]) => x + hw > a && x - hw < b)) continue
+      c.fillStyle = faintInk; c.fillText(label, x, H - 4); lastKm = x + hw
+    }
+    c.textAlign = 'right'; c.fillStyle = faintInk; c.fillText('km', GL - 14, H - 4)   // clear of a station code centred on the route start
     c.fillStyle = cssVar('--c-outage')
     for (const t of d.meta.tunnels) {
       if (t.to_m < m0 || t.from_m > m1) continue
@@ -205,6 +211,7 @@ export function initTimeline(store: Store, onSeek: (i: number) => void) {
   }, { passive: false })
 
   new ResizeObserver(() => drawBase()).observe(canvas)
+  document.fonts?.ready.then(() => drawBase())                           // redraw once the bundled faces are in, in case the first pass used a fallback
   store.on((_s, changed) => { if (changed.has('sim') || changed.has('metric') || changed.has('theme') || changed.has('linkVisible') || changed.has('data')) drawBase() })
   return { draw, redraw: drawBase }
 }
