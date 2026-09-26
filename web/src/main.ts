@@ -187,7 +187,8 @@ async function main() {
     if (o.lane) return { html: `<b>${o.lane === 'wan' ? 'Combined Wi-Fi' : o.lane}</b> · click to inspect sample`, style: tipStyle() }
     return null
   }
-  const mapCtx = createMap($('map'), data, theme, tooltip)
+  const mapCtx = createMap($('map'), data, theme, tooltip,
+    () => showNotice('The basemap could not be loaded, so the map shows a plain background. The simulation is unaffected; reload the page to try the basemap again.'))
   ;(window as any).__tls = { map: mapCtx.map, store, overlay: mapCtx.overlay }
   await mapCtx.ready
   mapCtx.setTerrain(store.state.layers.terrain)
