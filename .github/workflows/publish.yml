@@ -1,0 +1,106 @@
+name: publish
+
+# Rebuilds every route from the live feeds and publishes the viewer to Cloudflare Pages, where Cloudflare Access
+# decides who can open it. Runs on the 1st of each month, and whenever you press "Run workflow" on the Actions tab.
+#
+# Needs four repository secrets (Settings -> Secrets and variables -> Actions); docs/hosting.md walks through them:
+#   OFCOM_API_KEY, OPENCELLID_TOKEN       the same keys as your local .env
+#   CLOUDFLARE_API_TOKEN                  a token with Account -> Cloudflare Pages -> Edit
+#   CLOUDFLARE_ACCOUNT_ID                 from the Cloudflare dashboard
+#
+# If any route fails to build, nothing is published and the previous version stays live.
+
+on:
+  schedule:
+    - cron: "17 3 1 * *"   # 03:17 UTC on the 1st of every month
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+env:
+  PAGES_PROJECT: train-link-simulator
+
+jobs:
+  publish:
+    name: Rebuild routes from live feeds and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 350   # a full rebuild is mostly Ofcom API calls (about one per corridor postcode): roughly 2-3.5 h
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Check the secrets are set
+        env:
+          OFCOM_API_KEY: ${{ secrets.OFCOM_API_KEY }}
+          OPENCELLID_TOKEN: ${{ secrets.OPENCELLID_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          for s in OFCOM_API_KEY OPENCELLID_TOKEN CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do [ -n "${!s}" ] || missing="$missing $s"; done
+          if [ -n "$missing" ]; then echo "::error::Missing repository secrets:$missing (see docs/hosting.md)"; exit 1; fi
+
+      - run: pip install -e .
+
+      # Downloads and Ofcom answers from a run in the past week are reused, so re-running a failed publish is cheap.
+      - uses: actions/cache@v4
+        with:
+          path: data/raw
+          key: raw-${{ github.run_id }}
+          restore-keys: raw-
+
+      - name: Rebuild every route from the live feeds
+        env:
+          OFCOM_API_KEY: ${{ secrets.OFCOM_API_KEY }}
+          OPENCELLID_TOKEN: ${{ secrets.OPENCELLID_TOKEN }}
+        run: tcs build-all
+
+      - name: Summarise which feeds each route used
+        if: always()
+        shell: python
+        run: |
+          import glob, json, os
+          rows, degraded = [], []
+          for path in sorted(glob.glob("web/public/data/*/meta.json")):
+              m = json.load(open(path, encoding="utf-8"))
+              cov = ", ".join(m.get("coverage_sources") or []) or "-"
+              cells = [m.get("geometry_source"), m.get("terrain_source"), cov, m.get("cell_source")]
+              rows.append("| " + " | ".join([m["route"]["id"], *map(str, cells)]) + " |")
+              if any("synthetic" in str(c) for c in cells):
+                  degraded.append(m["route"]["id"])
+          out = ["## Feeds used per route", "", "| route | track | terrain | coverage | cell sites |", "|---|---|---|---|---|", *rows]
+          if degraded:
+              out += ["", f"{len(degraded)} route(s) used stand-in data for at least one feed: {', '.join(degraded)}. "
+                          "They are still published; run the workflow again later to retry the live feed."]
+              print(f"::warning::Stand-in data used for: {', '.join(degraded)}")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+              fh.write("\n".join(out) + "\n")
+
+      - name: Build the viewer
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Publish to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          # Creates the Pages project on the very first run; afterwards it already exists and this is a no-op.
+          npx --yes wrangler@4 pages project create "$PAGES_PROJECT" --production-branch main >/dev/null 2>&1 || true
+          npx --yes wrangler@4 pages deploy web/dist --project-name "$PAGES_PROJECT" --branch main --commit-dirty=true
