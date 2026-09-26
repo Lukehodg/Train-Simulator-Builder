@@ -1,18 +1,22 @@
 name: publish
 
 # Rebuilds every route from the live feeds and publishes the viewer to Cloudflare (a Workers static-assets site,
-# configured in wrangler.jsonc), where a Cloudflare Access application decides who can open it. Runs on the 1st of each month, and whenever you press "Run workflow" on the Actions tab.
+# configured in wrangler.jsonc), where a Cloudflare Access application decides who can open it. Runs on the 17th
+# of each month, and whenever you press "Run workflow" on the Actions tab.
 #
 # Needs four repository secrets (Settings -> Secrets and variables -> Actions); docs/hosting.md walks through them:
 #   OFCOM_API_KEY, OPENCELLID_TOKEN       the same keys as your local .env
 #   CLOUDFLARE_API_TOKEN                  a token with Account -> Workers Scripts -> Edit
 #   CLOUDFLARE_ACCOUNT_ID                 from the Cloudflare dashboard
 #
-# If any route fails to build, nothing is published and the previous version stays live.
+# Nothing is published, and the previous version stays live, if: the Ofcom API refuses a test call up front (its
+# call quota is used up), any route fails to build, or any route's coverage fell back to stand-in data.
+# A full rebuild makes about 18,000 Ofcom calls (one per postcode near the track), so run it at most once per quota
+# period: this key's quota was used up on 26 Sep 2026 and resets around the 16th, hence the 17th below.
 
 on:
   schedule:
-    - cron: "17 3 1 * *"   # 03:17 UTC on the 1st of every month
+    - cron: "17 3 17 * *"   # 03:17 UTC on the 17th of every month, just after the Ofcom quota resets
   workflow_dispatch:
 
 permissions:
@@ -26,7 +30,7 @@ jobs:
   publish:
     name: Rebuild routes from live feeds and publish
     runs-on: ubuntu-latest
-    timeout-minutes: 350   # a full rebuild is mostly Ofcom API calls (about one per corridor postcode): roughly 2-3.5 h
+    timeout-minutes: 350   # a full rebuild is mostly Ofcom API calls (about one per corridor postcode): roughly 5 h
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -53,6 +57,18 @@ jobs:
 
       - run: pip install -e .
 
+      # One test call before hours of work: when the Ofcom call quota is used up, every route would silently fall
+      # back to stand-in coverage, so stop here and keep the current site.
+      - name: Check the Ofcom API still has call quota
+        env:
+          OFCOM_API_KEY: ${{ secrets.OFCOM_API_KEY }}
+        run: |
+          if ! out=$(tcs probe-ofcom N1C4TB 2>&1); then
+            echo "$out" | tail -n 4
+            echo "::error::The Ofcom API refused a test call (usually its monthly call quota is used up). Nothing was rebuilt or published; the current site stays live. Run the workflow again once the quota resets."
+            exit 1
+          fi
+
       # Downloads and Ofcom answers from a run in the past week are reused, so re-running a failed publish is cheap.
       - uses: actions/cache@v4
         with:
@@ -71,7 +87,7 @@ jobs:
         shell: python
         run: |
           import glob, json, os
-          rows, degraded = [], []
+          rows, degraded, no_coverage = [], [], []
           for path in sorted(glob.glob("web/public/data/*/meta.json")):
               m = json.load(open(path, encoding="utf-8"))
               cov = ", ".join(m.get("coverage_sources") or []) or "-"
@@ -79,13 +95,21 @@ jobs:
               rows.append("| " + " | ".join([m["route"]["id"], *map(str, cells)]) + " |")
               if any("synthetic" in str(c) for c in cells):
                   degraded.append(m["route"]["id"])
+              if "synthetic_prior" in (m.get("coverage_sources") or []):
+                  no_coverage.append(m["route"]["id"])
           out = ["## Feeds used per route", "", "| route | track | terrain | coverage | cell sites |", "|---|---|---|---|---|", *rows]
           if degraded:
-              out += ["", f"{len(degraded)} route(s) used stand-in data for at least one feed: {', '.join(degraded)}. "
-                          "They are still published; run the workflow again later to retry the live feed."]
+              out += ["", f"{len(degraded)} route(s) used stand-in data for at least one feed: {', '.join(degraded)}."]
               print(f"::warning::Stand-in data used for: {', '.join(degraded)}")
+          if no_coverage:
+              # Coverage is the core input: publishing stand-ins would replace good live data on the site.
+              out += ["", f"**Not published:** Ofcom coverage fell back to stand-in data for {', '.join(no_coverage)} "
+                          "(usually the Ofcom call quota ran out part-way). The current site stays live."]
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
               fh.write("\n".join(out) + "\n")
+          if no_coverage:
+              print(f"::error::Ofcom coverage fell back to stand-in data for: {', '.join(no_coverage)}. Not publishing.")
+              raise SystemExit(1)
 
       - name: Build the viewer
         working-directory: web

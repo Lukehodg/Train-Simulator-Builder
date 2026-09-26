@@ -3,14 +3,14 @@
 The viewer is a static website: the live feeds are fetched by the pipeline when the routes are built, not while
 someone is using it. So hosting it "with live feeds" means two pieces:
 
-- **GitHub Actions** (`.github/workflows/publish.yml`) rebuilds all 18 routes from the live feeds on the 1st of each
+- **GitHub Actions** (`.github/workflows/publish.yml`) rebuilds all 18 routes from the live feeds on the 17th of each
   month, or whenever you run it by hand, then publishes the result. Your API keys live only there, as GitHub secrets.
   GitHub's machines have open internet, so OpenStreetMap works and every route gets its exact track line.
 - **Cloudflare** serves the site (a Workers static-assets site, configured in `wrangler.jsonc`; Cloudflare Pages now
   lives inside Workers), and **Cloudflare Access** decides who can open it. Colleagues open the link,
   enter their work email and type the one-time code Cloudflare emails them. No company sign-in integration is needed.
 
-Everything below is free: Cloudflare Access for up to 50 users, and a monthly rebuild (about 2-3.5 hours) fits
+Everything below is free: Cloudflare Access for up to 50 users, and a monthly rebuild (about 5 hours) fits
 within GitHub's free Actions minutes for a private repository. Setup takes about 20 minutes. Cloudflare changes its
 dashboard wording from time to time, so a label may differ slightly from what is written here.
 
@@ -73,20 +73,23 @@ Secrets are write-only: nobody, including you, can read them back from GitHub, a
 
 1. Make sure the change adding `.github/workflows/publish.yml` is merged into `main`.
 2. **Actions** tab → **publish** → **Run workflow** → branch `main` → **Run workflow**.
-3. Wait for it to finish (about 2-3.5 hours; mostly Ofcom API calls). Open the run: its summary lists the feeds
+3. Wait for it to finish (about 5 hours; mostly Ofcom API calls). Open the run: its summary lists the feeds
    each route used. Any route marked as using stand-in data is still published and is retried next run.
 4. Open the site address, sign in with your email and code, and share the address with your colleagues.
 
 ## Running it from then on
 
-- It rebuilds and republishes automatically on the 1st of each month. To refresh sooner, run the workflow by hand.
+- It rebuilds and republishes automatically on the 17th of each month, just after the Ofcom call quota resets. To
+  refresh sooner, run the workflow by hand, but see the quota note below.
 - **Adding or removing people:** edit the `Colleagues` policy in Zero Trust → Access → Applications. No rebuild needed.
 - **If a run fails:** nothing is published and the previous version stays live. Open the failed run and use
   **Re-run failed jobs**. Downloads and Ofcom answers from the past week are reused, so a re-run is cheaper.
 - **A "Workers Builds" check on pull requests** means the repository has been connected to Cloudflare's own Git
   builds. Delete that extra Worker in **Workers & Pages** (the publish workflow is the only thing that should deploy),
   and optionally uninstall the Cloudflare app under GitHub **Settings** → **Applications**.
-- **Ofcom quota:** each full rebuild makes a few thousand Ofcom API calls (one per postcode near the track). Monthly
-  is comfortable; running it many times a day may hit your API product's limits.
+- **Ofcom quota:** a full rebuild makes about 18,000 Ofcom API calls (one per postcode near the track), and the
+  API key has a call quota per period; the Ofcom API answers "Out of call volume quota" once it is used up. So rebuild
+  at most once per quota period. The workflow checks the quota with one call before starting, and it will not publish
+  if any route's coverage fell back to stand-in data, so an exhausted quota never replaces good data on the site.
 - **Company policy:** this puts work material on outside services, behind a login. If that is not allowed where you
   work, use the offline zip instead (`tcs package`, see the README).
