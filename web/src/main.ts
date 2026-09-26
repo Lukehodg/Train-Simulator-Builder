@@ -67,7 +67,7 @@ async function main() {
   $('provBadge').title = `Route ${meta.geometry_source} · terrain ${meta.terrain_source} · coverage ${meta.coverage_sources.join(', ') || 'synthetic'} · cells ${meta.cell_source} — click for detail`
   const parity = parityReport(data, sim)
   console.info(`[tls] parity vs Python default scenario: max bonded diff ${parity.maxBondedDiff.toFixed(2)} Mbps, class agreement ${(parity.classAgreement * 100).toFixed(1)} %`)
-  if (!realTerrain) showNotice('3D terrain is off: this route was built with synthetic elevation. Rebuild it with tcs run (without --offline; the Copernicus DEM needs no key) to enable it.')
+  if (!realTerrain) showNotice('3D terrain is off: this route was built with synthetic elevation. Rebuild it with a plain tcs run, without the offline flag (the Copernicus DEM needs no key), to enable it.')
   // ---- scenario: presets, train design, manual overrides -------------------------------------
   // Baseline = pristine simulation.yaml (the bundle may have been produced with a preset or a train design applied).
   const baselineMeta: Meta = JSON.parse(JSON.stringify({ ...meta, sim: meta.sim_defaults ?? meta.sim }))
