@@ -34,6 +34,9 @@ The address is `https://train-link-simulator.<your-workers-subdomain>.workers.de
 
 1. **Workers & Pages** → **Create** → **Upload static files** (or **Start with Hello World** and replace it), and
    name it exactly `train-link-simulator`. A single `index.html` saying `Coming soon` is enough.
+   Do **not** choose **Import a repository** / connect GitHub here: Cloudflare would then publish its own copy on
+   every push, straight from the repository, which has no route data (that is built by the workflow) and sits
+   outside the Access rule.
 2. Note the address Cloudflare shows for it.
 
 ## 3. Lock the site to your colleagues (Cloudflare Access)
@@ -80,6 +83,9 @@ Secrets are write-only: nobody, including you, can read them back from GitHub, a
 - **Adding or removing people:** edit the `Colleagues` policy in Zero Trust → Access → Applications. No rebuild needed.
 - **If a run fails:** nothing is published and the previous version stays live. Open the failed run and use
   **Re-run failed jobs**. Downloads and Ofcom answers from the past week are reused, so a re-run is cheaper.
+- **A "Workers Builds" check on pull requests** means the repository has been connected to Cloudflare's own Git
+  builds. Delete that extra Worker in **Workers & Pages** (the publish workflow is the only thing that should deploy),
+  and optionally uninstall the Cloudflare app under GitHub **Settings** → **Applications**.
 - **Ofcom quota:** each full rebuild makes a few thousand Ofcom API calls (one per postcode near the track). Monthly
   is comfortable; running it many times a day may hit your API product's limits.
 - **Company policy:** this puts work material on outside services, behind a login. If that is not allowed where you
