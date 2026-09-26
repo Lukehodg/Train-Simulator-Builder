@@ -145,6 +145,7 @@ async function main() {
     } catch (err) { showNotice(String((err as Error).message), true) }
     input.value = ''
   })
+  $('designLoad').addEventListener('click', () => $('designFile').click())   // a real button, so the file picker is reachable by keyboard
   $('designExample').addEventListener('click', async () => {
     try {
       const res = await fetch('examples/azuma-5car.train.json'); if (!res.ok) throw new Error('example design not found')

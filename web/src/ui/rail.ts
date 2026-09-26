@@ -74,7 +74,7 @@ export function initRail(store: Store) {
     const t = $('ly_terrain') as HTMLInputElement
     t.disabled = true
     $('ly_terrain_note').textContent = 'needs real elevation'
-    t.closest('label')!.title = 'This route was built with synthetic elevation. Run tcs run online (Copernicus DEM is keyless) to enable 3D terrain.'
+    t.closest('label')!.title = 'This route was built with synthetic elevation. Rebuild it with tcs run (without --offline; the Copernicus DEM needs no key) to enable 3D terrain.'
   }
 
   // ---- camera ---------------------------------------------------------------------------------

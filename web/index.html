@@ -168,13 +168,13 @@
       <section class="card">
         <h4>Onboard WAN</h4>
         <div class="wan">
-          <div class="kv"><span>Active</span><b id="wanActive">—</b></div>
+          <div class="kv kv-stack"><span>Active links</span><b id="wanActive">—</b></div>
           <div class="kv"><span>Bonded</span><b id="wanCap">—</b></div>
           <div class="kv"><span>Latency · loss</span><b id="wanLat">—</b></div>
           <div class="kv"><span>Per user</span><b id="wanUser">—</b></div>
         </div>
         <div class="wifi">
-          <div><span class="wifi-score" id="wifiScore">—</span><small>/100</small></div>
+          <div class="wifi-main"><span class="lbl">Passenger Wi-Fi</span><span class="wifi-num"><b class="wifi-score" id="wifiScore">—</b><small>/100</small></span></div>
           <div class="wifi-side">
             <span class="pill" id="wifiClass">—</span>
             <span class="conf">Confidence <i></i><b id="wanConf">—</b></span>
@@ -194,7 +194,8 @@
 
     <div class="tabpanel" id="tab-train" role="tabpanel" aria-labelledby="tabbtn-train" tabindex="0" hidden>
       <div class="train-actions">
-        <label class="btn"><input type="file" id="designFile" accept=".json,application/json" hidden>Load .train.json</label>
+        <input type="file" id="designFile" accept=".json,application/json" hidden>
+        <button class="btn" id="designLoad" type="button" title="Load a .train.json saved by the Train Builder">Load .train.json</button>
         <button class="btn" id="designExample" type="button" title="Load the bundled 5-car example design">Example</button>
         <button class="btn" id="designReset" type="button">Reset</button>
       </div>
