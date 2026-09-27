@@ -115,6 +115,23 @@ def test_heat_map_bands_follow_the_legend_edges():
     assert edges.tolist() == [0, 4, 8] and typical.tolist() == [0, 4]
 
 
+def test_outage_stretches_are_found_longest_first_with_their_place():
+    from tcs.report import outage_stretches
+
+    cls = ["GOOD", "OUTAGE", "OUTAGE", "GOOD", "OUTAGE", "OUTAGE", "OUTAGE", "GOOD"]
+    samples = pd.DataFrame({"sample_id": range(8), "distance_m": [i * 50.0 for i in range(8)],
+                            "in_tunnel": [False, False, False, False, True, True, True, False],
+                            "tunnel_name": [None, None, None, None, "Stoke Tunnel", "Stoke Tunnel", "Stoke Tunnel", None]})
+    rc = pd.DataFrame({"sample_id": range(8), "service_class": cls})
+    stations = pd.DataFrame({"name": ["Alpha", "Bravo", "Charlie"], "distance_m": [0.0, 180.0, 350.0]})
+    out = outage_stretches(samples, rc, stations)
+    assert out["length_km"].tolist() == [0.15, 0.1]           # three points then two, 50 m each
+    first = out.iloc[0]
+    assert (first["from"], first["to"], first["tunnel"]) == ("Bravo", "Charlie", "Stoke Tunnel")
+    assert out.iloc[1]["tunnel"] == ""
+    assert outage_stretches(samples, rc.assign(service_class="GOOD"), stations).empty
+
+
 def test_packaging_missing_build_preserves_existing_output(tmp_path, monkeypatch):
     from tcs import package
 

@@ -190,9 +190,20 @@ def test_report_all_places_packs_beside_the_viewer_bundle(pipeline, tmp_path, mo
     assert sorted(p.name for p in out.iterdir()) == sorted(["index.json", *files])   # no chart PNGs: they are inside the Word report
     from docx import Document
 
-    doc = Document(str(out / idx["reports"][0]["docx"]["file"]))
-    assert "2. Route heat maps" in [p.text for p in doc.paragraphs]
-    assert len(doc.inline_shapes) == 5                         # capacity, sections, heat maps, per-network strip, links
+    base, edge = (Document(str(out / r["docx"]["file"])) for r in idx["reports"])
+    headings = [p.text for p in base.paragraphs if p.style.name.startswith("Heading")]
+    for h in ("Executive summary", "1   Introduction", "2.4   Route heat maps", "8   Validation status", "Appendix A   Station-to-station results", "Appendix B   Glossary"):
+        assert h in headings
+    assert len(base.inline_shapes) == 5                        # throughput, sections, heat maps, per-network strip, links
+    assert base.core_properties.author == "Train Link Simulator"   # not python-docx's default
+    footer = "".join(t.text for t in base.sections[1].footer._element.iter() if t.tag.endswith("}t"))
+    assert f"TLS-{s.route_id.upper()}-BASELINE-" in footer and "Page" in footer
+    assert any(sec.orientation == 1 for sec in base.sections)  # the results appendix is landscape
+    captions = [p.text for p in edge.paragraphs if p.style.name == "Caption"]
+    assert any("compared with the baseline" in c for c in captions)   # only a non-baseline scenario compares
+    assert not any("compared with the baseline" in p.text for p in base.paragraphs if p.style.name == "Caption")
+    workbook = __import__("openpyxl").load_workbook(out / idx["reports"][0]["xlsx"]["file"], read_only=True)
+    assert workbook.sheetnames[:3] == ["Read me", "Summary", "Sections"]
 
     # A viewer bundle from another build is refused rather than described by the wrong pack.
     (web_data / s.route_id / "meta.json").write_text("{}", encoding="utf-8")

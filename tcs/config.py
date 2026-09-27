@@ -34,6 +34,7 @@ class Settings:
     offline: bool = False
     sim_defaults: dict[str, Any] = field(default_factory=dict)     # pristine copy of simulation.yaml (before presets / train designs)
     starlink_defaults: dict[str, Any] = field(default_factory=dict)
+    report: dict[str, Any] = field(default_factory=dict)          # config/report.yaml: cover-page and header details
 
     # ---- convenience accessors -------------------------------------------------
     @property
@@ -108,6 +109,7 @@ def load_settings(config_dir: Path | None = None, offline: bool = False, route_i
         sim=_load_yaml(cfg / "simulation.yaml"),
         env={k: v for k, v in os.environ.items() if k in {"OFCOM_API_KEY", "OPENCELLID_TOKEN", "OS_DATAHUB_KEY", "NROD_USERNAME", "NROD_PASSWORD", "OVERPASS_URL"}},
         offline=offline,
+        report=_load_yaml(cfg / "report.yaml").get("report", {}) if (cfg / "report.yaml").exists() else {},
     )
     import copy
 

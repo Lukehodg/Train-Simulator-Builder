@@ -87,12 +87,29 @@ multi-track stations route correctly (mileages come out within ~1 % of the publi
 
 ## Evidence pack (`tcs report`)
 
-A Word report and an Excel appendix per route and scenario: headline KPIs, capacity along the route with stations
-and tunnels, service class by station-to-station section, route heat maps of signal strength, throughput and latency
-(five bands each, darker = worse, with each band's share of the route) plus a per-network signal strip,
-per-link availability/capacity, onboard architecture,
-every model assumption, data provenance with live/synthetic status, and the validation status (metrics by section
-once measurements are attached). The document states plainly that figures are model predictions until validated.
+A Word report laid out for a tender submission, and an Excel data appendix, per route and scenario:
+
+- **Front matter:** cover with the key figures, document control and revision history, basis of preparation,
+  contents page.
+- **Executive summary:** key findings written from the results, the weakest sections, and for any scenario other than
+  the baseline a side-by-side comparison with the baseline configuration.
+- **Numbered sections:**
+  - scope and how to read the figures
+  - headline results and throughput along the route
+  - service class by section, and route heat maps of signal strength, throughput and latency (five bands each,
+    darker = worse, with each band's share of the route) plus a per-network signal strip
+  - station-to-station and per-link results, and the onboard configuration
+  - methodology, data sources and confidence
+  - validation status, assumptions and limitations
+- **Appendices:** a landscape table of results by section, and a glossary.
+
+Tables and figures are numbered, every page carries the document reference, classification and "Page X of Y", and
+the document states plainly that figures are model predictions until validated. Cover details (your organisation,
+the client, the tender reference, the classification, the version) come from `config/report.yaml`. Word offers to
+update the document's fields on first opening. Accept it, and the contents page gets its page numbers.
+
+The Excel appendix has a read-me sheet, the headline measures, every section and link, every 50 m point
+(including each network's RSRP), the assumptions and the sources.
 
 `tcs report-all` builds the pack for every built route in the two standard scenarios (baseline, and EDGE Rail 5G +
 Fleet Connect) and places it beside the route's viewer bundle (`web/public/data/<route>/reports/`, with an

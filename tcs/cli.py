@@ -257,8 +257,21 @@ def _build_report(route: str | None, preset: str | None, train: Path | None, pol
     meta = json.loads((processed / "web" / "meta.json").read_text(encoding="utf-8"))
     meta["model_version"] = s.sim["model_version"]
     vpath = processed / "validation_by_section.csv"
-    validation = pd.read_csv(vpath) if vpath.exists() else None
-    return build_report(s, meta, b.samples, obs, rc, stations, out or (processed / "reports"), label, validation)
+    validation = None
+    if vpath.exists():                                         # only a validation of this build's predictions counts
+        if vpath.stat().st_mtime >= (processed / "provider_observation.parquet").stat().st_mtime:
+            validation = pd.read_csv(vpath)
+        else:
+            console.log(f"[yellow]{vpath.name} predates the current build of {s.route_id}; run tcs validate again to include it")
+    baseline = None
+    if preset or train or policy or weather != "nominal":   # the report compares this scenario with the baseline configuration
+        from .report_docx import POLICIES, VEHICLES
+
+        base = load_settings(route_id=route)
+        obs_b, rc_b = simulate(base, b.samples, prior, serving, calibration=cal)
+        v, p = base.sim["vehicle"]["profile"], base.sim["wan"]["policy"]
+        baseline = {"title": f"{VEHICLES.get(v, v).lower()}, {POLICIES.get(p, p).split(' (')[0].lower()}", "obs": obs_b, "rc": rc_b}
+    return build_report(s, meta, b.samples, obs, rc, stations, out or (processed / "reports"), label, validation, weather=weather, baseline=baseline)
 
 
 REPORT_SCENARIOS = ("baseline", "edge_rail_fleet_connect")
