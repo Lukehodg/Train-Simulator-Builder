@@ -17,6 +17,21 @@ from .config import Settings
 WIFI_CLASSES = ["EXCELLENT", "GOOD", "USABLE", "POOR", "OUTAGE"]
 CLASS_COLORS = {"EXCELLENT": "#1e7d3e", "GOOD": "#3f9a52", "USABLE": "#c9a100", "POOR": "#d6531a", "OUTAGE": "#9c1b2c"}
 
+# Route heat maps: five bands per metric on one ordinal ramp, darker = worse, so weak stretches stand out. The ramp is
+# a single hue with monotone lightness and its light end at 2.1:1 on white (checked with an OKLab validator), so it
+# survives greyscale printing and colour-vision deficiency; the legends name every band in words and numbers.
+BANDS = ["Excellent", "Good", "Fair", "Poor", "Very poor"]
+BAND_COLORS = ["#e8a577", "#db773c", "#c24c0c", "#9d2c04", "#6f1a11"]
+HEAT_METRICS = {   # band edges, best first; industry-conventional RSRP bands for LTE/5G
+    "signal": {"title": "Signal strength", "sub": "strongest mobile network at the train (RSRP)",
+               "ranges": ["≥ −80 dBm", "−90 to −80 dBm", "−100 to −90 dBm", "−110 to −100 dBm", "< −110 dBm or none"]},
+    "throughput": {"title": "Throughput", "sub": "combined onboard WAN capacity",
+                   "ranges": ["≥ 200 Mbps", "100 to 200 Mbps", "50 to 100 Mbps", "10 to 50 Mbps", "< 10 Mbps or no link"]},
+    "latency": {"title": "Latency", "sub": "combined onboard WAN round trip",
+                "ranges": ["< 40 ms", "40 to 60 ms", "60 to 100 ms", "100 to 150 ms", "≥ 150 ms or no link"]},
+}
+INK, MUTED, HAIRLINE = "#1f2933", "#5d6c7b", "#dde3e9"
+
 
 # ---------------------------------------------------------------- analysis
 def section_table(samples: pd.DataFrame, rc: pd.DataFrame, obs: pd.DataFrame, stations: pd.DataFrame, providers: list[str]) -> pd.DataFrame:
@@ -88,6 +103,37 @@ def kpis(rc: pd.DataFrame, samples: pd.DataFrame, spacing_m: float) -> dict:
     }
 
 
+def rsrp_band(dbm: np.ndarray) -> np.ndarray:
+    """0 = Excellent … 4 = Very poor; no signal (NaN) is Very poor."""
+    return np.select([dbm >= -80, dbm >= -90, dbm >= -100, dbm >= -110], [0, 1, 2, 3], 4)
+
+
+def heat_bands(samples: pd.DataFrame, rc: pd.DataFrame, obs: pd.DataFrame) -> dict[str, np.ndarray]:
+    """Per-sample band (0 = Excellent … 4 = Very poor) for each HEAT_METRICS entry, in route order."""
+    sid = samples["sample_id"].to_numpy()
+    cell = obs[obs["provider_type"] == "cellular"]
+    best = cell.groupby("sample_id")["signal_primary"].max().reindex(sid).to_numpy(float)
+    r = rc.set_index("sample_id").reindex(sid)
+    cap, lat = r["bonded_capacity_mbps"].to_numpy(float), r["effective_latency_ms"].to_numpy(float)
+    return {"signal": rsrp_band(best),
+            "throughput": np.select([cap >= 200, cap >= 100, cap >= 50, cap >= 10], [0, 1, 2, 3], 4),
+            "latency": np.select([lat < 40, lat < 60, lat < 100, lat < 150], [0, 1, 2, 3], 4)}   # NaN latency = no link
+
+
+def typical_bands(bands: np.ndarray, n_runs: int) -> tuple[np.ndarray, np.ndarray]:
+    """Split the route into up to n_runs equal runs of samples; each run takes the band that at least half of it reaches
+    (the upper median), so charts at page scale show sustained stretches without one 50 m sample colouring a kilometre.
+    Returns (run start indices plus the end, band per run)."""
+    edges = np.linspace(0, len(bands), min(n_runs, len(bands)) + 1).astype(int)
+    typical = np.array([np.sort(bands[a:b])[(b - a) // 2] for a, b in zip(edges[:-1], edges[1:])], dtype=int)
+    return edges, typical
+
+
+def band_shares(bands: np.ndarray) -> list[float]:
+    """Share of the route (%) in each band; samples are evenly spaced, so a share of samples is a share of length."""
+    return list(np.bincount(bands, minlength=len(BANDS)) / max(len(bands), 1) * 100)
+
+
 # ---------------------------------------------------------------- charts
 def _chart_capacity(samples, rc, stations, title) -> bytes:
     import matplotlib
@@ -140,6 +186,136 @@ def _chart_links(links: pd.DataFrame) -> bytes:
     for ax in axes:
         ax.spines[["top", "right"]].set_visible(False); ax.grid(axis="x", alpha=0.25)
     buf = io.BytesIO(); fig.tight_layout(); fig.savefig(buf, format="png"); plt.close(fig)
+    return buf.getvalue()
+
+
+def _band_legend(ax, metric: str, bands: np.ndarray, ncol: int = 1) -> None:
+    from matplotlib.patches import Patch
+
+    shares = band_shares(bands)
+    fmt = lambda v: "0 %" if v == 0 else ("<1 %" if v < 0.5 else f"{v:.0f} %")
+    labels = [f"{b}  {r}  ·  {fmt(v)}" for b, r, v in zip(BANDS, HEAT_METRICS[metric]["ranges"], shares)]
+    handles = [Patch(facecolor=c, edgecolor="none") for c in BAND_COLORS]
+    ax.legend(handles, labels, loc="upper left", ncol=ncol, frameon=False, fontsize=6.5, handlelength=1.4, handleheight=0.9,
+              borderaxespad=0, labelcolor=INK, title="Share of route length", title_fontsize=6.5, alignment="left")
+
+
+def _scale_bar(ax) -> None:
+    """A km scale bar in the lower-left corner (axes are in km, equal aspect)."""
+    x0, x1 = ax.get_xlim(); y0, y1 = ax.get_ylim()
+    target = (x1 - x0) * 0.22
+    length = max([v for v in (1, 2, 5, 10, 20, 25, 50, 100, 200) if v <= target] or [1])
+    bx, by = x0 + (x1 - x0) * 0.04, y0 + (y1 - y0) * 0.05
+    ax.plot([bx, bx + length], [by, by], color=MUTED, linewidth=1.2, solid_capstyle="butt", zorder=4)
+    ax.text(bx + length / 2, by + (y1 - y0) * 0.02, f"{length} km", ha="center", va="bottom", fontsize=6, color=MUTED, zorder=4)
+
+
+def _chart_heatmap(samples: pd.DataFrame, stations: pd.DataFrame, bands: dict[str, np.ndarray]) -> bytes:
+    """Three small-multiple maps of the railway (signal, throughput, latency), each coloured by band along the line."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection
+    from matplotlib.patheffects import withStroke
+
+    lat0 = np.radians(float(samples["latitude"].mean()))
+    kx, ky = 111.32 * np.cos(lat0), 110.57                    # equirectangular km: accurate to <1 % over a UK route
+    x, y = samples["longitude"].to_numpy() * kx, samples["latitude"].to_numpy() * ky
+    w, h = max(float(np.ptp(x)), 1.0), max(float(np.ptp(y)), 1.0)
+    xy = np.column_stack([x, y])
+    tall = h > 1.1 * w                                         # north-south route: maps side by side; otherwise stacked
+    if tall:
+        map_h = float(np.clip(3.0 * h / w, 2.6, 6.0))
+        fig = plt.figure(figsize=(10, map_h + 1.9), dpi=160)
+        gs = fig.add_gridspec(2, 3, height_ratios=[map_h, 1.05], left=0.02, right=0.98, top=1 - 0.5 / (map_h + 1.9), bottom=0.01, wspace=0.08, hspace=0.06)
+        cells = [(gs[0, i], gs[1, i]) for i in range(3)]
+    else:
+        map_h = float(np.clip(6.4 * h / w, 1.5, 2.6))
+        fig = plt.figure(figsize=(10, 3 * (map_h + 0.5)), dpi=160)
+        gs = fig.add_gridspec(3, 2, width_ratios=[6.4, 3.0], left=0.02, right=0.98, top=1 - 0.45 / (3 * (map_h + 0.5)), bottom=0.01, hspace=0.32, wspace=0.04)
+        cells = [(gs[i, 0], gs[i, 1]) for i in range(3)]
+    # Page scale: a run of line is about 2 pt long, and neighbouring runs overlap by about 0.7 pt so anti-aliasing leaves no seams.
+    box_w, box_h = (3.0, map_h) if tall else (6.3, map_h)      # map box in inches (approximate; the 6 % padding is below)
+    pt_per_km = 72 * min(box_w / (w * 1.12), box_h / (h * 1.12))
+    path_km = float(np.hypot(np.diff(x), np.diff(y)).sum())
+    n_runs = int(np.clip(path_km * pt_per_km / 2.0, 50, 600))
+    spacing_km = max(float(np.median(np.diff(samples["distance_m"].to_numpy()))) / 1000, 1e-3)
+    overlap = max(1, int(np.ceil(0.7 / pt_per_km / spacing_km)))
+    stops = stations[stations["stop"]] if "stop" in stations else stations
+    sx, sy = stops["longitude"].to_numpy() * kx, stops["latitude"].to_numpy() * ky
+    for (map_cell, legend_cell), (metric, spec) in zip(cells, HEAT_METRICS.items()):
+        ax = fig.add_subplot(map_cell)
+        ax.set_aspect("equal", adjustable="datalim")
+        pad = 0.06 * max(w, h)
+        ax.set_xlim(x.min() - pad, x.max() + pad); ax.set_ylim(y.min() - pad, y.max() + pad)
+        ax.plot(x, y, color="#8b939c", linewidth=4.4, solid_capstyle="round", solid_joinstyle="round", zorder=1)   # casing: the palest band still reads
+        edges, typical = typical_bands(bands[metric], n_runs)
+        change = np.r_[True, typical[1:] != typical[:-1]]      # merge neighbouring runs in the same band
+        starts, kinds = edges[:-1][change], typical[change]
+        ends = np.r_[starts[1:], len(xy)]
+        runs = [xy[max(a - overlap, 0):min(b + overlap, len(xy))] for a, b in zip(starts, ends)]
+        order = np.argsort(kinds, kind="stable")               # worse runs on top where runs overlap
+        ax.add_collection(LineCollection([runs[i] for i in order], colors=np.array(BAND_COLORS)[kinds[order]], linewidths=3.0,
+                                         capstyle="butt", joinstyle="round", zorder=2))
+        ax.scatter(sx, sy, s=14, facecolor="white", edgecolor=INK, linewidth=0.8, zorder=3)
+        placed: list[tuple[float, float]] = []
+        gap = 0.07 * max(w, h)
+        for k in [0, len(stops) - 1, *range(1, len(stops) - 1)]:   # ends first, then intermediate stops that have room
+            if k < 0 or any(np.hypot(sx[k] - px, sy[k] - py) < gap for px, py in placed):
+                continue
+            placed.append((sx[k], sy[k]))
+            ax.annotate(stops["crs"].iloc[k], (sx[k], sy[k]), xytext=(4, 3), textcoords="offset points", fontsize=6, color=INK, zorder=4,
+                        path_effects=[withStroke(linewidth=2.2, foreground="white")])
+        ax.set_xticks([]); ax.set_yticks([])
+        for sp in ax.spines.values():
+            sp.set_color(HAIRLINE); sp.set_linewidth(0.6)
+        ax.annotate("N", xy=(0.96, 0.96), xytext=(0, -16), xycoords="axes fraction", textcoords="offset points", ha="center", va="center",
+                    fontsize=6.5, color=MUTED, arrowprops={"arrowstyle": "-|>", "color": MUTED, "lw": 0.8})
+        ax.annotate(spec["title"], (0, 1), xytext=(0, 12), xycoords="axes fraction", textcoords="offset points", fontsize=9, fontweight="bold", color=INK, va="bottom")
+        ax.annotate(spec["sub"], (0, 1), xytext=(0, 3), xycoords="axes fraction", textcoords="offset points", fontsize=6.5, color=MUTED, va="bottom")
+        fig.canvas.draw()                                      # settle the equal-aspect limits before placing the scale bar
+        _scale_bar(ax)
+        lax = fig.add_subplot(legend_cell); lax.axis("off")
+        _band_legend(lax, metric, bands[metric])
+    buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig)
+    return buf.getvalue()
+
+
+def _chart_networks(samples: pd.DataFrame, stations: pd.DataFrame, obs: pd.DataFrame, names: dict[str, str], best: np.ndarray) -> bytes:
+    """Heat strip: signal band of each mobile network (rows) along the route (columns), plus the strongest of them."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import ListedColormap
+    from matplotlib.patches import Patch
+
+    sid = samples["sample_id"].to_numpy()
+    cell = obs[obs["provider_type"] == "cellular"]
+    ids = list(dict.fromkeys(cell["provider_id"]))
+    rows = [rsrp_band(cell[cell["provider_id"] == p].set_index("sample_id")["signal_primary"].reindex(sid).to_numpy(float)) for p in ids]
+    rows.append(best)
+    labels = [names.get(p, p) for p in ids] + ["Strongest"]
+    grid = np.vstack([typical_bands(r, 500)[1] for r in rows])  # same smoothing as the maps: about 0.3 mm of print per column
+    km = float(samples["distance_m"].max()) / 1000
+    fig, ax = plt.subplots(figsize=(10, 0.34 * len(rows) + 1.35), dpi=160)
+    ax.imshow(grid, cmap=ListedColormap(BAND_COLORS), vmin=-0.5, vmax=len(BANDS) - 0.5, aspect="auto", interpolation="nearest", extent=[0, km, len(rows), 0])
+    for i in range(1, len(rows)):
+        ax.axhline(i, color="white", linewidth=2.2 if i == len(rows) - 1 else 1.2)   # a wider gap sets off the "Strongest" row
+    ax.set_yticks(np.arange(len(rows)) + 0.5); ax.set_yticklabels(labels, fontsize=7, color=INK)
+    ax.tick_params(axis="y", length=0)
+    ax.set_xlabel("Distance from origin (km)", fontsize=7, color=MUTED); ax.tick_params(axis="x", labelsize=6.5, colors=MUTED)
+    stops = stations[stations["stop"]] if "stop" in stations else stations
+    ax.set_xlim(0, km)
+    top = ax.secondary_xaxis("top")
+    top.set_xticks(np.minimum(stops["distance_m"].to_numpy() / 1000, km)); top.set_xticklabels(stops["crs"], fontsize=5.5, rotation=90, color=MUTED)
+    top.tick_params(length=2, colors=MUTED)
+    for sp in ax.spines.values():
+        sp.set_visible(False)
+    for sp in top.spines.values():
+        sp.set_visible(False)
+    ax.legend([Patch(facecolor=c) for c in BAND_COLORS], [f"{b}  {r}" for b, r in zip(BANDS, HEAT_METRICS["signal"]["ranges"])], loc="upper center",
+              bbox_to_anchor=(0.5, -0.32 if len(rows) > 3 else -0.5), ncol=5, frameon=False, fontsize=6.5, handlelength=1.4, labelcolor=INK)
+    buf = io.BytesIO(); fig.tight_layout(); fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0.08); plt.close(fig)
     return buf.getvalue()
 
 
@@ -221,7 +397,8 @@ def write_docx(path: Path, settings: Settings, meta: dict, k: dict, sec: pd.Data
     box.add_run("Figures below are simulation outputs built from the route geometry, terrain, published coverage predictions and the onboard architecture described in the method section. "
                 "They are not measurements of the deployed system. Confidence values state how much of each figure rests on measured, predicted or synthetic inputs; the validation section states what has been checked against field data.")
 
-    doc.add_heading("1. Headline results", 1)
+    num = iter(range(1, 20))                                   # section numbers (the architecture section is optional)
+    doc.add_heading(f"{next(num)}. Headline results", 1)
     kp = pd.DataFrame([
         ("Share of route supporting video calls / streaming (EXCELLENT or GOOD)", f"{k['streaming_share_pct']} %"),
         ("Share of route usable or better", f"{k['usable_share_pct']} %"),
@@ -239,19 +416,31 @@ def write_docx(path: Path, settings: Settings, meta: dict, k: dict, sec: pd.Data
     doc.add_picture(io.BytesIO(charts["sections"]), width=Cm(17))
     doc.add_paragraph("Figure 2. Predicted passenger Wi-Fi service class by station-to-station section.").alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    doc.add_heading("2. Station-to-station performance", 1)
+    doc.add_heading(f"{next(num)}. Route heat maps", 1)
+    doc.add_paragraph("Where along the railway connectivity is strong and where it is weak, darker meaning worse. Signal is the strongest mobile "
+                      "network received at the train with this scenario's antenna; throughput and latency are for the combined onboard WAN after "
+                      "the link-manager policy, which also draws on the satellite link. At page scale each short stretch of line shows the band "
+                      f"that at least half of it reaches; the legend shares count every {route['sample_spacing_m']} m sample, and the Excel "
+                      "appendix lists them all. Circles mark calling stations.")
+    doc.add_picture(io.BytesIO(charts["heatmap"]), width=Cm(17))
+    doc.add_paragraph("Figure 3. Route heat maps: predicted signal strength, throughput and latency (darker = worse).").alignment = WD_ALIGN_PARAGRAPH.CENTER
+    doc.add_picture(io.BytesIO(charts["networks"]), width=Cm(17))
+    doc.add_paragraph("Figure 4. Predicted signal strength of each mobile network along the route (RSRP at the train, darker = weaker); "
+                      "the bottom row is the strongest of them, as mapped in Figure 3.").alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    doc.add_heading(f"{next(num)}. Station-to-station performance", 1)
     doc.add_paragraph("Each row is the section between consecutive stations in the service's calling pattern. Capacities are the combined onboard WAN after the link-manager policy; the streaming share is the proportion of the section's length in the EXCELLENT or GOOD passenger Wi-Fi classes.")
     table(sec, ["section", "length_km", "minutes", "bonded_mean_mbps", "bonded_p10_mbps", "per_user_mean_mbps", "latency_mean_ms", "streaming_share_pct", "usable_share_pct", "outage_km", "tunnels", "weakest_link", "confidence"],
           {"section": "Section", "length_km": "km", "minutes": "min", "bonded_mean_mbps": "Mean Mbps", "bonded_p10_mbps": "P10 Mbps", "per_user_mean_mbps": "Per user Mbps", "latency_mean_ms": "Latency ms",
            "streaming_share_pct": "Streaming %", "usable_share_pct": "Usable %", "outage_km": "Outage km", "tunnels": "Tunnels", "weakest_link": "Weakest link", "confidence": "Conf."}, font=7)
 
-    doc.add_heading("3. Individual links", 1)
+    doc.add_heading(f"{next(num)}. Individual links", 1)
     doc.add_picture(io.BytesIO(charts["links"]), width=Cm(17))
     table(links, ["link", "type", "availability_pct", "p50_capacity_mbps", "p10_capacity_mbps", "mean_latency_ms", "handover_events", "unavailable_km", "mean_confidence"],
           {"link": "Link", "type": "Type", "availability_pct": "Available %", "p50_capacity_mbps": "P50 Mbps", "p10_capacity_mbps": "P10 Mbps", "mean_latency_ms": "Latency ms", "handover_events": "Handovers", "unavailable_km": "Unavailable km", "mean_confidence": "Conf."})
 
     if design:
-        doc.add_heading("4. Onboard architecture", 1)
+        doc.add_heading(f"{next(num)}. Onboard architecture", 1)
         doc.add_paragraph(f"Train design: {design.get('title')} — {design.get('n_carriages')} carriages, {design.get('cellular_units')} EDGE Rail cellular roof unit(s), "
                           f"{design.get('satcom_units')} satcom terminal(s){' (' + str(design.get('satcom_terminal')) + ')' if design.get('satcom_terminal') else ''}, "
                           f"{design.get('aps_connected')}/{design.get('aps_total')} access points connected, Fleet Connect {'present' if design.get('fleet_connect') else 'absent'}; "
@@ -259,22 +448,22 @@ def write_docx(path: Path, settings: Settings, meta: dict, k: dict, sec: pd.Data
         for w in design.get("warnings", []):
             doc.add_paragraph(w, style="List Bullet")
 
-    doc.add_heading(f"{5 if design else 4}. Method and assumptions", 1)
+    doc.add_heading(f"{next(num)}. Method and assumptions", 1)
     doc.add_paragraph("The route is sampled every 50 m along the railway centreline. At each sample the model estimates every cellular operator (coverage prior → terrain and cutting adjustment → serving-cell distance and handover effects → vehicle/antenna profile) and the satellite link (sky visibility from a digital elevation model horizon, tunnels and station canopies → availability → capacity), then runs the onboard link manager and a passenger demand model to predict the Wi-Fi experience. Every numerical assumption is listed below and versioned in the configuration files that accompany this pack.")
     table(pd.DataFrame(assumptions, columns=["Parameter", "Value"]), font=8)
 
-    doc.add_heading(f"{6 if design else 5}. Data sources and provenance", 1)
+    doc.add_heading(f"{next(num)}. Data sources and provenance", 1)
     table(pd.DataFrame(sources, columns=["Layer", "Source", "Status"]), font=8)
     doc.add_paragraph("Ofcom coverage is operator-predicted, not measured. OpenCellID is community-contributed; a missing cell does not imply no service. There is no public route-level Starlink RF telemetry; the satellite model is predictive until terminal telemetry is ingested. Throughput depends on network load and spectrum as well as signal.")
 
-    doc.add_heading(f"{7 if design else 6}. Validation status", 1)
+    doc.add_heading(f"{next(num)}. Validation status", 1)
     if validation is not None and len(validation):
         doc.add_paragraph("Predicted values were compared with field measurements attached to the route (within 250 m). Metrics by route section:")
         table(validation.head(60), font=7)
     else:
         doc.add_paragraph("No field measurements have yet been attached to this route. The calibration and validation tooling (tcs calibrate / tcs validate) accepts Ofcom drive-test data, the Ofcom Connectivity on Trains study annexes, Network Survey logs and onboard modem logs; once supplied, this section reports MAE/RMSE for signal, outage precision/recall, classification accuracy and handover position error by section, and the confidence values above rise accordingly.")
 
-    doc.add_heading(f"{8 if design else 7}. How to read confidence", 1)
+    doc.add_heading(f"{next(num)}. How to read confidence", 1)
     for line in ["0.90–1.00 directly measured / well validated", "0.70–0.89 strong source coverage + calibrated model", "0.40–0.69 prediction with partial infrastructure support", "0.10–0.39 sparse data / synthetic estimate", "0.00 unknown"]:
         doc.add_paragraph(line, style="List Bullet")
     doc.save(path)
@@ -319,7 +508,10 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
         ("Satellite", "predictive obstruction model" + (" + terminal telemetry" if any("telemetry" in str(x) for x in obs["source_flags"].unique()) else ""), "predictive"),
         ("Timetable", settings.route.get("timetable", {}).get("source", "yaml"), "configured"),
     ]
-    charts = {"capacity": _chart_capacity(samples, rc, stations, f"{meta['route']['name']} — {scenario_label}"), "sections": _chart_sections(sec), "links": _chart_links(links)}
+    bands = heat_bands(samples, rc, obs)
+    names = {op["id"]: op.get("name", op["id"]) for op in settings.operators}
+    charts = {"capacity": _chart_capacity(samples, rc, stations, f"{meta['route']['name']} — {scenario_label}"), "sections": _chart_sections(sec), "links": _chart_links(links),
+              "heatmap": _chart_heatmap(samples, stations, bands), "networks": _chart_networks(samples, stations, obs, names, bands["signal"])}
     design = sim.get("train", {}).get("design")
     stem = f"evidence_{meta['route']['id']}_{(sim.get('active_preset') or 'baseline')}"
     docx_path, xlsx_path = out_dir / f"{stem}.docx", out_dir / f"{stem}.xlsx"

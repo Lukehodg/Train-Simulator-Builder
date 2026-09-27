@@ -188,6 +188,11 @@ def test_report_all_places_packs_beside_the_viewer_bundle(pipeline, tmp_path, mo
             assert f.stat().st_size == r[kind]["bytes"] > 0
             files.append(f.name)
     assert sorted(p.name for p in out.iterdir()) == sorted(["index.json", *files])   # no chart PNGs: they are inside the Word report
+    from docx import Document
+
+    doc = Document(str(out / idx["reports"][0]["docx"]["file"]))
+    assert "2. Route heat maps" in [p.text for p in doc.paragraphs]
+    assert len(doc.inline_shapes) == 5                         # capacity, sections, heat maps, per-network strip, links
 
     # A viewer bundle from another build is refused rather than described by the wrong pack.
     (web_data / s.route_id / "meta.json").write_text("{}", encoding="utf-8")

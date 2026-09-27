@@ -91,6 +91,30 @@ def test_outage_distance_cannot_exceed_route_length():
     assert result["outage_km"] == result["route_length_km"]
 
 
+def test_heat_map_bands_follow_the_legend_edges():
+    """The route heat maps band every sample exactly as their legends state (0 = Excellent ... 4 = Very poor)."""
+    from tcs.report import HEAT_METRICS, band_shares, heat_bands, typical_bands
+
+    rsrp = [-80.0, -80.1, -90.0, -100.0, -110.0, -110.1, np.nan]
+    cap = [200.0, 199.9, 100.0, 50.0, 10.0, 9.9, 0.0]
+    lat = [39.9, 40.0, 60.0, 100.0, 149.9, 150.0, np.nan]         # no latency = no link
+    n = len(rsrp)
+    samples = pd.DataFrame({"sample_id": range(n)})
+    obs = pd.DataFrame({"sample_id": [*range(n), *range(n)], "provider_type": ["cellular"] * (2 * n),
+                        "signal_primary": [*rsrp, *([-125.0] * n)]})   # a weaker second network never lowers the strongest
+    rc = pd.DataFrame({"sample_id": range(n)[::-1], "bonded_capacity_mbps": cap[::-1], "effective_latency_ms": lat[::-1]})   # aligned by id, not row order
+    bands = heat_bands(samples, rc, obs)
+    assert bands["signal"].tolist() == [0, 1, 1, 2, 3, 4, 4]
+    assert bands["throughput"].tolist() == [0, 1, 1, 2, 3, 4, 4]
+    assert bands["latency"].tolist() == [0, 1, 2, 3, 3, 4, 4]
+    assert all(len(m["ranges"]) == 5 for m in HEAT_METRICS.values())
+    assert sum(band_shares(bands["signal"])) == pytest.approx(100)
+
+    # page-scale runs take the band at least half of them reach: one bad sample does not colour a run, half of them do
+    edges, typical = typical_bands(np.array([0, 0, 0, 4, 0, 0, 4, 4]), 2)
+    assert edges.tolist() == [0, 4, 8] and typical.tolist() == [0, 4]
+
+
 def test_packaging_missing_build_preserves_existing_output(tmp_path, monkeypatch):
     from tcs import package
 

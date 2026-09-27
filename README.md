@@ -88,7 +88,9 @@ multi-track stations route correctly (mileages come out within ~1 % of the publi
 ## Evidence pack (`tcs report`)
 
 A Word report and an Excel appendix per route and scenario: headline KPIs, capacity along the route with stations
-and tunnels, service class by station-to-station section, per-link availability/capacity, onboard architecture,
+and tunnels, service class by station-to-station section, route heat maps of signal strength, throughput and latency
+(five bands each, darker = worse, with each band's share of the route) plus a per-network signal strip,
+per-link availability/capacity, onboard architecture,
 every model assumption, data provenance with live/synthetic status, and the validation status (metrics by section
 once measurements are attached). The document states plainly that figures are model predictions until validated.
 
