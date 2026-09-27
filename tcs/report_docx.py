@@ -146,7 +146,7 @@ def _rgb(hex6: str) -> RGBColor:
     return RGBColor.from_string(hex6)
 
 
-_UNIT = re.compile(r"(?<=[\d%)]) (?=(?:%|km|Mbps|ms|dBm|dB|min|h|m|points)\b)")
+_UNIT = re.compile(r"(?<=[\d%)]) (?=%|(?:km|Mbps|ms|dBm|dB|min|h|m|pp|points)\b)")
 
 
 def _nb(text: str) -> str:
@@ -236,7 +236,7 @@ def _share(v: float) -> str:
 
 def _hours(minutes: float) -> str:
     h, m = divmod(int(round(minutes)), 60)
-    return f"{h} h {m:02d} min" if h else f"{m} min"
+    return f"{h}\u00a0h\u00a0{m:02d}\u00a0min" if h else f"{m}\u00a0min"   # never broken across lines
 
 
 # ------------------------------------------------------------------------------------------------ the document
@@ -593,7 +593,7 @@ class _Report:
         sat = f"the {ev.satcom} satellite link" if ev.satcom != "no satellite link" else "no satellite link"
         self.para(f"This document sets out the predicted onboard connectivity{whom}{ref} for passengers travelling on the {ev.route_name} "
                   f"between {ev.origin} and {ev.destination}: {k['route_length_km']:.0f} km in {_hours(k['journey_minutes'])}. It models "
-                  f"{'the baseline configuration' if ev.scenario_title.startswith('Baseline') else 'the ' + ev.scenario_title + ' scenario'}, "
+                  f"{'the baseline configuration' if ev.scenario_title.startswith('Baseline') else 'the ' + ev.scenario_title + ('' if ev.design else ' scenario')}, "
                   f"{_a(ev.vehicle.lower() if not ev.vehicle.startswith('EDGE') else ev.vehicle)} with {ev.policy.split(' (')[0].lower()}, "
                   f"across the {_and(ev.operators)} mobile networks and {sat}.")
         self.doc.add_heading("Key findings", 3)

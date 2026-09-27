@@ -559,7 +559,7 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
     preset = sim.get("active_preset")
     presets = sim.get("presets", {})
     if design:
-        title = f"Train design: {design.get('title')}"
+        title = f"{design.get('title')} train design"
     elif preset and preset != "baseline" and preset in presets:
         title = presets[preset].get("label", preset)
     else:

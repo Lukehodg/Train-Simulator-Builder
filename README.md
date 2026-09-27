@@ -105,7 +105,9 @@ A Word report laid out for a tender submission, and an Excel data appendix, per 
 
 Tables and figures are numbered, every page carries the document reference, classification and "Page X of Y", and
 the document states plainly that figures are model predictions until validated. Cover details (your organisation,
-the client, the tender reference, the classification, the version) come from `config/report.yaml`. Word offers to
+the client, the tender reference, the classification, the version) come from `config/report.yaml`; for a one-off
+pack, `tcs report` takes them on the command line instead (`--prepared-for "London North Eastern Railway (LNER)"
+--tender-ref ... --prepared-by ... --classification ... --doc-version ...`). Word offers to
 update the document's fields on first opening. Accept it, and the contents page gets its page numbers.
 
 The Excel appendix has a read-me sheet, the headline measures, every section and link, every 50 m point
