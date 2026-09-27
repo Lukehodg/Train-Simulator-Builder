@@ -9,6 +9,7 @@ import { parityReport, simulate } from './sim/model'
 import { Store, fmtClock, type State } from './state'
 import { initInspector, showTab } from './ui/inspector'
 import { initRail } from './ui/rail'
+import { initReports } from './ui/reports'
 import { trapTab } from './ui/a11y'
 import { setSimState } from './ui/status'
 import { initTimeline } from './ui/timeline'
@@ -120,7 +121,18 @@ async function main() {
     if (open) { const r = pill.getBoundingClientRect(); pop.style.right = `${Math.max(8, innerWidth - r.right)}px`; ($('preset') as HTMLElement).focus() }
     else if (returnFocus) pill.focus()
   }
-  pill.addEventListener('click', e => { e.stopPropagation(); setPopover(pop.hidden) })
+  // Report: the evidence packs pre-built for the standard scenarios; flags when the screen shows something else.
+  const reports = initReports({
+    routeId, describe: () => $('scenarioSummary').textContent ?? '', onExport: () => exportScenario(store), onOpen: () => setPopover(false),
+    matching: ids => {
+      const sc = store.state.scenario, p = presetSel.value
+      if (sc.weather !== 'nominal' || !ids.includes(p)) return null
+      const pr = p === 'baseline' ? {} : baselineMeta.sim.presets?.[p]
+      if (!pr) return null
+      return sc.policy === (pr.policy ?? baselineScenario.policy) && sc.vehicle === (pr.vehicle_profile ?? baselineScenario.vehicle) ? p : null
+    },
+  })
+  pill.addEventListener('click', e => { e.stopPropagation(); reports.set(false); setPopover(pop.hidden) })
   pop.addEventListener('click', e => e.stopPropagation())
   document.addEventListener('click', () => setPopover(false))
   const renderTrainTab = () => {
@@ -221,7 +233,7 @@ async function main() {
   jump.innerHTML = '<option value="">station…</option>' + meta.stations.map((s, k) => `<option value="${k}">${s.name}</option>`).join('')
   jump.addEventListener('change', () => { const s = meta.stations[Number(jump.value)]; if (s) seek(Math.max(0, data.t[s.sample_id] - 30)); jump.value = '' })
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { closeHelp(); setPopover(false, true); return }
+    if (e.key === 'Escape') { closeHelp(); setPopover(false, true); reports.set(false, true); return }
     if (!help.hidden) return                                  // the dialog is modal: no app shortcuts behind it
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
     if (e.ctrlKey || e.metaKey || e.altKey) return
@@ -288,7 +300,8 @@ async function main() {
   requestAnimationFrame(frame)
 }
 
-/** Browser-side export of the on-screen scenario: per-sample CSV + a JSON summary. The tender-grade pack (Word + Excel) is `tcs report`. */
+/** Browser-side export of the on-screen scenario: per-sample CSV + a JSON summary. The tender-grade pack (Word + Excel) is
+ *  `tcs report`; `tcs report-all` pre-builds it for the standard scenarios, which the Report button offers. */
 function exportScenario(store: Store) {
   const { data, sim, scenario } = store.state
   const m = data.meta
@@ -361,6 +374,7 @@ function renderHelp() {
       <li><b>Sky window</b>: the disc above the train scales with the satcom sky-visibility score from the DEM horizon; in the outage colour there is no session (tunnel, canopy, deep cutting).</li>
       <li><b>Train and surroundings</b>: the consist follows the loaded Train Studio design (roof units included); rails, catenary, 3D buildings and woodland trees come from the basemap's own vector tiles, so they are real footprints but schematic heights.</li>
       <li><b>Scenario controls</b> re-run the link manager and Wi-Fi model in the browser; the Python pipeline produced the per-link base estimates.</li>
+      <li><b>Report</b> downloads the evidence pack (Word report + Excel appendix) pre-built for the standard scenarios; <b>Export</b> saves whatever scenario is on screen as CSV + JSON.</li>
       <li><b>Confidence</b>: switch the colouring to Confidence to see how much of the route rests on measured, predicted or synthetic inputs.</li>
       <li><b>Keys</b>: <kbd>Space</kbd> play / pause · <kbd>←</kbd> <kbd>→</kbd> ±1 min (<kbd>Shift</kbd> ±10 min) · <kbd>[</kbd> <kbd>]</kbd> playback rate · <kbd>Home</kbd> <kbd>End</kbd> start / end · <kbd>I</kbd> inspector · <kbd>S</kbd> inspect the sample at the train · <kbd>C</kbd> camera view · <kbd>?</kbd> this help · <kbd>Esc</kbd> close. Drag the map to take the camera.</li>
     </ul>
