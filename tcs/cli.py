@@ -96,6 +96,7 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     if copy_to_web:
         dest = ROOT / "web" / "public" / "data" / s.route_id
         dest.mkdir(parents=True, exist_ok=True)
+        shutil.rmtree(dest / "reports", ignore_errors=True)   # evidence packs describe the previous build; `tcs report-all` rebuilds them
         for f in ("route.arrow", "cells.arrow", "meta.json"):
             shutil.copy(s.paths()["web"] / f, dest / f)
         console.log(f"web bundle -> {dest}")
@@ -157,7 +158,7 @@ def serve(port: int = typer.Option(8000, help="Preferred port (the next free one
 
 @app.command()
 def package(out: Path | None = typer.Option(None, help="Output folder (default: dist/)"),
-            zip_it: bool = typer.Option(True, "--zip/--no-zip"), reports: bool = typer.Option(True, "--reports/--no-reports"),
+            zip_it: bool = typer.Option(True, "--zip/--no-zip"), reports: bool = typer.Option(True, "--reports/--no-reports", help="Keep the evidence packs the viewer's Report button offers"),
             skip_build: bool = typer.Option(False, help="Reuse an existing web/dist instead of running npm build")):
     """Package the viewer, the Train Builder and every built route into a zip that runs with nothing installed."""
     from .package import package as _package
@@ -205,6 +206,12 @@ def report(route: str | None = typer.Option(None, help="Route id (default: confi
            train: Path | None = typer.Option(None, help="Train Studio project (*.train.json)"), policy: str | None = typer.Option(None), weather: str = typer.Option("nominal"),
            out: Path | None = typer.Option(None, help="Output folder (default data/processed/<route>/reports)")):
     """Tender evidence pack: Word report + Excel appendix for one route and scenario (re-simulates from the cached route data)."""
+    written = _build_report(route, preset, train, policy, weather, out)
+    for k, v in written.items():
+        console.log(f"[bold]{k}[/bold] {v}")
+
+
+def _build_report(route: str | None, preset: str | None, train: Path | None, policy: str | None, weather: str, out: Path | None) -> dict[str, Path]:
     from .model import calibration
     from .model.simulate import simulate
     from .pipeline.sample_route import load_bundle
@@ -251,9 +258,54 @@ def report(route: str | None = typer.Option(None, help="Route id (default: confi
     meta["model_version"] = s.sim["model_version"]
     vpath = processed / "validation_by_section.csv"
     validation = pd.read_csv(vpath) if vpath.exists() else None
-    written = build_report(s, meta, b.samples, obs, rc, stations, out or (processed / "reports"), label, validation)
-    for k, v in written.items():
-        console.log(f"[bold]{k}[/bold] {v}")
+    return build_report(s, meta, b.samples, obs, rc, stations, out or (processed / "reports"), label, validation)
+
+
+REPORT_SCENARIOS = ("baseline", "edge_rail_fleet_connect")
+
+
+@app.command("report-all")
+def report_all(only: str | None = typer.Option(None, help="Comma-separated route ids (default: every built route)"),
+               scenarios: str = typer.Option(",".join(REPORT_SCENARIOS), help="'baseline' and/or preset ids"),
+               web_data: Path = typer.Option(ROOT / "web" / "public" / "data", help="Viewer data folder holding the route bundles")):
+    """Evidence packs for every built route, placed beside its viewer bundle (<web-data>/<route>/reports/) with the
+    index.json the viewer's Report button reads. Re-simulates from the cached route data: no API calls."""
+    from .sources.base import now_iso
+
+    ids = sorted(p.parent.name for p in web_data.glob("*/meta.json"))
+    if only:
+        ids = [i for i in ids if i in {x.strip() for x in only.split(",")}]
+    wanted = [x.strip() for x in scenarios.split(",") if x.strip()]
+    presets = load_settings().sim.get("presets", {})
+    failures = []
+    for rid in ids:
+        out = web_data / rid / "reports"
+        shutil.rmtree(out, ignore_errors=True)
+        built = load_settings(route_id=rid).paths()["processed"] / "web" / "meta.json"
+        if not built.is_file() or built.read_bytes() != (web_data / rid / "meta.json").read_bytes():
+            # the pack re-simulates from data/processed: it must be the same build the viewer shows
+            console.log(f"[red]{rid}: the viewer bundle and data/processed/{rid} come from different builds; rebuild the route with tcs run")
+            failures += [f"{rid}/{sc}" for sc in wanted]
+            continue
+        items = []
+        for sc in wanted:
+            try:
+                written = _build_report(rid, None if sc == "baseline" else sc, None, None, "nominal", out)
+            except Exception as exc:  # noqa: BLE001 - keep going, report at the end
+                console.log(f"[red]{rid} / {sc} failed: {exc}")
+                failures.append(f"{rid}/{sc}")
+                continue
+            label = presets.get(sc, {}).get("label", "Baseline (config defaults)" if sc == "baseline" else sc)
+            items.append({"scenario": sc, "label": label, **{kind: {"file": p.name, "bytes": p.stat().st_size} for kind, p in written.items()}})
+        for png in out.glob("*.png"):
+            png.unlink()   # the charts are already inside the Word report
+        if items:
+            (out / "index.json").write_text(json.dumps({"route": rid, "generated_at": now_iso(), "reports": items}, indent=1), encoding="utf-8")
+            console.log(f"{rid}: {len(items)} report(s) -> {out}")
+    console.rule("report-all")
+    console.log(f"{len(ids) * len(wanted) - len(failures)}/{len(ids) * len(wanted)} reports built" + (f"; failed: {', '.join(failures)}" if failures else ""))
+    if failures:
+        raise typer.Exit(code=1)
 
 
 @app.command("probe-ofcom")

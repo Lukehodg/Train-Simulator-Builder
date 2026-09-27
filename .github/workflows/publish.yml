@@ -111,6 +111,15 @@ jobs:
               print(f"::error::Ofcom coverage fell back to stand-in data for: {', '.join(no_coverage)}. Not publishing.")
               raise SystemExit(1)
 
+      # Word report + Excel appendix per route for the baseline and EDGE Rail + Fleet Connect scenarios, placed beside
+      # each route bundle for the viewer's Report button. Re-simulates from the data just built: no API calls.
+      # A pack that fails to build does not hold back the publish; that route's Report menu says it has no pack.
+      - name: Build the evidence packs for the Report button
+        run: |
+          if ! tcs report-all; then
+            echo "::warning::Some evidence packs failed to build (see the log above); those routes are published without a Report download."
+          fi
+
       - name: Build the viewer
         working-directory: web
         run: |

@@ -5,7 +5,9 @@ Produces dist/train-link-simulator-<date>.zip containing:
   Start Simulator.bat   Windows launcher (PowerShell static server; nothing to install)
   start-simulator.sh    macOS / Linux launcher (python3 -m http.server)
   README.txt            what it is, how to run it, what the figures mean
-  reports/              any evidence packs generated for the included routes (optional)
+
+The evidence packs `tcs report-all` built travel inside site/data/<route>/reports/, where the viewer's Report button
+offers them; --no-reports leaves them out for a smaller zip.
 
 The recipient needs no Python, no Node and no network connection except for the basemap and terrain tiles.
 """
@@ -50,6 +52,8 @@ WHAT YOU CAN DO
   what that architecture delivers along the route.
 * Click any ribbon to inspect a single 50 m sample: carrier values, estimated serving cell, obstruction state,
   provenance and the model reasoning behind each number.
+* Download the evidence pack (Word report + Excel appendix) for the baseline and the EDGE Rail + Fleet Connect
+  scenarios with the Report button, where it was built for the route.
 * Export the on-screen scenario as CSV + JSON with the Export button.
 
 HOW TO READ THE FIGURES
@@ -118,15 +122,9 @@ def package(out_dir: Path | None = None, include_reports: bool = True, zip_it: b
             shutil.copy(src, stage / name)
     (stage / "start-simulator.sh").chmod(0o755) if (stage / "start-simulator.sh").exists() else None
 
-    if include_reports:
-        for rep in (ROOT / "data" / "processed").glob("*/reports"):
-            rid = rep.parent.name
-            if routes and rid not in routes:
-                continue
-            for f in rep.glob("evidence_*"):
-                dest = stage / "reports" / rid
-                dest.mkdir(parents=True, exist_ok=True)
-                shutil.copy(f, dest / f.name)
+    if not include_reports:
+        for rep in (stage / "site" / "data").glob("*/reports"):
+            shutil.rmtree(rep)
 
     (stage / "README.txt").write_text(
         README.format(n_routes=len(routes) or "the", built=stamp, model_version=model_version, routes=", ".join(routes) or "(none built)"),

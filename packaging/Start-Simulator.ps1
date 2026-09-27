@@ -14,6 +14,7 @@ $mime = @{
   '.png' = 'image/png'; '.jpg' = 'image/jpeg'; '.jpeg' = 'image/jpeg'; '.webp' = 'image/webp'; '.ico' = 'image/x-icon'
   '.woff' = 'font/woff'; '.woff2' = 'font/woff2'; '.ttf' = 'font/ttf'; '.txt' = 'text/plain; charset=utf-8'
   '.csv' = 'text/csv'; '.geojson' = 'application/geo+json'; '.map' = 'application/json'
+  '.docx' = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'; '.xlsx' = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 }
 
 # First free port from 8777 upwards.

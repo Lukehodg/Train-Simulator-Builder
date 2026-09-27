@@ -4,7 +4,8 @@ The viewer is a static website: the live feeds are fetched by the pipeline when 
 someone is using it. So hosting it "with live feeds" means two pieces:
 
 - **GitHub Actions** (`.github/workflows/publish.yml`) rebuilds all 18 routes from the live feeds on the 17th of each
-  month, or whenever you run it by hand, then publishes the result. Your API keys live only there, as GitHub secrets.
+  month, or whenever you run it by hand, builds each route's Word + Excel evidence pack for the viewer's **Report**
+  button, then publishes the result. Your API keys live only there, as GitHub secrets.
   GitHub's machines have open internet, so OpenStreetMap works and every route gets its exact track line.
 - **Cloudflare** serves the site (a Workers static-assets site, configured in `wrangler.jsonc`; Cloudflare Pages now
   lives inside Workers), and **Cloudflare Access** decides who can open it. Colleagues open the link,
@@ -81,6 +82,10 @@ Secrets are write-only: nobody, including you, can read them back from GitHub, a
 
 - It rebuilds and republishes automatically on the 17th of each month, just after the Ofcom call quota resets. To
   refresh sooner, run the workflow by hand, but see the quota note below.
+- **Report downloads:** each publish builds the evidence pack (Word report + Excel appendix) for every route in the
+  baseline and EDGE Rail + Fleet Connect scenarios; colleagues download them from the viewer's **Report** button.
+  They add about 66 MB to the site and a few minutes to the run. A pack that fails to build does not stop the
+  publish: the run shows a warning and that route's Report menu says it has no pack.
 - **Adding or removing people:** edit the `Colleagues` policy in Zero Trust → Access → Applications. No rebuild needed.
 - **If a run fails:** nothing is published and the previous version stays live. Open the failed run and use
   **Re-run failed jobs**. Downloads and Ofcom answers from the past week are reused, so a re-run is cheaper.

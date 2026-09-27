@@ -146,6 +146,56 @@ def test_calibrate_twice_keeps_calibration(pipeline, tmp_path, monkeypatch):
     assert load(interim / "calibration.json")["bias"]["ee"] == pytest.approx(bias1)
 
 
+def test_report_all_places_packs_beside_the_viewer_bundle(pipeline, tmp_path, monkeypatch):
+    """`tcs report-all` writes the Word + Excel packs and the index.json the viewer's Report menu reads."""
+    import copy
+    import json
+    import shutil
+
+    from typer.testing import CliRunner
+
+    from tcs import config
+    from tcs.cli import app
+    from tcs.pipeline.export import export_all
+    from tcs.pipeline.sample_route import save_bundle
+
+    s, b, stations, prior, serving, obs, rc = pipeline
+    for name in ("RAW", "INTERIM", "PROCESSED"):
+        monkeypatch.setattr(config, name, tmp_path / name.lower())
+    b = copy.copy(b)
+    b.stations = stations                                   # as `tcs run` saves it
+    interim = s.paths()["interim"]
+    save_bundle(b, interim)
+    prior.to_parquet(interim / "coverage_prior.parquet", index=False)
+    serving.to_parquet(interim / "serving.parquet", index=False)
+    export_all(s, b, b.samples, stations, corridor_cells(s, b, b.samples), obs, rc, prior)
+    web_data = tmp_path / "web-data"
+    (web_data / s.route_id).mkdir(parents=True)
+    shutil.copy(s.paths()["web"] / "meta.json", web_data / s.route_id / "meta.json")
+
+    res = CliRunner().invoke(app, ["report-all", "--web-data", str(web_data)])
+    assert res.exit_code == 0, res.output
+    out = web_data / s.route_id / "reports"
+    idx = json.loads((out / "index.json").read_text(encoding="utf-8"))
+    assert idx["route"] == s.route_id
+    assert [r["scenario"] for r in idx["reports"]] == ["baseline", "edge_rail_fleet_connect"]
+    files = []
+    for r in idx["reports"]:
+        assert r["label"]
+        for kind in ("docx", "xlsx"):
+            f = out / r[kind]["file"]
+            assert f.suffix == f".{kind}"
+            assert f.stat().st_size == r[kind]["bytes"] > 0
+            files.append(f.name)
+    assert sorted(p.name for p in out.iterdir()) == sorted(["index.json", *files])   # no chart PNGs: they are inside the Word report
+
+    # A viewer bundle from another build is refused rather than described by the wrong pack.
+    (web_data / s.route_id / "meta.json").write_text("{}", encoding="utf-8")
+    res = CliRunner().invoke(app, ["report-all", "--web-data", str(web_data)])
+    assert res.exit_code == 1
+    assert not out.exists()
+
+
 @pytest.mark.parametrize("calibrated", [False, True])
 def test_browser_model_parity(pipeline, calibrated):
     import copy

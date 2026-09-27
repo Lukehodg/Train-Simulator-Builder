@@ -5,7 +5,10 @@ import path from 'node:path'
 test.beforeEach(async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', error => errors.push(error.message))
-  page.on('response', response => { if (response.url().startsWith('http://127.0.0.1:4178/') && response.status() >= 400) errors.push(`HTTP ${response.status()}: ${response.url()}`) })
+  page.on('response', response => {
+    if (response.url().endsWith('/reports/index.json')) return   // a route without evidence packs is a normal state (the Report menu says so)
+    if (response.url().startsWith('http://127.0.0.1:4178/') && response.status() >= 400) errors.push(`HTTP ${response.status()}: ${response.url()}`)
+  })
   ;(page as any).appErrors = errors
   await page.route('**/*', async route => {
     const url = new URL(route.request().url())
@@ -81,6 +84,62 @@ test('valid design, rejected malformed design, reset and export', async ({ page 
   const stream = await download.createReadStream()
   const chunks = []; for await (const chunk of stream!) chunks.push(chunk)
   expect(Buffer.concat(chunks).length).toBeGreaterThan(100)
+})
+
+// `tcs report-all` places Word + Excel packs for the standard scenarios beside each route bundle, with an index.json.
+test('the Report menu offers the pre-built packs and flags a scenario they do not cover', async ({ page }) => {
+  const pack = (sc: string, label: string, xlsxBytes: number) => ({ scenario: sc, label,
+    docx: { file: `evidence_ecml_kgx_edb_${sc}.docx`, bytes: 266861 }, xlsx: { file: `evidence_ecml_kgx_edb_${sc}.xlsx`, bytes: xlsxBytes } })
+  const reports = [pack('baseline', 'Baseline (config defaults)', 4_100_000), pack('edge_rail_fleet_connect', 'EDGE Rail 5G active antenna + Fleet Connect', 708216)]
+  await page.route(url => /\/data\/ecml_kgx_edb\/reports\//.test(url.pathname), route => {
+    if (route.request().url().endsWith('/index.json')) return route.fulfill({ json: { route: 'ecml_kgx_edb', generated_at: '2026-09-27T12:00:00+00:00', reports } })
+    return route.fulfill({ body: 'pack', contentType: 'application/octet-stream' })
+  })
+  const btn = page.locator('#btnReport'), menu = page.locator('#reportPopover')
+  await btn.click()
+  await expect(menu).toBeVisible()
+  await expect(btn).toHaveAttribute('aria-expanded', 'true')
+  await expect(menu.locator('.rp-item')).toHaveCount(2)
+  await expect(menu.locator('.rp-item.on')).toContainText('Baseline')
+  await expect(menu.locator('.rp-note')).toHaveCount(0)
+  await expect(menu).toContainText(/Built 27 Sept? 2026/)
+  const first = menu.locator('.rp-file').first()
+  await expect(first).toBeFocused()                          // the pack matching the screen
+  await expect(first).toHaveAttribute('href', 'data/ecml_kgx_edb/reports/evidence_ecml_kgx_edb_baseline.docx')
+  await expect(menu.locator('.rp-file').nth(1)).toContainText('4.1 MB')
+  const [download] = await Promise.all([page.waitForEvent('download'), first.click()])
+  expect(download.suggestedFilename()).toBe('evidence_ecml_kgx_edb_baseline.docx')
+  await page.keyboard.press('Escape')
+  await expect(menu).toBeHidden()
+  await expect(btn).toBeFocused()
+
+  await page.locator('#scenarioPill').click()
+  await page.locator('#preset').selectOption('edge_rail_fleet_connect')
+  await btn.click()                                          // one header popover at a time
+  await expect(page.locator('#scenarioPopover')).toBeHidden()
+  await expect(menu.locator('.rp-item.on')).toContainText('EDGE Rail')
+  await expect(menu.locator('.rp-item.on .rp-file').first()).toBeFocused()
+  await page.keyboard.press('Escape')
+
+  await page.locator('#scenarioPill').click()
+  await page.locator('#weather').selectOption('storm')
+  await btn.click()
+  await expect(menu.locator('.rp-item.on')).toHaveCount(0)
+  await expect(menu.locator('.rp-note')).toContainText('no pack')
+  await expect(menu.locator('.rp-note')).toContainText('storm')
+  const [csv] = await Promise.all([page.waitForEvent('download'), menu.getByRole('button', { name: 'Export on-screen scenario' }).click()])
+  expect(csv.suggestedFilename()).toMatch(/\.(csv|json)$/)
+  await expect(menu).toBeHidden()
+})
+
+test('the Report menu explains when a route has no evidence pack', async ({ page }) => {
+  await page.route(url => url.pathname.endsWith('/reports/index.json'), route => route.fulfill({ status: 404, body: 'Not found' }))
+  await page.locator('#btnReport').click()
+  await expect(page.locator('#reportPopover')).toContainText('No evidence pack was published')
+  await expect(page.locator('#reportPopover .rp-file')).toHaveCount(0)
+  await expect(page.locator('#reportPopover').getByRole('button', { name: 'Export on-screen scenario' })).toBeFocused()
+  await page.locator('#clock').click()                       // a click outside closes it
+  await expect(page.locator('#reportPopover')).toBeHidden()
 })
 
 test('route selection reloads and timeline click inspects a sample', async ({ page }) => {

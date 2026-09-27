@@ -25,6 +25,7 @@ tcs run --route wcml_eus_glc
 tcs build-all               # every route in the catalogue -> web/public/data/<id>/ + index.json (route picker)
 tcs report --route ecml_kgx_edb --preset edge_rail_fleet_connect --train examples/azuma-5car.train.json
                             # tender evidence pack: Word report + Excel appendix in data/processed/<route>/reports/
+tcs report-all              # packs for every built route (baseline + EDGE Rail + Fleet Connect) for the viewer's Report button
 tcs sources                 # which feeds are live, which fall back
 
 # Viewer
@@ -71,8 +72,9 @@ tcs serve --built      # serve the production build locally without packaging
 The zip runs with **nothing installed**: on Windows the recipient double-clicks `Start Simulator.bat` (a
 PowerShell static file server, no admin rights, no Python or Node); on macOS/Linux `./start-simulator.sh` uses
 the preinstalled `python3`. A browser opens automatically. Only the basemap and terrain tiles need the internet -
-offline, every ribbon, panel and figure still works against blank map tiles. Any evidence packs generated for the
-included routes are copied into `reports/`, and `README.txt` explains how to read the confidence values.
+offline, every ribbon, panel and figure still works against blank map tiles. The evidence packs built by
+`tcs report-all` travel inside the site, behind the viewer's **Report** button (`--no-reports` leaves them out for a
+smaller zip), and `README.txt` explains how to read the confidence values.
 
 ## Routes
 
@@ -89,7 +91,15 @@ A Word report and an Excel appendix per route and scenario: headline KPIs, capac
 and tunnels, service class by station-to-station section, per-link availability/capacity, onboard architecture,
 every model assumption, data provenance with live/synthetic status, and the validation status (metrics by section
 once measurements are attached). The document states plainly that figures are model predictions until validated.
-The viewer's **Export** button downloads the on-screen scenario as CSV + JSON.
+
+`tcs report-all` builds the pack for every built route in the two standard scenarios (baseline, and EDGE Rail 5G +
+Fleet Connect) and places it beside the route's viewer bundle (`web/public/data/<route>/reports/`, with an
+`index.json`). The viewer's **Report** button offers those downloads, marks the one matching the scenario on screen,
+and says so when the screen shows something no pack covers (a train design, other overrides, bad weather). It
+re-simulates from the cached route data (no API calls; about 2.5 minutes for all 18 routes) and refuses a route whose
+viewer bundle comes from a different build. A fresh `tcs run` clears that route's packs, since they describe the
+previous build. The monthly publish runs it after the rebuild. The viewer's **Export** button downloads whatever
+scenario is on screen as CSV + JSON.
 
 ## Viewer
 
