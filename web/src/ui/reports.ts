@@ -1,12 +1,12 @@
 /** The Report menu: download links for the evidence packs (Word report + Excel appendix) that `tcs report-all` builds
  *  beside each route bundle, in data/<route>/reports/ with an index.json. UI only; nothing is generated in the browser. */
 import { CONFIG } from '../config'
+import { esc } from '../html'
 
 interface ReportFile { file: string; bytes: number }
 interface ReportItem { scenario: string; label: string; docx?: ReportFile; xlsx?: ReportFile }
 interface ReportIndex { route: string; generated_at: string; reports: ReportItem[] }
 
-const esc = (s: string) => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`)
 const size = (b: number) => (b >= 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`)
 const KINDS = [
   { key: 'docx', name: 'Word report', icon: 'M4 1.5h5L12 4.5V14.5H4zM9 1.5v3h3M6 8h4M6 10.5h4' },

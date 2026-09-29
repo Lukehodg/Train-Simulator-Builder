@@ -1,6 +1,7 @@
 import type { Store } from '../state'
 import type { CameraMode, Metric } from '../types'
 import { CLASS_VARS, CONF_VARS, cssVar } from '../sim/classify'
+import { esc } from '../html'
 import { arrowNav } from './a11y'
 import { showTab } from './inspector'
 
@@ -54,7 +55,7 @@ export function initRail(store: Store) {
     if (r.group !== group) { group = r.group; const h = document.createElement('div'); h.className = 'grp-h'; h.textContent = group; list.appendChild(h) }
     const el = document.createElement('label')
     el.className = 'link-row'
-    el.innerHTML = `<input type="checkbox" ${s.linkVisible[r.key] ? 'checked' : ''}><span class="name">${r.label}${r.sub ? `<small>${r.sub}</small>` : ''}</span><span class="lane">${r.tag}</span>`
+    el.innerHTML = `<input type="checkbox" ${s.linkVisible[r.key] ? 'checked' : ''}><span class="name">${esc(r.label)}${r.sub ? `<small>${esc(r.sub)}</small>` : ''}</span><span class="lane">${esc(r.tag)}</span>`
     el.querySelector('input')!.addEventListener('change', e => store.set({ linkVisible: { ...store.state.linkVisible, [r.key]: (e.target as HTMLInputElement).checked } }))
     list.appendChild(el)
   }

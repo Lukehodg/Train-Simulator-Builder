@@ -185,3 +185,23 @@ test('the viewer runs with 3D terrain switched on', async ({ page }) => {
   await page.waitForTimeout(1500)                            // several map renders with terrain on; afterEach checks for page errors
   await expect(page.locator('#simState')).toHaveAttribute('data-state', 'running')
 })
+
+// Station, provider and route names come from OSM, OpenCelliD and route config; none of it may become markup.
+test('names from the route data are shown as text, never as markup', async ({ page }) => {
+  const meta = JSON.parse(readFileSync(path.resolve('tests/.generated', 'meta.json'), 'utf-8'))
+  const tag = (id: string) => `<img id="${id}" src="data:," onerror="window.__xss=1">`
+  meta.stations[1].name = `Halt ${tag('xss-station')}`
+  meta.providers[0].name = `${meta.providers[0].name} ${tag('xss-provider')}`
+  meta.warnings = [...(meta.warnings ?? []), `Check ${tag('xss-warning')}`]
+  await page.route(url => /\/data\/[^/]+\/meta\.json$/.test(url.pathname), route => route.fulfill({ json: meta }))
+  await page.route(url => url.pathname === '/data/index.json', route => route.fulfill({ json: { routes: [{ id: 'ecml_kgx_edb', name: `Test ${tag('xss-route')}`, origin: 'London', destination: 'Edinburgh', length_km: 590 }] } }))
+  await page.reload()
+  await expect(page.locator('#kpis .kpi')).toHaveCount(6)
+  await page.locator('.tab[data-tab="sources"]').click()
+  await expect(page.locator('#sourcesBody')).toContainText('Check <img id="xss-warning"')
+  await expect(page.locator('#jump option').nth(2)).toHaveText(/Halt <img id="xss-station"/)
+  await expect(page.locator('#routePick option').first()).toHaveText(/Test <img id="xss-route"/)
+  await expect(page.locator('#liveLinks')).toContainText('<img id="xss-provider"')
+  await expect(page.locator('[id^="xss-"]')).toHaveCount(0)
+  expect(await page.evaluate(() => (window as any).__xss)).toBeUndefined()
+})
