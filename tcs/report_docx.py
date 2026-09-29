@@ -59,6 +59,7 @@ GLOSSARY = [
     ("Packet bonding", "Aggregating several links at once so the train's capacity is close to their sum."),
     ("RSRP", "Reference Signal Received Power: the signal strength of an LTE/5G cell at the modem, in dBm. −80 dBm or more is excellent, below −110 dBm very poor."),
     ("Sample", "One point every 50 m along the railway at which every link and the passenger experience are estimated."),
+    ("Sensitivity analysis", "Re-running the simulation with an uncertain assumption set pessimistically and optimistically, to see how far the results move (section 9.2)."),
     ("Service class", "Passenger Wi-Fi experience from per-user throughput, latency and loss: EXCELLENT, GOOD, USABLE, POOR or OUTAGE (section 1.3)."),
     ("Sky visibility", "Share of the sky above the satellite minimum elevation left open by terrain, cuttings, canopies and buildings."),
     ("Streaming-capable", "In the EXCELLENT or GOOD service class: video calls and streaming work."),
@@ -92,6 +93,7 @@ class Evidence:
     claims: list[str]
     info: dict                                   # config/report.yaml
     baseline: dict | None = None                 # {"title", "k", "shares"} when this scenario is not the baseline
+    sensitivity: dict | None = None              # tcs.sensitivity.run(): results with the main assumptions varied
     generated: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -340,6 +342,25 @@ class _Report:
             ts.add_tab_stop(pos, WD_TAB_ALIGNMENT.CLEAR)
         ts.add_tab_stop(Cm(width_cm), WD_TAB_ALIGNMENT.RIGHT)
 
+    def _ends(self, measure: str, fmt: str) -> tuple[str, str]:
+        from .sensitivity import span
+
+        lo, hi = span(self.ev.sensitivity, measure)
+        show = _share if measure.endswith("_pct") else (lambda v: format(v, fmt))   # 99.6 % is not rounded up to 100 %
+        return show(lo), show(hi)
+
+    def span(self, measure: str, fmt: str, unit: str) -> str:
+        """'a–b unit' across the sensitivity cases, or '' when there is no sensitivity analysis."""
+        if not self.ev.sensitivity:
+            return ""
+        a, b = self._ends(measure, fmt)
+        return f"{a}{unit}" if a == b else f"{a}–{b}{unit}"
+
+    def between(self, measure: str, fmt: str, unit: str) -> str:
+        """'between a unit and b unit' (or 'at a unit' when the cases agree), for running text."""
+        a, b = self._ends(measure, fmt)
+        return f"at {a}{unit}" if a == b else f"between {a}{unit} and {b}{unit}"
+
     @property
     def reference(self) -> str:
         preset = self.ev.meta.get("scenario_id", "baseline")
@@ -531,15 +552,15 @@ class _Report:
         _run(p, "Scenario  ", 9, True, MUTED, caps=True)
         _run(p, ev.scenario_title, 12, True, NAVY)
         self.para(ev.scenario_detail, 9.5, MUTED, after=28)
-        tiles = [(_share(k["streaming_share_pct"]), "%", "of the journey supports\nvideo calls and streaming"),
-                 (_share(k["usable_share_pct"]), "%", "usable or better\n(browsing, email, messaging)"),
-                 (f"{k['bonded_median_mbps']:.0f}", "Mbps", "median combined\nonboard throughput"),
-                 (f"{k['outage_km']:.1f}", "km", f"predicted loss of service\n({k['outage_share_pct']:.1f} % of the route)")]
+        tiles = [(_share(k["streaming_share_pct"]), "%", "of the journey supports\nvideo calls and streaming", self.span("streaming_share_pct", ".0f", " %")),
+                 (_share(k["usable_share_pct"]), "%", "usable or better\n(browsing, email, messaging)", self.span("usable_share_pct", ".1f", " %")),
+                 (f"{k['bonded_median_mbps']:.0f}", "Mbps", "median combined\nonboard throughput", self.span("bonded_median_mbps", ".0f", " Mbps")),
+                 (f"{k['outage_km']:.1f}", "km", f"predicted loss of service\n({k['outage_share_pct']:.1f} % of the route)", self.span("outage_km", ".1f", " km"))]
         t = self.doc.add_table(rows=1, cols=4)
         _fixed(t, PORTRAIT_TEXT_CM)
         for j in range(4):
             t.columns[j].width = Cm(PORTRAIT_TEXT_CM / 4)
-        for cell, (big, unit, small) in zip(t.rows[0].cells, tiles):
+        for cell, (big, unit, small, rng) in zip(t.rows[0].cells, tiles):
             cell.width = Cm(PORTRAIT_TEXT_CM / 4)
             _cell_borders(cell, top={"val": "single", "sz": 18, "space": 0, "color": ACCENT}, left={"val": "nil"}, bottom={"val": "nil"}, right={"val": "nil"})
             a = cell.paragraphs[0]
@@ -549,13 +570,16 @@ class _Report:
             for line in small.split("\n"):
                 b = cell.add_paragraph(); b.paragraph_format.space_after = Pt(0); b.paragraph_format.line_spacing = 1.0
                 _run(b, line, 8.5, color=MUTED)
+            if rng:
+                r = cell.add_paragraph(); r.paragraph_format.space_before = Pt(4); r.paragraph_format.space_after = Pt(0)
+                _run(r, f"range {rng}", 8, True, ACCENT)
         rows = [("Prepared for", info.get("prepared_for", "")), ("Prepared by", info.get("prepared_by", "")),
                 ("Tender reference", info.get("tender_reference", "")), ("Document reference", self.reference),
                 ("Version", info.get("version") or "1.0"), ("Date of issue", ev.generated.strftime("%d %B %Y").lstrip("0")),
                 ("Status", "Model prediction" + ("; validated against field measurements" if ev.validation is not None and len(ev.validation) else "; not yet validated against field measurements")),
                 ("Classification", info.get("classification", ""))]
         rows = [(a, b) for a, b in rows if b]
-        self.para(after=max(40, 330 - 17 * len(rows)))            # the details sit towards the foot of the cover
+        self.para(after=max(40, (310 if ev.sensitivity else 330) - 17 * len(rows)))   # the details sit towards the foot of the cover
         self.kv(rows, label_cm=4.2, size=9)
 
     def document_control(self) -> None:
@@ -578,7 +602,9 @@ class _Report:
                      "They combine the railway's geometry and terrain, the mobile operators' published coverage predictions, cell-site data, a "
                      "satellite visibility model and the onboard configuration described in section 5. Each estimate carries a confidence value "
                      "stating how much of it rests on measured, predicted or synthetic inputs (section 7), and section 8 states what has been "
-                     "checked against field measurements. Assumptions and limitations are listed in section 9.")
+                     "checked against field measurements. Assumptions and limitations are listed in section 9"
+                     + (", and section 9.2 shows how far the results move if the main assumptions are wrong; the ranges quoted "
+                        "alongside the headline figures come from it." if ev.sensitivity else "."))
 
     def contents_page(self):
         self.page_break()
@@ -624,6 +650,13 @@ class _Report:
                              (moves("the streaming-capable share of the journey", b["streaming_share_pct"], k["streaming_share_pct"], " %", ".1f"), True),
                              (", " + moves("median throughput", b["bonded_median_mbps"], k["bonded_median_mbps"], " Mbps", ".0f") + " and "
                               + moves("predicted loss of service", b["outage_km"], k["outage_km"], " km", ".1f") + ".", False)])
+        if ev.sensitivity:
+            top = max(ev.sensitivity["cases"], key=lambda r: (abs(r["high_kpis"]["streaming_share_pct"] - r["low_kpis"]["streaming_share_pct"]),
+                                                              abs(r["high_kpis"]["bonded_median_mbps"] - r["low_kpis"]["bonded_median_mbps"])))
+            findings.append([("Allowing for the main uncertainties (section 9.2), ", False),
+                             (f"the streaming-capable share stays {self.between('streaming_share_pct', '.0f', ' %')} and median throughput "
+                              f"{self.between('bonded_median_mbps', '.0f', ' Mbps')}", True),
+                             (f"; the result depends most on {top['phrase']}.", False)])
         validated = ev.validation is not None and len(ev.validation)
         findings.append([("The estimates carry ", False), (f"a mean confidence of {k['mean_confidence']:.2f}", True),
                          (" on a 0–1 scale" + ("; they have been compared with field measurements (section 8)." if validated else
@@ -676,25 +709,33 @@ class _Report:
         self.bullets(["Shares of the journey are by distance. “Streaming-capable” means the EXCELLENT or GOOD class.",
                       "P10 is the value exceeded over 90 % of the route, so it describes the weak stretches rather than the average.",
                       "Route heat maps use five bands per metric, darker meaning worse; each legend states the band edges and the share of the route in each.",
-                      "Every figure is a prediction with a confidence value (section 7); terms are defined in the glossary (Appendix B)."])
+                      "Every figure is a prediction with a confidence value (section 7); terms are defined in the glossary (Appendix B).",
+                      *(["Ranges show how far a result moves when the main assumptions are set pessimistically or optimistically "
+                         "(section 9.2); they are not statistical confidence intervals."] if ev.sensitivity else [])])
 
     def performance(self) -> None:
         ev, k, sh = self.ev, self.ev.k, self.ev.shares
         self.h1("Predicted performance along the route", page_break=True)
         self.h2("Headline results")
-        self.table([("Measure", 11.2, "l"), ("Prediction", 5.4, "r")], [
-            ["Journey supporting video calls and streaming (EXCELLENT or GOOD)", f"{k['streaming_share_pct']:.1f} %"],
-            ["Journey usable or better", f"{k['usable_share_pct']:.1f} %"],
-            ["Predicted loss of service (OUTAGE class)", f"{k['outage_km']:.1f} km  ({k['outage_share_pct']:.1f} %)"],
-            ["Combined onboard throughput: mean / median", f"{k['bonded_mean_mbps']:.0f} / {k['bonded_median_mbps']:.0f} Mbps"],
-            ["Combined onboard throughput exceeded over 90 % of the route (P10)", f"{k['bonded_p10_mbps']:.0f} Mbps"],
-            ["Throughput per active passenger (mean)", f"{k['per_user_mean_mbps']:.2f} Mbps"],
-            ["Latency (mean, when connected)", f"{k['latency_mean_ms']:.0f} ms"],
-            ["Journey with latency below 60 ms", f"{sh['latency'][0] + sh['latency'][1]:.0f} %"],
-            ["Journey where the strongest network is Good or better (≥ −90 dBm)", f"{sh['signal'][0] + sh['signal'][1]:.0f} %"],
-            ["Passenger Wi-Fi service score (mean, 0–100)", f"{k['wifi_score_mean']:.0f}"],
-            ["Mean confidence of the estimates (0–1)", f"{k['mean_confidence']:.2f}"],
-        ], "Headline predictions for the whole journey")
+        rows = [
+            ["Journey supporting video calls and streaming (EXCELLENT or GOOD)", f"{k['streaming_share_pct']:.1f} %", self.span("streaming_share_pct", ".1f", " %")],
+            ["Journey usable or better", f"{k['usable_share_pct']:.1f} %", self.span("usable_share_pct", ".1f", " %")],
+            ["Predicted loss of service (OUTAGE class)", f"{k['outage_km']:.1f} km  ({k['outage_share_pct']:.1f} %)", self.span("outage_km", ".1f", " km")],
+            ["Combined onboard throughput: mean / median", f"{k['bonded_mean_mbps']:.0f} / {k['bonded_median_mbps']:.0f} Mbps",
+             ("median " + self.span("bonded_median_mbps", ".0f", " Mbps")) if ev.sensitivity else ""],
+            ["Combined onboard throughput exceeded over 90 % of the route (P10)", f"{k['bonded_p10_mbps']:.0f} Mbps", self.span("bonded_p10_mbps", ".0f", " Mbps")],
+            ["Throughput per active passenger (mean)", f"{k['per_user_mean_mbps']:.2f} Mbps", ""],
+            ["Latency (mean, when connected)", f"{k['latency_mean_ms']:.0f} ms", ""],
+            ["Journey with latency below 60 ms", f"{sh['latency'][0] + sh['latency'][1]:.0f} %", ""],
+            ["Journey where the strongest network is Good or better (≥ −90 dBm)", f"{sh['signal'][0] + sh['signal'][1]:.0f} %", ""],
+            ["Passenger Wi-Fi service score (mean, 0–100)", f"{k['wifi_score_mean']:.0f}", ""],
+            ["Mean confidence of the estimates (0–1)", f"{k['mean_confidence']:.2f}", ""],
+        ]
+        if ev.sensitivity:
+            self.table([("Measure", 8.8, "l"), ("Prediction", 3.6, "r"), ("Range (section 9.2)", 4.2, "r")],
+                       [[a, b, c or "–"] for a, b, c in rows], "Headline predictions for the whole journey")
+        else:
+            self.table([("Measure", 11.2, "l"), ("Prediction", 5.4, "r")], [[a, b] for a, b, _ in rows], "Headline predictions for the whole journey")
         self.h2("Throughput along the route")
         self.para("Figure 1 shows the combined onboard throughput from origin to destination: the line is the median over a short moving "
                   "window (stated in the legend) and the shaded band the range between the 10th and 90th percentiles within it. Calling "
@@ -816,12 +857,47 @@ class _Report:
                       "network survey logs and onboard modem logs. Once supplied, this section reports signal error, outage detection, "
                       "service-class accuracy and handover position error by section, and the confidence values rise accordingly.")
 
+    def sensitivity_section(self) -> None:
+        ev, sens = self.ev, self.ev.sensitivity
+        self.h2("Sensitivity to the main assumptions")
+        self.para("The central figures in this document rest on the assumptions in section 9.1. To show how much they depend on the "
+                  "uncertain ones, the simulation was run again with each of them set to a pessimistic and an optimistic value, one at a "
+                  f"time, and then with all of them set the same way at once. Figure {self.figures + 1} and the table below show the results. The ranges are "
+                  "not statistical confidence intervals: they show which assumptions matter and how far the results could move if an "
+                  "assumption is wrong.", keep=True)
+        self.figure(ev.charts["sensitivity"], "Sensitivity of the headline results to the main assumptions: each bar spans the pessimistic "
+                                              "and optimistic cases; the dashed line is the central prediction")
+
+        def pair(r_lo: dict, r_hi: dict, m: str, fmt: str, unit: str) -> str:
+            return f"{format(r_lo[m], fmt)} / {format(r_hi[m], fmt)}{unit}"
+        rows = [[r["label"], r["low"], r["high"], pair(r["low_kpis"], r["high_kpis"], "streaming_share_pct", ".1f", " %"),
+                 pair(r["low_kpis"], r["high_kpis"], "bonded_median_mbps", ".0f", " Mbps"),
+                 pair(r["low_kpis"], r["high_kpis"], "outage_km", ".1f", " km")] for r in sens["cases"]]
+        rows.append(["All of them together", "every pessimistic case", "every optimistic case",
+                     pair(sens["combined"]["low"], sens["combined"]["high"], "streaming_share_pct", ".1f", " %"),
+                     pair(sens["combined"]["low"], sens["combined"]["high"], "bonded_median_mbps", ".0f", " Mbps"),
+                     pair(sens["combined"]["low"], sens["combined"]["high"], "outage_km", ".1f", " km")])
+        c = sens["central"]
+        self.table([("Assumption", 3.9, "l"), ("Pessimistic case", 2.9, "l"), ("Optimistic case", 2.5, "l"),
+                    ("Streaming-capable", 2.6, "r"), ("Median throughput", 2.6, "r"), ("Loss of service", 2.1, "r")], rows,
+                   f"Results with each assumption varied, pessimistic / optimistic (central: {c['streaming_share_pct']:.1f} % streaming-capable, "
+                   f"{c['bonded_median_mbps']:.0f} Mbps median, {c['outage_km']:.1f} km loss of service)", size=8, bold_first=True)
+        lo_out, hi_out = sorted((sens["combined"]["low"]["outage_km"], sens["combined"]["high"]["outage_km"]))
+        steady = hi_out - lo_out <= max(0.5, 0.2 * c["outage_km"])
+        self.para("The “all together” case assumes every assumption is wrong in the same direction at once, so it is a deliberately wide "
+                  "envelope rather than a likely outcome."
+                  + (" Predicted loss of service barely moves because it is set by tunnels and deep cuttings, where no link can be reached "
+                     "whatever the assumptions." if steady else "")
+                  + " The assumptions whose bars are longest are the ones field measurements should check first (section 8).")
+
     def assumptions(self) -> None:
         ev = self.ev
         self.h1("Assumptions and limitations")
         self.h2("Model assumptions")
         self.table([("Parameter", 5.6, "l"), ("Value", 11.0, "l")], [[a, b] for a, b in ev.assumptions], "Model parameters used for this scenario",
                    size=8, bold_first=True)
+        if ev.sensitivity:
+            self.sensitivity_section()
         self.h2("Limitations")
         self.bullets([
             "The figures are predictions from published coverage predictions and a simulation; they are not measurements of a deployed system.",
