@@ -824,10 +824,11 @@ class _Report:
     def provenance(self) -> None:
         ev = self.ev
         self.h1("Data sources and confidence")
-        status = {"live": "Live", "synthetic stand-in": "Stand-in (synthetic)", "predictive": "Predictive model", "configured": "Configured"}
+        status = {"live": "Live", "synthetic stand-in": "Stand-in (synthetic)", "partly stand-in": "Partly stand-in", "predictive": "Predictive model",
+                  "configured": "Configured"}
         self.table([("Input", 5.4, "l"), ("Source", 7.6, "l"), ("Status", 3.6, "l")],
                    [[a, b, status.get(c, c)] for a, b, c in ev.sources], "Data sources behind this assessment", size=8.5)
-        stand_ins = [a for a, _, c in ev.sources if c == "synthetic stand-in"]
+        stand_ins = [a for a, _, c in ev.sources if c in ("synthetic stand-in", "partly stand-in")]
         if stand_ins:
             self.para("Stand-in data was used for: " + "; ".join(stand_ins).lower() + ". Estimates that rest on it carry a lower confidence.",
                       color=MUTED, size=9)

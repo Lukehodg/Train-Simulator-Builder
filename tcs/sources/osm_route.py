@@ -82,6 +82,21 @@ def _parse_maxspeed(v: str | None) -> float | None:
     return kph
 
 
+def _segment(p0: tuple[float, float], p1: tuple[float, float], tags: dict, way_id) -> dict:
+    """One piece of the routed line with the OSM tags the obstruction and movement models use."""
+    return {
+        "lon0": p0[0], "lat0": p0[1], "lon1": p1[0], "lat1": p1[1],
+        "tunnel": tags.get("tunnel") in ("yes", "building_passage"),
+        "tunnel_name": (tags.get("tunnel:name") or tags.get("bridge:name") or ("tunnel" if tags.get("tunnel") else None)) if tags.get("tunnel") else None,
+        "cutting": tags.get("cutting") in ("yes", "both", "left", "right"),
+        "embankment": tags.get("embankment") in ("yes", "both", "left", "right"),
+        "bridge": tags.get("bridge") in ("yes", "viaduct"),
+        "maxspeed_kph": _parse_maxspeed(tags.get("maxspeed")),
+        "line_name": tags.get("name"),
+        "way_id": way_id,
+    }
+
+
 def fetch_route(crs_codes: list[str], country: str, raw_dir: Path, *, corridor_m: float = 8000, overpass_url: str | None = None,
                 offline: bool = False, timeout: int = 180) -> RouteGeometry:
     stations = fetch_stations(crs_codes, country, raw_dir, overpass_url=overpass_url, offline=offline, timeout=timeout)
@@ -156,24 +171,15 @@ out skel qt;"""
         for a, b in zip(path[:-1], path[1:]):
             tags = G.edges[a, b]["tags"] if G.has_edge(a, b) else {}
             (lon0, lat0), (lon1, lat1) = nodes[a], nodes[b]
-            if coords and coords[-1] == (lon0, lat0):
-                pass
-            elif not coords:
+            if not coords:
                 coords.append((lon0, lat0))
-            else:
-                coords.append((lon0, lat0))   # platform hop between parallel tracks: a short lateral jump
+            elif coords[-1] != (lon0, lat0):
+                # Platform hop between parallel tracks: a short lateral jump. It is part of the line, so it gets an
+                # (untagged) segment too; otherwise every flag after it is looked up at the wrong distance.
+                seg_rows.append(_segment(coords[-1], (lon0, lat0), {}, None))
+                coords.append((lon0, lat0))
             coords.append((lon1, lat1))
-            seg_rows.append({
-                "lon0": lon0, "lat0": lat0, "lon1": lon1, "lat1": lat1,
-                "tunnel": tags.get("tunnel") in ("yes", "building_passage"),
-                "tunnel_name": (tags.get("tunnel:name") or tags.get("bridge:name") or ("tunnel" if tags.get("tunnel") else None)) if tags.get("tunnel") else None,
-                "cutting": tags.get("cutting") in ("yes", "both", "left", "right"),
-                "embankment": tags.get("embankment") in ("yes", "both", "left", "right"),
-                "bridge": tags.get("bridge") in ("yes", "viaduct"),
-                "maxspeed_kph": _parse_maxspeed(tags.get("maxspeed")),
-                "line_name": tags.get("name"),
-                "way_id": G.edges[a, b]["way"] if G.has_edge(a, b) else None,
-            })
+            seg_rows.append(_segment((lon0, lat0), (lon1, lat1), tags, G.edges[a, b]["way"] if G.has_edge(a, b) else None))
     line = LineString(coords)
     prov = Provenance(source="openstreetmap", url=overpass_url or DEFAULT_OVERPASS, fetched_at=now_iso(),
                       notes="ODbL. Rail network routed station-to-station; tags carried per edge.")

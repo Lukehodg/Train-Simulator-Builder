@@ -1,7 +1,7 @@
 import './styles.css'
 import type { PickingInfo } from '@deck.gl/core'
 import { CONFIG } from './config'
-import { indexAtTime, loadRoute } from './data'
+import { indexAtTime, LIVE_COVERAGE_MIN, liveCoverageShare, loadRoute } from './data'
 import { createMap } from './map/map'
 import { buildRuns, cellLayers, labelFontReady, ribbonLayers, stationLayers, trainLayers, type Run } from './map/layers'
 import { setBuildings, trackLayers, treeLayer } from './map/environment'
@@ -61,7 +61,7 @@ async function main() {
     sel.addEventListener('change', () => { const u = new URL(location.href); u.searchParams.set('route', sel.value); location.href = u.toString() })
   }).catch(() => {})
   $('btnExport').addEventListener('click', () => exportScenario(store))
-  const liveFlags = [meta.geometry_source === 'osm' || meta.geometry_source === 'file', realTerrain, meta.coverage_sources.some(s => s.startsWith('ofcom')), meta.cell_source === 'opencellid']
+  const liveFlags = [meta.geometry_source === 'osm' || meta.geometry_source === 'file', realTerrain, liveCoverageShare(meta) >= LIVE_COVERAGE_MIN, meta.cell_source === 'opencellid']
   const liveCount = liveFlags.filter(Boolean).length
   $('provDots').innerHTML = liveFlags.map(ok => `<i class="${ok ? 'live' : ''}"></i>`).join('')
   $('provText').textContent = liveCount === 4 ? 'Live data' : liveCount === 0 ? 'Synthetic' : `${liveCount}/4 live`

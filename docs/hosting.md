@@ -75,7 +75,8 @@ Secrets are write-only: nobody, including you, can read them back from GitHub, a
 1. Make sure the change adding `.github/workflows/publish.yml` is merged into `main`.
 2. **Actions** tab → **publish** → **Run workflow** → branch `main` → **Run workflow**.
 3. Wait for it to finish (about 5 hours; mostly Ofcom API calls). Open the run: its summary lists the feeds
-   each route used. Any route marked as using stand-in data is still published and is retried next run.
+   each route used. A route with a stand-in track line, terrain or cell sites is still published and retried next
+   run; one whose coverage is not live stops the publish (see the quota note below).
 4. Open the site address, sign in with your email and code, and share the address with your colleagues.
 
 ## Running it from then on
@@ -95,6 +96,7 @@ Secrets are write-only: nobody, including you, can read them back from GitHub, a
 - **Ofcom quota:** a full rebuild makes about 18,000 Ofcom API calls (one per postcode near the track), and the
   API key has a call quota per period; the Ofcom API answers "Out of call volume quota" once it is used up. So rebuild
   at most once per quota period. The workflow checks the quota with one call before starting, and it will not publish
-  if any route's coverage fell back to stand-in data, so an exhausted quota never replaces good data on the site.
+  if less than 90 % of any route's coverage is live Ofcom data (the quota can run out part-way through a route), so an
+  exhausted quota never replaces good data on the site. What a failed run downloaded is kept for a re-run.
 - **Company policy:** this puts work material on outside services, behind a login. If that is not allowed where you
   work, use the offline zip instead (`tcs package`, see the README).

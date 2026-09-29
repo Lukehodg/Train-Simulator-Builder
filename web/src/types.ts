@@ -42,6 +42,7 @@ export interface Meta {
   sim_defaults?: any
   provenance: any
   coverage_sources: string[]
+  coverage_share?: Record<string, number>   // share of sample-operator pairs per coverage source (bundles from late 2026 on)
   cell_source: string
   model_version: string
   warnings: string[]

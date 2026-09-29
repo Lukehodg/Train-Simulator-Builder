@@ -103,6 +103,18 @@ def kpis(rc: pd.DataFrame, samples: pd.DataFrame, spacing_m: float) -> dict:
     }
 
 
+LIVE_COVERAGE_MIN = 0.9       # a route's coverage counts as live when at least this share of it comes from Ofcom
+
+
+def live_coverage_share(meta: dict) -> float:
+    """Share of sample-operator pairs whose coverage prior comes from Ofcom (API or Connected Nations). Bundles built
+    before the share was recorded count as fully live when any Ofcom source is listed, as they used to."""
+    share = meta.get("coverage_share")
+    if share:
+        return float(sum(v for k, v in share.items() if str(k).startswith("ofcom")))
+    return 1.0 if any(str(c).startswith("ofcom") for c in meta.get("coverage_sources", [])) else 0.0
+
+
 def rsrp_band(dbm: np.ndarray) -> np.ndarray:
     """0 = Excellent … 4 = Very poor; no signal (NaN) is Very poor."""
     return np.select([dbm >= -80, dbm >= -90, dbm >= -100, dbm >= -110], [0, 1, 2, 3], 4)
@@ -561,6 +573,16 @@ def write_xlsx(path: Path, ev, samples: pd.DataFrame, rc: pd.DataFrame, obs: pd.
     wb.save(path)
 
 
+def _coverage_row(meta: dict) -> tuple[str, str, str]:
+    share = live_coverage_share(meta)
+    what = "Ofcom operator coverage predictions" + (" (with Connected Nations open data)" if "ofcom_connected_nations" in meta.get("coverage_sources", []) else "")
+    if share >= LIVE_COVERAGE_MIN:
+        return ("Mobile coverage", what, "live")
+    if share > 0:
+        return ("Mobile coverage", f"{what} for {share * 100:.0f} % of the route; the rest a neutral stand-in", "partly stand-in")
+    return ("Mobile coverage", "Stand-in coverage prior", "synthetic stand-in")
+
+
 # ---------------------------------------------------------------- entry point
 def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.DataFrame, rc: pd.DataFrame, stations: pd.DataFrame, out_dir: Path, scenario_label: str,
                  validation: pd.DataFrame | None = None, weather: str = "nominal", baseline: dict | None = None,
@@ -583,14 +605,12 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
     bands = heat_bands(samples, rc, obs)
     shares = {m: band_shares(b) for m, b in bands.items()}
     live = lambda ok: "live" if ok else "synthetic stand-in"
-    cov = meta.get("coverage_sources", [])
     geometry = {"osm": "OpenStreetMap (ODbL), routed station to station", "file": "Route file supplied", "synthetic_route": "Approximate line through the stations (stand-in)"}
     sources = [
         ("Route centreline, stations, tunnels, cuttings, line speed", geometry.get(meta["geometry_source"], meta["geometry_source"]), live(meta["geometry_source"] in ("osm", "file"))),
         ("Terrain and sky visibility", {"copernicus_glo30": "Copernicus DEM GLO-30 (30 m)", "synthetic_terrain": "Flat stand-in terrain"}.get(meta["terrain_source"], meta["terrain_source"]),
          live(meta["terrain_source"] != "synthetic_terrain")),
-        ("Mobile coverage", "Ofcom operator coverage predictions" if any(c.startswith("ofcom") for c in cov) else (", ".join(cov) or "Stand-in coverage prior"),
-         live(any(c.startswith("ofcom") for c in cov))),
+        _coverage_row(meta),
         ("Cell sites and handovers", {"opencellid": "OpenCellID"}.get(meta.get("cell_source", ""), meta.get("cell_source", "") or "Stand-in cell sites"), live(meta.get("cell_source") == "opencellid")),
         ("Satellite", "Predictive sky-visibility model" + (" with terminal telemetry" if any("telemetry" in str(x) for x in obs["source_flags"].unique()) else ""), "predictive"),
         ("Timetable", "Route configuration" if settings.route.get("timetable", {}).get("source", "yaml") == "yaml" else str(settings.route["timetable"]["source"]), "configured"),

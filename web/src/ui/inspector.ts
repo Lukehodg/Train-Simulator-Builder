@@ -1,6 +1,7 @@
 import { fmtHM, type Store } from '../state'
 import { CLASS_NAMES, CLASS_VARS, WIFI_CLASSES, classOf, cssVar, qClass } from '../sim/classify'
 import { arrowNav } from './a11y'
+import { LIVE_COVERAGE_MIN, liveCoverageShare } from '../data'
 
 const $ = (id: string) => document.getElementById(id)!
 const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
@@ -156,12 +157,14 @@ function renderSources(store: Store) {
   const live = (flag: boolean, liveLabel = 'live', synthLabel = 'synthetic') => `<em class="${flag ? 'live' : 'synth'}">${flag ? liveLabel : synthLabel}</em>`
   const geomLive = m.geometry_source === 'osm' || m.geometry_source === 'file'
   const terrLive = m.terrain_source !== 'synthetic_terrain'
-  const covLive = m.coverage_sources.some(s => s.startsWith('ofcom'))
+  const covShare = liveCoverageShare(m), covLive = covShare >= LIVE_COVERAGE_MIN
   const cellLive = m.cell_source === 'opencellid'
   const items = [
     ['Route geometry', geomLive, m.geometry_source === 'osm' ? 'OpenStreetMap rail network, routed station-to-station (ODbL). Tunnel / cutting / embankment / bridge / maxspeed tags carried per 50 m sample.' : m.geometry_source === 'file' ? 'Infrastructure-manager / curated centreline file.' : 'Spline through approximate station coordinates. Run <code>tcs run</code> without <code>--offline</code> to fetch the OSM centreline.'],
     ['Terrain & sky visibility', terrLive, terrLive ? `${m.terrain_source}: 30 m DEM, 16-ray horizon per sample, solid-angle sky fraction above the terminal's minimum elevation.` : 'Procedural terrain. 3D terrain rendering is disabled until real elevation is available.'],
-    ['Cellular coverage prior', covLive, covLive ? `${m.coverage_sources.join(', ')} — operator predictions on Ofcom's 50 m grid mapped to a model score; never presented as measured RSRP.` : 'Synthetic prior (noise field). Set <code>OFCOM_API_KEY</code>, or enable Connected Nations open data, to replace it.'],
+    ['Cellular coverage prior', covLive, covLive ? `${m.coverage_sources.join(', ')} — operator predictions on Ofcom's 50 m grid mapped to a model score; never presented as measured RSRP.`
+      : covShare > 0 ? `Only ${Math.round(covShare * 100)} % of the route has Ofcom predictions (usually the Ofcom call quota ran out part-way); the rest is a neutral stand-in. Rebuild the route once the quota resets.`
+      : 'Synthetic prior (noise field). Set <code>OFCOM_API_KEY</code>, or enable Connected Nations open data, to replace it.', covShare > 0 && !covLive ? 'partly live' : undefined],
     ['Cell sites', cellLive, cellLive ? 'OpenCellID corridor extract (CC BY-SA 4.0). Logical cells; top-5 candidates per sample; serving cell with hysteresis.' : 'Synthetic site layout. Set <code>OPENCELLID_TOKEN</code> to use the community database.'],
     ['Satcom', false, `Predictive obstruction model (${m.providers.find(p => p.type === 'satcom')?.terminal ?? 'performance'} terminal). No public route-level Starlink RF telemetry exists; confidence capped at 0.35 until terminal telemetry is ingested.`, 'predictive'],
     ['Calibration', false, 'No measurements loaded. <code>tcs calibrate &lt;csv&gt;</code> fits score→RSRP and per-operator bias from Ofcom drive tests, the Ofcom train study or Network Survey logs.', 'none'],

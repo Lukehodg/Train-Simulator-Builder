@@ -142,3 +142,76 @@ def test_packaging_missing_build_preserves_existing_output(tmp_path, monkeypatch
     with pytest.raises(RuntimeError, match="no index.html"):
         package.package(skip_build=True)
     assert marker.read_text(encoding="utf-8") == "keep"
+
+
+def test_osm_segments_tile_the_routed_line_across_platform_hops(tmp_path, monkeypatch):
+    """A leg ending on one track and the next starting on a parallel one adds a lateral hop to the line. The segment
+    table must include it, or every tunnel/cutting flag after the station is looked up at the wrong distance."""
+    from shapely.geometry import Point
+
+    from tcs.geo import Projector, local_crs
+    from tcs.sources import osm_route
+
+    lat0, off = 51.5, 0.0007                                    # second track about 78 m north of the first
+    nodes = {1: (-0.10, lat0), 2: (-0.09, lat0), 3: (-0.08, lat0),                         # track 1: A -> B
+             4: (-0.08, lat0 + off), 5: (-0.07, lat0 + off), 6: (-0.06, lat0 + off), 7: (-0.05, lat0 + off)}   # track 2: B -> C
+    ways = [{"type": "way", "id": 10, "nodes": [1, 2, 3], "tags": {"railway": "rail"}},
+            {"type": "way", "id": 11, "nodes": [4, 5], "tags": {"railway": "rail"}},
+            {"type": "way", "id": 12, "nodes": [5, 6], "tags": {"railway": "rail", "tunnel": "yes", "tunnel:name": "Test Tunnel"}},
+            {"type": "way", "id": 13, "nodes": [6, 7], "tags": {"railway": "rail"}}]
+    stations = [("AAA", -0.10, lat0), ("BBB", -0.08, lat0 + off / 2), ("CCC", -0.05, lat0 + off)]   # B sits between both tracks
+
+    def fake_overpass(query, raw_dir, name, url, offline, timeout):
+        if name == "osm_stations":
+            return {"elements": [{"type": "node", "lat": la, "lon": lo, "tags": {"ref:crs": c, "name": c}} for c, lo, la in stations]}
+        return {"elements": [{"type": "node", "id": k, "lon": lo, "lat": la} for k, (lo, la) in nodes.items()] + ways}
+
+    monkeypatch.setattr(osm_route, "_overpass", fake_overpass)
+    geom = osm_route.fetch_route(["AAA", "BBB", "CCC"], "GB", tmp_path)
+    proj = Projector(local_crs(-0.075, lat0, "GB"))
+    line = proj.line_to_xy(geom.line)
+    seg = geom.segments
+    x0, y0 = proj.to_xy(seg["lon0"].values, seg["lat0"].values)
+    x1, y1 = proj.to_xy(seg["lon1"].values, seg["lat1"].values)
+    cum = np.concatenate([[0.0], np.cumsum(np.hypot(x1 - x0, y1 - y0))])
+    assert cum[-1] == pytest.approx(line.length, abs=0.5)      # the segments tile the whole line, hop included
+    k = int(np.flatnonzero(seg["tunnel"].values)[0])
+    portal = line.project(Point(*proj.to_xy(*nodes[5])))
+    assert cum[k] == pytest.approx(portal, abs=0.5)            # the tunnel starts where it really is, not ~78 m early
+
+
+def test_ofcom_quota_refusal_stops_the_source_instead_of_filling_stand_ins(tmp_path, monkeypatch):
+    """A 403/429 mid-route is a quota or key problem, not 'no data for this postcode': the source must stop so the
+    route falls back to a labelled source, rather than carrying on and labelling neutral stand-ins as Ofcom."""
+    from tcs.sources import ofcom_coverage
+
+    settings = load_settings(offline=True)
+    settings.offline = False
+    monkeypatch.setenv("OFCOM_API_KEY", "test-key")
+    calls = []
+
+    def refused(url, **kw):
+        calls.append(url)
+        raise base.SourceUnavailable("ofcom_api: HTTP 403 for https://example.invalid")
+    monkeypatch.setattr(ofcom_coverage, "http_get", refused)
+    postcodes = pd.DataFrame({"postcode": ["AB1 2CD", "AB1 2CE", "AB1 2CF"]})
+    with pytest.raises(base.SourceUnavailable, match="refused"):
+        ofcom_coverage.fetch_ofcom_api(postcodes, settings, tmp_path)
+    assert len(calls) == 1                                      # no point spending the rest of the route on refusals
+
+    def not_found(url, **kw):
+        raise base.SourceUnavailable("ofcom_api: HTTP 404 for https://example.invalid")
+    monkeypatch.setattr(ofcom_coverage, "http_get", not_found)
+    with pytest.raises(base.SourceUnavailable, match="no parsable"):   # a genuine gap is still skipped, postcode by postcode
+        ofcom_coverage.fetch_ofcom_api(postcodes, settings, tmp_path)
+
+
+def test_coverage_counts_as_live_only_when_most_of_it_is_ofcom():
+    from tcs.report import _coverage_row, live_coverage_share
+
+    full = {"coverage_sources": ["no_coverage_record", "ofcom_predicted"], "coverage_share": {"ofcom_predicted": 0.97, "no_coverage_record": 0.03}}
+    partial = {"coverage_sources": ["no_coverage_record", "ofcom_predicted"], "coverage_share": {"ofcom_predicted": 0.116, "no_coverage_record": 0.884}}
+    assert _coverage_row(full)[2] == "live"
+    assert _coverage_row(partial)[2] == "partly stand-in" and "12 %" in _coverage_row(partial)[1]
+    assert _coverage_row({"coverage_sources": ["synthetic_prior"], "coverage_share": {"synthetic_prior": 1.0}})[2] == "synthetic stand-in"
+    assert live_coverage_share({"coverage_sources": ["ofcom_predicted"]}) == 1.0   # bundles built before the share was recorded

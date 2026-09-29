@@ -131,6 +131,7 @@ def export_all(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame, s
         "sim_defaults": settings.sim_defaults or settings.sim,
         "provenance": bundle.provenance,
         "coverage_sources": sorted(set(prior["source"].dropna().astype(str))),
+        "coverage_share": {str(k): round(float(v), 4) for k, v in prior["source"].fillna("no_coverage_record").value_counts(normalize=True).items()},
         "cell_source": str(cells["source"].iloc[0]) if len(cells) else "none",
         "model_version": settings.sim["model_version"],
         "warnings": bundle.warnings,
