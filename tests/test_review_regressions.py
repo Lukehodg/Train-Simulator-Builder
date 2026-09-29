@@ -215,3 +215,18 @@ def test_coverage_counts_as_live_only_when_most_of_it_is_ofcom():
     assert _coverage_row(partial)[2] == "partly stand-in" and "12 %" in _coverage_row(partial)[1]
     assert _coverage_row({"coverage_sources": ["synthetic_prior"], "coverage_share": {"synthetic_prior": 1.0}})[2] == "synthetic stand-in"
     assert live_coverage_share({"coverage_sources": ["ofcom_predicted"]}) == 1.0   # bundles built before the share was recorded
+
+
+def test_in_tunnel_coverage_is_listed_per_route_not_shared():
+    """The ECML's King's Cross and Edinburgh km ranges used to apply to every route, giving other routes' first
+    2.5 km of tunnels phantom in-tunnel coverage."""
+    from tcs.model.cellular import das_mask
+
+    ecml = load_settings(offline=True)
+    other = load_settings(offline=True, route_id="tfw_cdf_man")
+    assert ecml.sim["cellular"]["tunnels"]["das_tunnels"]
+    assert other.sim["cellular"]["tunnels"]["das_tunnels"] == []
+    assert other.sim_defaults["cellular"]["tunnels"]["das_tunnels"] == []     # what the viewer re-simulates from
+    names, km = np.array(["Tunnel"], dtype=object), np.array([1.0])
+    assert das_mask(set(ecml.sim["cellular"]["tunnels"]["das_tunnels"]), names, km).all()
+    assert not das_mask(set(other.sim["cellular"]["tunnels"]["das_tunnels"]), names, km).any()

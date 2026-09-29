@@ -113,6 +113,9 @@ def load_settings(config_dir: Path | None = None, offline: bool = False, route_i
     )
     import copy
 
+    # In-tunnel coverage is geography: each route lists its own tunnels, and a list in simulation.yaml never leaks
+    # one route's km ranges onto another.
+    s.sim["cellular"]["tunnels"]["das_tunnels"] = list(s.route.get("das_tunnels") or [])
     s.sim_defaults = copy.deepcopy(s.sim)
     s.starlink_defaults = copy.deepcopy(s.starlink)
     for p in s.paths().values():

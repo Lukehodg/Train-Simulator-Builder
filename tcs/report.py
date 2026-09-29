@@ -432,6 +432,11 @@ def _plain(v) -> str:
     return str(v)
 
 
+def _das_plain(entries: list[str]) -> str:
+    """das_tunnels entries for people: 'km:0-2.5' -> 'km 0–2.5'."""
+    return ", ".join(f"km {e[3:].replace('-', '–')}" if e.startswith("km:") else e for e in entries)
+
+
 def _assumptions(settings: Settings) -> list[tuple[str, str]]:
     from .report_docx import POLICIES, VEHICLES
 
@@ -453,8 +458,9 @@ def _assumptions(settings: Settings) -> list[tuple[str, str]]:
         ("Distance from serving cell", f"−{cell['cell_distance']['penalty_per_km']} quality per km beyond {cell['cell_distance']['free_km']} km"),
         ("Handover", f"{cell['handover']['duration_samples']} points (≈{cell['handover']['duration_samples'] * settings.spacing_m:.0f} m), "
                      f"+{cell['handover']['latency_spike_ms']} ms, capacity ×{cell['handover']['capacity_factor']}"),
-        ("Tunnels", f"quality {cell['tunnels']['default_score']} without in-tunnel coverage; {cell['tunnels']['das_score']} where it is assumed "
-                    f"({_plain(cell['tunnels']['das_tunnels'])})"),
+        ("Tunnels", f"quality {cell['tunnels']['default_score']} without in-tunnel coverage; "
+                    + (f"{cell['tunnels']['das_score']} where it is assumed ({_das_plain(cell['tunnels']['das_tunnels'])})"
+                       if cell["tunnels"].get("das_tunnels") else "no tunnel on this route is assumed to have it")),
         ("Satellite", "; ".join(f"{p.get('name', p['id'])}: {p['terminal'].replace('_', ' ')} terminal, {p['capacity_prior_mbps'][p['terminal']]} Mbps, "
                                 f"minimum elevation {p['min_elevation_deg'][p['terminal']]}°, sky-visibility threshold {p['availability']['sky_threshold']}"
                                 for p in settings.starlink["satcom"]["providers"]) + ("" if sim.get("satcom_enabled", True) else " (not fitted in this design)")),
