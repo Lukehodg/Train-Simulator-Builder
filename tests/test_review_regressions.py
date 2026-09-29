@@ -259,3 +259,52 @@ def test_measurement_columns_are_not_confused_by_similar_names(tmp_path):
     f2.write_text("timestamp,precision_m,latitude,longitude,mcc,mnc,cellId,rsrp\n2026-09-01T10:00:00Z,5,51.5,-0.1,234,20,1234,-99\n")
     s = load_measurements(f2, "network_survey", ops)
     assert s["cell_id"].tolist() == [1234] and s["provider_id"].tolist() == ["three"]
+
+
+def test_overpass_error_answers_are_not_cached_as_the_railway(tmp_path, monkeypatch):
+    """Overpass answers 200 with an HTML error page or a 'timed out' remark when busy. Those used to crash the build
+    (or, cached, return an empty railway for 30 days); now the route source is unavailable and the cache is dropped."""
+    from tcs.sources import osm_route
+
+    cached = tmp_path / "answer.json"
+    monkeypatch.setattr(osm_route, "http_get", lambda *a, **kw: cached)
+    for body, why in [("<html>Too many requests</html>", "other than JSON"),
+                      ('{"elements": [], "remark": "runtime error: Query timed out in \\"query\\" at line 2 after 181 seconds."}', "could not finish")]:
+        cached.write_text(body)
+        with pytest.raises(base.SourceUnavailable, match=why):
+            osm_route._overpass("q", tmp_path, "osm_rail", None, False, 180)
+        assert not cached.exists()
+    cached.write_text('{"elements": []}')
+    monkeypatch.setattr(osm_route, "_overpass", lambda *a, **kw: {"elements": []})
+    with pytest.raises(base.SourceUnavailable, match="AAA"):          # no station found: a clear gap, not a KeyError
+        osm_route.fetch_stations(["AAA"], "GB", tmp_path, overpass_url=None, offline=False, timeout=10)
+
+
+def test_a_leg_without_rail_path_is_retried_wider_then_labelled_straight(tmp_path, monkeypatch):
+    from tcs.report import _geometry_row
+    from tcs.sources import osm_route
+
+    lat = 51.5
+    nodes = {1: (-0.10, lat), 2: (-0.09, lat), 3: (-0.08, lat), 4: (-0.07, lat), 5: (-0.06, lat)}
+    split = [{"type": "way", "id": 10, "nodes": [1, 2, 3], "tags": {}}, {"type": "way", "id": 11, "nodes": [4, 5], "tags": {}}]
+    joined = split + [{"type": "way", "id": 12, "nodes": [3, 4], "tags": {}}]
+    stations = [("AAA", -0.10, lat), ("BBB", -0.08, lat), ("CCC", -0.06, lat)]
+    answers: list[list[dict]] = []
+
+    def fake_overpass(query, raw_dir, name, url, offline, timeout):
+        if name == "osm_stations":
+            return {"elements": [{"type": "node", "lat": la, "lon": lo, "tags": {"ref:crs": c, "name": c}} for c, lo, la in stations]}
+        return {"elements": [{"type": "node", "id": k, "lon": lo, "lat": la} for k, (lo, la) in nodes.items()] + answers.pop(0)}
+
+    monkeypatch.setattr(osm_route, "_overpass", fake_overpass)
+    answers[:] = [split, joined]                                  # the line leaves the first corridor; the wider one has it
+    geom = osm_route.fetch_route(["AAA", "BBB", "CCC"], "GB", tmp_path)
+    assert geom.straight_legs == [] and not answers and not geom.warnings
+
+    answers[:] = [split, split]                                   # nowhere to be found: drawn straight, and said so
+    geom = osm_route.fetch_route(["AAA", "BBB", "CCC"], "GB", tmp_path)
+    assert geom.straight_legs == ["BBB-CCC"] and "BBB-CCC" in geom.warnings[0]
+    row = _geometry_row({"geometry_source": "osm", "geometry_straight_legs": geom.straight_legs})
+    assert row[2] == "partly stand-in" and "BBB–CCC" in row[1]
+    assert _geometry_row({"geometry_source": "synthetic"})[2] == "synthetic stand-in"
+    assert _geometry_row({"geometry_source": "osm"})[2] == "live"

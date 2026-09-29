@@ -137,7 +137,7 @@ def build_route(settings: Settings) -> RouteBundle:
     samples["urban_density"] = _station_proximity_urban(samples, st)
     samples["geometry_source"] = geom.source
 
-    prov = {"route": geom.provenance.__dict__, "warnings": warnings + geom.warnings}
+    prov = {"route": geom.provenance.__dict__, "warnings": warnings + geom.warnings, "straight_legs": geom.straight_legs}
     return RouteBundle(samples=samples, stations=st, proj=proj, line_lonlat=list(geom.line.coords), geometry_source=geom.source,
                        provenance=prov, warnings=warnings + geom.warnings)
 

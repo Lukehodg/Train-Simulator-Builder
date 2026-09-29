@@ -156,11 +156,13 @@ function renderSources(store: Store) {
   const m = store.state.data.meta
   const live = (flag: boolean, liveLabel = 'live', synthLabel = 'synthetic') => `<em class="${flag ? 'live' : 'synth'}">${flag ? liveLabel : synthLabel}</em>`
   const geomLive = m.geometry_source === 'osm' || m.geometry_source === 'file'
+  const straight = m.geometry_source === 'osm' ? m.geometry_straight_legs ?? [] : []   // legs with no rail path, drawn straight
   const terrLive = m.terrain_source !== 'synthetic_terrain'
   const covShare = liveCoverageShare(m), covLive = covShare >= LIVE_COVERAGE_MIN
   const cellLive = m.cell_source === 'opencellid'
   const items = [
-    ['Route geometry', geomLive, m.geometry_source === 'osm' ? 'OpenStreetMap rail network, routed station-to-station (ODbL). Tunnel / cutting / embankment / bridge / maxspeed tags carried per 50 m sample.' : m.geometry_source === 'file' ? 'Infrastructure-manager / curated centreline file.' : 'Spline through approximate station coordinates. Run <code>tcs run</code> without <code>--offline</code> to fetch the OSM centreline.'],
+    ['Route geometry', geomLive && !straight.length, m.geometry_source === 'osm' ? 'OpenStreetMap rail network, routed station-to-station (ODbL). Tunnel / cutting / embankment / bridge / maxspeed tags carried per 50 m sample.'
+      + (straight.length ? ` No rail path was found for ${esc(straight.map(s => s.replace('-', '–')).join(', '))}: drawn as a straight line there, without tunnels, cuttings or line speeds.` : '') : m.geometry_source === 'file' ? 'Infrastructure-manager / curated centreline file.' : 'Spline through approximate station coordinates. Run <code>tcs run</code> without <code>--offline</code> to fetch the OSM centreline.', straight.length ? 'partly live' : undefined],
     ['Terrain & sky visibility', terrLive, terrLive ? `${esc(m.terrain_source)}: 30 m DEM, 16-ray horizon per sample, solid-angle sky fraction above the terminal's minimum elevation.` : 'Procedural terrain. 3D terrain rendering is disabled until real elevation is available.'],
     ['Cellular coverage prior', covLive, covLive ? `${esc(m.coverage_sources.join(', '))} — operator predictions on Ofcom's 50 m grid mapped to a model score; never presented as measured RSRP.`
       : covShare > 0 ? `Only ${Math.round(covShare * 100)} % of the route has Ofcom predictions (usually the Ofcom call quota ran out part-way); the rest is a neutral stand-in. Rebuild the route once the quota resets.`

@@ -103,9 +103,11 @@ jobs:
               m = json.load(open(path, encoding="utf-8"))
               share = live_coverage_share(m)
               cov = f"{share:.0%} Ofcom ({', '.join(m.get('coverage_sources') or []) or '-'})"
-              cells = [m.get("geometry_source"), m.get("terrain_source"), cov, m.get("cell_source")]
+              legs = m.get("geometry_straight_legs") or []   # OSM legs with no rail path, drawn straight
+              track = f"{m.get('geometry_source')}" + (f" (straight: {', '.join(legs)})" if legs else "")
+              cells = [track, m.get("terrain_source"), cov, m.get("cell_source")]
               rows.append("| " + " | ".join([m["route"]["id"], *map(str, cells)]) + " |")
-              if any("synthetic" in str(c) for c in cells) or share < LIVE_COVERAGE_MIN:
+              if any("synthetic" in str(c) for c in cells) or share < LIVE_COVERAGE_MIN or legs:
                   degraded.append(m["route"]["id"])
               if share < LIVE_COVERAGE_MIN:   # also catches a quota that ran out part-way through a route
                   no_coverage.append(m["route"]["id"])

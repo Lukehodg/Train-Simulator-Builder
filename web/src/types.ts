@@ -29,6 +29,7 @@ export interface TunnelMeta { name: string; from_m: number; to_m: number; das: b
 export interface Meta {
   route: { id: string; name: string; country: string; operator?: string; service_id?: string; direction?: string; origin_crs: string; destination_crs: string; sample_spacing_m: number }
   geometry_source: string
+  geometry_straight_legs?: string[]         // OSM legs with no rail path, drawn straight ('BWK-DUN')
   terrain_source: string
   length_m: number
   duration_s: number

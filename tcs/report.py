@@ -589,6 +589,20 @@ def _coverage_row(meta: dict) -> tuple[str, str, str]:
     return ("Mobile coverage", "Stand-in coverage prior", "synthetic stand-in")
 
 
+def _geometry_row(meta: dict) -> tuple[str, str, str]:
+    what = "Route centreline, stations, tunnels, cuttings, line speed"
+    src = meta["geometry_source"]
+    if src == "osm":
+        legs = [str(x).replace("-", "–") for x in meta.get("geometry_straight_legs") or []]
+        if legs:
+            return (what, f"OpenStreetMap (ODbL), routed station to station, except {', '.join(legs)}: no rail path was found there, so that stretch "
+                          "is a straight line without tunnels, cuttings or line speeds", "partly stand-in")
+        return (what, "OpenStreetMap (ODbL), routed station to station", "live")
+    if src == "file":
+        return (what, "Route file supplied", "live")
+    return (what, "Approximate line through the stations (stand-in)", "synthetic stand-in")
+
+
 # ---------------------------------------------------------------- entry point
 def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.DataFrame, rc: pd.DataFrame, stations: pd.DataFrame, out_dir: Path, scenario_label: str,
                  validation: pd.DataFrame | None = None, weather: str = "nominal", baseline: dict | None = None,
@@ -611,9 +625,8 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
     bands = heat_bands(samples, rc, obs)
     shares = {m: band_shares(b) for m, b in bands.items()}
     live = lambda ok: "live" if ok else "synthetic stand-in"
-    geometry = {"osm": "OpenStreetMap (ODbL), routed station to station", "file": "Route file supplied", "synthetic_route": "Approximate line through the stations (stand-in)"}
     sources = [
-        ("Route centreline, stations, tunnels, cuttings, line speed", geometry.get(meta["geometry_source"], meta["geometry_source"]), live(meta["geometry_source"] in ("osm", "file"))),
+        _geometry_row(meta),
         ("Terrain and sky visibility", {"copernicus_glo30": "Copernicus DEM GLO-30 (30 m)", "synthetic_terrain": "Flat stand-in terrain"}.get(meta["terrain_source"], meta["terrain_source"]),
          live(meta["terrain_source"] != "synthetic_terrain")),
         _coverage_row(meta),
