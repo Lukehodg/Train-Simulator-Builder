@@ -7,24 +7,28 @@ cellular:
       mcc: 234
       mnc: [30, 31, 32, 33, 34]        # OpenCellID "net" codes attributed to EE (incl. legacy Orange/T-Mobile)
       ofcom_key: EE                   # Ofcom API field Mc_EE
+      aliases: [EE Limited, Everything Everywhere, Orange, T-Mobile]   # names measurement files use (whole words)
       capacity_prior_mbps: {4G: 110, 5G: 260, blend: 170}   # p50 usable throughput at excellent signal, rooftop antenna; blend = Ofcom's merged 4G/5G level
     - id: o2
       name: O2
       mcc: 234
       mnc: [10, 11]
       ofcom_key: O2                   # Mc_O2
+      aliases: [Telefonica, VMO2]
       capacity_prior_mbps: {4G: 70, 5G: 170, blend: 110}
     - id: vodafone
       name: Vodafone
       mcc: 234
       mnc: [15, 91]
       ofcom_key: VO                   # Mc_VO
+      aliases: [VF]
       capacity_prior_mbps: {4G: 85, 5G: 200, blend: 130}
     - id: three
       name: Three
       mcc: 234
       mnc: [20, 94]                   # 234-20 Three UK, 234-94 legacy 3G
       ofcom_key: TH                   # Mc_TH
+      aliases: ["3", H3G, Hutchison]
       capacity_prior_mbps: {4G: 80, 5G: 240, blend: 145}   # widest 5G holding (100 MHz n78) lifts the 5G/blend prior
 
   # Ofcom Mobile Checker UPRN Coverage API (June 2025 methodology): one blended 4G+5G level per MNO.

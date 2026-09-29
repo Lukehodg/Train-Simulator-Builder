@@ -230,3 +230,32 @@ def test_in_tunnel_coverage_is_listed_per_route_not_shared():
     names, km = np.array(["Tunnel"], dtype=object), np.array([1.0])
     assert das_mask(set(ecml.sim["cellular"]["tunnels"]["das_tunnels"]), names, km).all()
     assert not das_mask(set(other.sim["cellular"]["tunnels"]["das_tunnels"]), names, km).any()
+
+
+def test_measured_network_names_are_matched_on_whole_words():
+    """'Three' contains 'ee', so every Three measurement used to be calibrated as EE."""
+    from tcs.sources.measurements import _provider_from
+
+    ops = load_settings(offline=True).operators
+    cases = {"Three": "three", "3": "three", "Three UK": "three", "EE": "ee", "EE Limited": "ee", "O2 - UK": "o2", "Vodafone UK": "vodafone",
+             "vodafone": "vodafone", "TH": "three", "Unknown MVNO": None, "": None, "Vodafone / Three": None}
+    assert {v: _provider_from(v, ops) for v in cases} == cases
+
+
+def test_measurement_columns_are_not_confused_by_similar_names(tmp_path):
+    """A 'latency' column used to be read as latitude (it starts with 'lat'), dropping or misplacing every point."""
+    from tcs.sources.measurements import load_measurements
+
+    ops = load_settings(offline=True).operators
+    f = tmp_path / "modem.csv"
+    f.write_text("time,latency_ms,carrier,gps_lat,gps_lon,rsrp,throughput_mbps\n"
+                 "2026-09-01T10:00:00Z,48,Three,51.53,-0.12,-95,42.5\n"
+                 "2026-09-01T10:00:05Z,52,EE,51.54,-0.13,-90,60.1\n")
+    m = load_measurements(f, "modem_log", ops)
+    assert m["latitude"].tolist() == [51.53, 51.54] and m["longitude"].tolist() == [-0.12, -0.13]
+    assert m["latency_ms"].tolist() == [48, 52] and m["provider_id"].tolist() == ["three", "ee"]
+
+    f2 = tmp_path / "survey.csv"                                # 'ci' must not be read out of 'precision'
+    f2.write_text("timestamp,precision_m,latitude,longitude,mcc,mnc,cellId,rsrp\n2026-09-01T10:00:00Z,5,51.5,-0.1,234,20,1234,-99\n")
+    s = load_measurements(f2, "network_survey", ops)
+    assert s["cell_id"].tolist() == [1234] and s["provider_id"].tolist() == ["three"]
