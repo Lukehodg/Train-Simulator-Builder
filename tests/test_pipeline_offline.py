@@ -238,6 +238,13 @@ def test_sensitivity_moves_results_the_right_way(pipeline):
     edge.sim["vehicle"]["profile"] = "EDGE_RAIL_ACTIVE_ANTENNA"
     edge.sim["cellular"]["units_capacity_factor"] = 2.0
     assert {c.key for c in cases(edge)} == {"cellular", "coverage", "satellite", "demand", "antenna", "units"}
+    # The all-pessimistic case adds up: the full coverage error on top of half the antenna gain, whatever the order.
+    offset = edge.sim["vehicle"]["profiles"]["EDGE_RAIL_ACTIVE_ANTENNA"]["score_offset"]
+    both = copy.deepcopy(edge)
+    for c in cases(edge):
+        c.apply_low(both)
+    span_db = edge.sim["cellular"]["rsrp_dbm"]["at_one"] - edge.sim["cellular"]["rsrp_dbm"]["at_zero"]
+    assert both.sim["vehicle"]["profiles"]["EDGE_RAIL_ACTIVE_ANTENNA"]["score_offset"] == pytest.approx(offset / 2 - 5 / span_db)
 
 
 @pytest.mark.parametrize("calibrated", [False, True])

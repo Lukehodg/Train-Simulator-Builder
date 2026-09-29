@@ -80,10 +80,12 @@ def cases(s: Settings) -> list[Case]:
         v = _vehicle(s)
         gain, factor = float(v.get("db_offset", 6)), float(v.get("capacity_factor", 1.35))
 
+        half = float(v["score_offset"]) / 2
+
         def weaker_antenna(t: Settings) -> None:
             tv = _vehicle(t)
-            tv["score_offset"] = float(tv["score_offset"]) / 2      # half the modelled link-budget gain
-            tv["capacity_factor"] = 1 + (factor - 1) / 2
+            tv["score_offset"] = float(tv["score_offset"]) - half   # remove half the modelled link-budget gain; composes with
+            tv["capacity_factor"] = 1 + (factor - 1) / 2            # the coverage shift in the all-together case
         out.append(Case("antenna", "EDGE Rail antenna benefit", "the EDGE Rail antenna's assumed benefit", f"half the assumed gain (+{gain / 2:g} dB, ×{1 + (factor - 1) / 2:.2f})",
                         "as assumed", weaker_antenna, None))
     units = float(s.sim["cellular"].get("units_capacity_factor", 1.0) or 1.0)
