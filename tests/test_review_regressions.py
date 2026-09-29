@@ -308,3 +308,59 @@ def test_a_leg_without_rail_path_is_retried_wider_then_labelled_straight(tmp_pat
     assert row[2] == "partly stand-in" and "BBB–CCC" in row[1]
     assert _geometry_row({"geometry_source": "synthetic"})[2] == "synthetic stand-in"
     assert _geometry_row({"geometry_source": "osm"})[2] == "live"
+
+
+def test_the_terminus_is_reached_at_its_timetabled_time():
+    """Calling-point times are departures and the terminus time an arrival; the dwell used to be taken off the last
+    leg too, so every train reached its terminus one dwell early."""
+    from tcs.pipeline.movement import movement
+
+    s = load_settings(offline=True)
+    s.route = {**s.route, "line_speed_kph": {"default": 200, "restrictions": []},
+               "timetable": {"source": "yaml", "departure": "09:00", "calls": {"AAA": "09:00", "BBB": "09:20", "CCC": "09:40"}, "dwell_s": 120}}
+    n = int(40000 / s.spacing_m) + 1
+    samples = pd.DataFrame({"sample_id": np.arange(n), "distance_m": np.arange(n) * s.spacing_m})
+    ids = [0, n // 2, n - 1]
+    stations = pd.DataFrame({"crs": ["AAA", "BBB", "CCC"], "stop": True, "sample_id": ids, "distance_m": [i * s.spacing_m for i in ids]})
+    out, _ = movement(s, samples, stations)
+    t = out["sim_seconds"].values
+    assert t[ids[1]] == pytest.approx(20 * 60 - 120, abs=1)       # arrives a dwell before its 09:20 departure
+    assert t[ids[2]] == pytest.approx(40 * 60, abs=1)             # and reaches the terminus at 09:40, not 09:38
+
+
+def test_unknown_policy_or_weather_is_refused():
+    """Both used to run silently with the default while the output was labelled with the name asked for."""
+    import typer
+
+    from tcs.cli import _check_overrides
+
+    s = load_settings(offline=True)
+    _check_overrides(s, "FAILOVER", "rain")
+    with pytest.raises(typer.BadParameter, match="policy"):
+        _check_overrides(s, "FAILOVR", "nominal")
+    with pytest.raises(typer.BadParameter, match="weather"):
+        _check_overrides(s, None, "snow")
+
+
+def test_run_records_the_policy_and_weather_it_simulated(tmp_path, monkeypatch):
+    """`tcs run --policy/--weather` simulated the override but wrote the default into meta.json, so the viewer re-ran
+    and showed a different scenario from the one built."""
+    import json
+
+    from tcs import cli, config
+
+    for name in ("RAW", "INTERIM", "PROCESSED"):
+        monkeypatch.setattr(config, name, tmp_path / name.lower())
+    real = cli.load_settings
+
+    def coarse(**kw):
+        s = real(**kw)
+        s.route["sample_spacing_m"] = 2000
+        s.terrain["horizon_azimuths"], s.terrain["horizon_reach_m"] = 4, 1000
+        return s
+    monkeypatch.setattr(cli, "load_settings", coarse)
+    cli.run_pipeline(offline=True, policy="FAILOVER", weather="rain", copy_to_web=False)
+    s = real(offline=True)
+    meta = json.loads((s.paths()["web"] / "meta.json").read_text(encoding="utf-8"))
+    assert meta["sim"]["wan"]["policy"] == "FAILOVER" and meta["sim"]["weather"] == "rain"
+    assert meta["sim_defaults"]["wan"]["policy"] == s.sim["wan"]["policy"] != "FAILOVER"   # the baseline stays the config's

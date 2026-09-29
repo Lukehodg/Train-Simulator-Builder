@@ -41,7 +41,8 @@ async function main() {
     return
   }
   const meta = data.meta
-  const scenario = { policy: (meta.sim.wan.policy as Policy) ?? 'PACKET_BONDING', vehicle: (meta.sim.vehicle.profile as Vehicle) ?? 'EXTERNAL_ROOFTOP_ANTENNA', weather: 'nominal' }
+  // open on the scenario the bundle was simulated with (tcs run --policy / --weather record theirs in meta.sim)
+  const scenario = { policy: (meta.sim.wan.policy as Policy) ?? 'PACKET_BONDING', vehicle: (meta.sim.vehicle.profile as Vehicle) ?? 'EXTERNAL_ROOFTOP_ANTENNA', weather: (meta.sim.weather as string) ?? 'nominal' }
   const sim = simulate(data, scenario)
   const realTerrain = meta.terrain_source !== 'synthetic_terrain'
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches

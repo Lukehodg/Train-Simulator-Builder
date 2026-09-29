@@ -47,10 +47,11 @@ def movement(settings: Settings, samples: pd.DataFrame, stations: pd.DataFrame) 
     calls = from_yaml(tcfg) if tcfg.get("source", "yaml") == "yaml" else pd.DataFrame(columns=["crs", "time", "stop"])
     sched = schedule_seconds(calls, tcfg.get("departure", "00:00"))
     stop_rows = [(str(r["crs"]), int(r["sample_id"])) for _, r in stops.iterrows()]
-    for (c0, i0), (c1, i1) in zip(stop_rows[:-1], stop_rows[1:]):
+    for k, ((c0, i0), (c1, i1)) in enumerate(zip(stop_rows[:-1], stop_rows[1:])):
         if c0 in sched and c1 in sched:
             physics = dt[i0 + 1:i1 + 1].sum()
-            planned = sched[c1] - sched[c0] - dwell
+            # Calling-point times are departures, so the run to one ends a dwell earlier; the terminus time is the arrival.
+            planned = sched[c1] - sched[c0] - (0.0 if k == len(stop_rows) - 2 else dwell)
             if planned > physics > 0:
                 dt[i0 + 1:i1 + 1] *= planned / physics
             elif planned < physics:

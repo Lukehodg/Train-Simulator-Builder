@@ -75,6 +75,10 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
                     f"{design.passengers} seats · policy {design.policy}")
         for w in design.warnings:
             console.log(f"[yellow]{w}")
+    _check_overrides(s, policy, weather)
+    if policy:
+        s.sim["wan"]["policy"] = policy                        # recorded in meta.json: the viewer opens on the scenario simulated here
+    s.sim["weather"] = weather
     b = build_route(s)
     console.log(f"route: {len(b.samples)} samples at {s.spacing_m:.0f} m, {b.samples['distance_m'].max() / 1000:.1f} km, geometry={b.geometry_source}")
     for w in b.warnings:
@@ -104,6 +108,17 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     _summary(rc, obs)
     for k, v in written.items():
         console.log(f"[dim]{k}[/dim] {v}")
+
+
+def _check_overrides(s, policy: str | None, weather: str) -> None:
+    """An unknown policy or weather used to run silently with the default one while being labelled as asked."""
+    from .model.bonding import POLICIES
+
+    if policy and policy not in POLICIES:
+        raise typer.BadParameter(f"unknown policy '{policy}'; choose from {', '.join(POLICIES)}")
+    known = {w for p in s.starlink["satcom"]["providers"] for w in p["availability"]["weather"]} or {"nominal"}
+    if weather not in known:
+        raise typer.BadParameter(f"unknown weather '{weather}'; choose from {', '.join(sorted(known))}")
 
 
 def _summary(rc: pd.DataFrame, obs: pd.DataFrame) -> None:
@@ -229,6 +244,7 @@ def _build_report(route: str | None, preset: str | None, train: Path | None, pol
     _require_built(s)
     interim, processed = _interim(s), s.paths()["processed"]
     label_parts = []
+    variant = []                                               # what else sets this scenario apart, for the file name
     if preset:
         pr = s.sim.get("presets", {}).get(preset)
         if pr is None:
@@ -249,10 +265,14 @@ def _build_report(route: str | None, preset: str | None, train: Path | None, pol
         d = load_design(train, s)
         apply_to_settings(s, d)
         label_parts.append(f"train design '{d.title}'")
+        variant.append(d.title)
+    _check_overrides(s, policy, weather)
     if policy:
         s.sim["wan"]["policy"] = policy
+        variant.append(policy)
     if weather != "nominal":
         label_parts.append(f"weather {weather}")
+        variant.append(weather)
     if not label_parts:
         label_parts.append("baseline configuration")
     label = " · ".join(label_parts) + f" · policy {s.sim['wan']['policy'].lower().replace('_', ' ')} · {s.sim['vehicle']['profile'].lower().replace('_', ' ')}"
@@ -283,7 +303,7 @@ def _build_report(route: str | None, preset: str | None, train: Path | None, pol
 
     sens = sensitivity(s, b.samples, prior, serving, calibration=cal, weather=weather)
     return build_report(s, meta, b.samples, obs, rc, stations, out or (processed / "reports"), label, validation, weather=weather, baseline=baseline,
-                        sensitivity=sens)
+                        sensitivity=sens, variant=variant)
 
 
 REPORT_SCENARIOS = ("baseline", "edge_rail_fleet_connect")

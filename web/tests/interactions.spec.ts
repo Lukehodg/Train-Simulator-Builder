@@ -205,3 +205,14 @@ test('names from the route data are shown as text, never as markup', async ({ pa
   await expect(page.locator('[id^="xss-"]')).toHaveCount(0)
   expect(await page.evaluate(() => (window as any).__xss)).toBeUndefined()
 })
+
+// `tcs run --policy / --weather` records the scenario it simulated; the viewer opens on it, not on the defaults.
+test('the viewer opens on the policy and weather the route was built with', async ({ page }) => {
+  const meta = JSON.parse(readFileSync(path.resolve('tests/.generated', 'meta.json'), 'utf-8'))
+  meta.sim = { ...meta.sim, weather: 'storm', wan: { ...meta.sim.wan, policy: 'FAILOVER' } }
+  await page.route(url => /\/data\/[^/]+\/meta\.json$/.test(url.pathname), route => route.fulfill({ json: meta }))
+  await page.reload()
+  await expect(page.locator('#kpis .kpi')).toHaveCount(6)
+  await expect(page.locator('#weather')).toHaveValue('storm')
+  await expect(page.locator('#policy')).toHaveValue('FAILOVER')
+})

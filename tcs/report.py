@@ -6,6 +6,7 @@ Everything in it is a model prediction unless the validation section says otherw
 from __future__ import annotations
 
 import io
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -589,6 +590,10 @@ def _coverage_row(meta: dict) -> tuple[str, str, str]:
     return ("Mobile coverage", "Stand-in coverage prior", "synthetic stand-in")
 
 
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")[:40] or "x"
+
+
 def _geometry_row(meta: dict) -> tuple[str, str, str]:
     what = "Route centreline, stations, tunnels, cuttings, line speed"
     src = meta["geometry_source"]
@@ -606,9 +611,11 @@ def _geometry_row(meta: dict) -> tuple[str, str, str]:
 # ---------------------------------------------------------------- entry point
 def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.DataFrame, rc: pd.DataFrame, stations: pd.DataFrame, out_dir: Path, scenario_label: str,
                  validation: pd.DataFrame | None = None, weather: str = "nominal", baseline: dict | None = None,
-                 sensitivity: dict | None = None) -> dict[str, Path]:
+                 sensitivity: dict | None = None, variant: list[str] | None = None) -> dict[str, Path]:
     """baseline: {"title", "obs", "rc"} of the baseline configuration, when this scenario is something else (for the comparison).
-    sensitivity: tcs.sensitivity.run() for this scenario, for the ranges and the sensitivity section."""
+    sensitivity: tcs.sensitivity.run() for this scenario, for the ranges and the sensitivity section.
+    variant: what else sets the scenario apart (design title, policy, weather), added to the file names so reports on the
+    same route and preset don't overwrite each other."""
     from .report_docx import POLICIES, VEHICLES, Evidence, write_docx
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -669,7 +676,7 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
         operators=[op.get("name", op["id"]) for op in settings.operators], design=design,
         claims=list(presets.get(preset, {}).get("claims", [])) if preset and not design else [], info=dict(settings.report), baseline=base,
         sensitivity=sensitivity)
-    stem = f"evidence_{meta['route']['id']}_{(preset or 'baseline')}"
+    stem = "_".join([f"evidence_{meta['route']['id']}_{meta['scenario_id']}", *(_slug(v) for v in variant or [])])
     docx_path, xlsx_path = out_dir / f"{stem}.docx", out_dir / f"{stem}.xlsx"
     reference = write_docx(docx_path, ev)
     write_xlsx(xlsx_path, ev, samples, rc, obs, reference)
