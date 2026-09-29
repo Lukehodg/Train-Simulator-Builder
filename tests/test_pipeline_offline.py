@@ -194,7 +194,8 @@ def test_report_all_places_packs_beside_the_viewer_bundle(pipeline, tmp_path, mo
     headings = [p.text for p in base.paragraphs if p.style.name.startswith("Heading")]
     for h in ("Executive summary", "1   Introduction", "2.4   Route heat maps", "8   Validation status", "Appendix A   Station-to-station results", "Appendix B   Glossary"):
         assert h in headings
-    assert len(base.inline_shapes) == 5                        # throughput, sections, heat maps, per-network strip, links
+    assert "9.2   Sensitivity to the main assumptions" in headings
+    assert len(base.inline_shapes) == 6                        # throughput, sections, heat maps, per-network strip, links, sensitivity
     assert base.core_properties.author == "Train Link Simulator"   # not python-docx's default
     footer = "".join(t.text for t in base.sections[1].footer._element.iter() if t.tag.endswith("}t"))
     assert f"TLS-{s.route_id.upper()}-BASELINE-" in footer and "Page" in footer
@@ -203,13 +204,40 @@ def test_report_all_places_packs_beside_the_viewer_bundle(pipeline, tmp_path, mo
     assert any("compared with the baseline" in c for c in captions)   # only a non-baseline scenario compares
     assert not any("compared with the baseline" in p.text for p in base.paragraphs if p.style.name == "Caption")
     workbook = __import__("openpyxl").load_workbook(out / idx["reports"][0]["xlsx"]["file"], read_only=True)
-    assert workbook.sheetnames[:3] == ["Read me", "Summary", "Sections"]
+    assert workbook.sheetnames[:3] == ["Read me", "Summary", "Sections"] and "Sensitivity" in workbook.sheetnames
 
     # A viewer bundle from another build is refused rather than described by the wrong pack.
     (web_data / s.route_id / "meta.json").write_text("{}", encoding="utf-8")
     res = CliRunner().invoke(app, ["report-all", "--web-data", str(web_data)])
     assert res.exit_code == 1
     assert not out.exists()
+
+
+def test_sensitivity_moves_results_the_right_way(pipeline):
+    """Pessimistic assumptions never improve a result and optimistic ones never worsen it; the design-only cases appear only when they apply."""
+    import copy
+
+    from tcs.sensitivity import cases, run, span
+
+    s, b, _, prior, serving, *_ = pipeline
+    before = copy.deepcopy((s.sim, s.networks, s.starlink))
+    sens = run(s, b.samples, prior, serving)
+    assert (s.sim, s.networks, s.starlink) == before                           # each case works on its own copy
+    c = sens["central"]
+    by = {r["key"]: r for r in sens["cases"]}
+    assert set(by) == {"cellular", "coverage", "satellite", "demand"}          # passive antenna, one roof unit
+    for key in ("cellular", "coverage", "satellite"):
+        assert by[key]["low_kpis"]["bonded_median_mbps"] <= c["bonded_median_mbps"] <= by[key]["high_kpis"]["bonded_median_mbps"]
+    assert by["cellular"]["low_kpis"]["bonded_median_mbps"] < c["bonded_median_mbps"]    # capacity really is scaled
+    assert by["demand"]["low_kpis"]["streaming_share_pct"] <= c["streaming_share_pct"] <= by["demand"]["high_kpis"]["streaming_share_pct"]
+    assert sens["combined"]["low"]["streaming_share_pct"] <= c["streaming_share_pct"] <= sens["combined"]["high"]["streaming_share_pct"]
+    lo, hi = span(sens, "bonded_median_mbps")
+    assert lo == sens["combined"]["low"]["bonded_median_mbps"] and hi == sens["combined"]["high"]["bonded_median_mbps"]
+
+    edge = copy.deepcopy(s)
+    edge.sim["vehicle"]["profile"] = "EDGE_RAIL_ACTIVE_ANTENNA"
+    edge.sim["cellular"]["units_capacity_factor"] = 2.0
+    assert {c.key for c in cases(edge)} == {"cellular", "coverage", "satellite", "demand", "antenna", "units"}
 
 
 @pytest.mark.parametrize("calibrated", [False, True])

@@ -101,6 +101,10 @@ A Word report laid out for a tender submission, and an Excel data appendix, per 
   - station-to-station and per-link results, and the onboard configuration
   - methodology, data sources and confidence
   - validation status, assumptions and limitations
+  - sensitivity to the main assumptions: the simulation re-run with each uncertain assumption (mobile capacity,
+    coverage prediction error, satellite capacity, passengers online, and where they apply the EDGE Rail antenna
+    benefit and extra roof units) set pessimistically and optimistically, one at a time and all together. The
+    resulting ranges are quoted on the cover, in the headline table and in the executive summary.
 - **Appendices:** a landscape table of results by section, and a glossary.
 
 Tables and figures are numbered, every page carries the document reference, classification and "Page X of Y", and

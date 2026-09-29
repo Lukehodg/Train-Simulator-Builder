@@ -279,7 +279,11 @@ def _build_report(route: str | None, preset: str | None, train: Path | None, pol
         obs_b, rc_b = simulate(base, b.samples, prior, serving, calibration=cal)
         v, p = base.sim["vehicle"]["profile"], base.sim["wan"]["policy"]
         baseline = {"title": f"{VEHICLES.get(v, v).lower()}, {POLICIES.get(p, p).split(' (')[0].lower()}", "obs": obs_b, "rc": rc_b}
-    return build_report(s, meta, b.samples, obs, rc, stations, out or (processed / "reports"), label, validation, weather=weather, baseline=baseline)
+    from .sensitivity import run as sensitivity
+
+    sens = sensitivity(s, b.samples, prior, serving, calibration=cal, weather=weather)
+    return build_report(s, meta, b.samples, obs, rc, stations, out or (processed / "reports"), label, validation, weather=weather, baseline=baseline,
+                        sensitivity=sens)
 
 
 REPORT_SCENARIOS = ("baseline", "edge_rail_fleet_connect")

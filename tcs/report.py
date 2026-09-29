@@ -252,6 +252,34 @@ def _chart_links(links: pd.DataFrame) -> bytes:
     return _png(fig)
 
 
+def _chart_sensitivity(sens: dict) -> bytes:
+    """Tornado chart: for each assumption, the range of a result between its pessimistic and optimistic value."""
+    plt = _plt()
+    rows = [(r["label"], r["low_kpis"], r["high_kpis"]) for r in sens["cases"]] + [("All of them together", sens["combined"]["low"], sens["combined"]["high"])]
+    fig, axes = plt.subplots(1, 2, figsize=(10, 0.46 * len(rows) + 1.0), dpi=160, sharey=True)
+    y = np.arange(len(rows))[::-1]
+    for ax, measure, title, fmt in ((axes[0], "streaming_share_pct", "Journey supporting video calls and streaming (%)", "{:.1f}"),
+                                    (axes[1], "bonded_median_mbps", "Median combined throughput (Mbps)", "{:.0f}")):
+        c = sens["central"][measure]
+        vals = [v for _, lo, hi in rows for v in (lo[measure], hi[measure])] + [c]
+        pad = (max(vals) - min(vals)) * 0.18 or max(abs(c) * 0.05, 1.0)
+        for yy, (label, lo, hi) in zip(y, rows):
+            a, b = sorted((lo[measure], hi[measure]))
+            last = label.startswith("All of")
+            ax.barh(yy, max(b - a, (max(vals) - min(vals)) * 0.004), left=a, height=0.56, color="#1b2a41" if last else ACCENT_HEX, alpha=1 if last else 0.85)
+            ax.text(a - pad * 0.08, yy, fmt.format(lo[measure] if lo[measure] <= hi[measure] else hi[measure]), va="center", ha="right", fontsize=6.5, color=INK)
+            ax.text(b + pad * 0.08, yy, fmt.format(hi[measure] if hi[measure] >= lo[measure] else lo[measure]), va="center", ha="left", fontsize=6.5, color=INK)
+        ax.axvline(c, color=INK, linewidth=0.9, linestyle=(0, (3, 2)), zorder=3)
+        ax.text(c, len(rows) - 0.35, f"central {fmt.format(c)}", ha="center", va="bottom", fontsize=6.5, color=INK)
+        ax.set_xlim(min(vals) - pad, max(vals) + pad); ax.set_ylim(-0.6, len(rows) - 0.1)
+        ax.set_title(title, loc="left"); ax.grid(axis="x", color=HAIRLINE, linewidth=0.6)
+        ax.spines[["top", "right", "left"]].set_visible(False); ax.tick_params(axis="y", length=0)
+    axes[0].set_yticks(y); axes[0].set_yticklabels([r[0] for r in rows], fontsize=7.5, color=INK)
+    axes[0].get_yticklabels()[-1].set_fontweight("bold")
+    fig.tight_layout()
+    return _png(fig)
+
+
 def _band_legend(ax, metric: str, bands: np.ndarray, ncol: int = 1) -> None:
     from matplotlib.patches import Patch
 
@@ -471,6 +499,7 @@ def write_xlsx(path: Path, ev, samples: pd.DataFrame, rc: pd.DataFrame, obs: pd.
                  ("Samples", "Every point along the railway (one row per sample): position, time, speed, terrain, each link's quality, capacity, "
                              "latency, availability and signal, and the combined connection and passenger service"),
                  ("Assumptions", "Model parameters used for this scenario"), ("Sources", "Data sources and whether each was live"),
+                 *([("Sensitivity", "The headline results with each main assumption set pessimistically and optimistically")] if ev.sensitivity else []),
                  *([("Validation", "Agreement between predictions and field measurements")] if ev.validation is not None and len(ev.validation) else [])]:
         r += 1
         ws.cell(r, 1, a).border = rule; ws.cell(r, 2, b).border = rule
@@ -514,6 +543,17 @@ def write_xlsx(path: Path, ev, samples: pd.DataFrame, rc: pd.DataFrame, obs: pd.
     sheet("Samples", smp)
     sheet("Assumptions", pd.DataFrame(ev.assumptions, columns=["Parameter", "Value"]), {"Parameter": 40, "Value": 120})
     sheet("Sources", pd.DataFrame(ev.sources, columns=["Input", "Source", "Status"]), {"Input": 52, "Source": 60, "Status": 20})
+    if ev.sensitivity:
+        sens = ev.sensitivity
+        rows = [(r["label"], r["low"], r["high"], *[r[side][m] for side in ("low_kpis", "high_kpis") for m in ("streaming_share_pct", "bonded_median_mbps", "bonded_p10_mbps", "outage_km")])
+                for r in sens["cases"]]
+        rows.append(("All of them together", "every pessimistic case", "every optimistic case",
+                     *[sens["combined"][side][m] for side in ("low", "high") for m in ("streaming_share_pct", "bonded_median_mbps", "bonded_p10_mbps", "outage_km")]))
+        rows.insert(0, ("Central prediction", "", "", *[sens["central"][m] for _ in (0, 1) for m in ("streaming_share_pct", "bonded_median_mbps", "bonded_p10_mbps", "outage_km")]))
+        sheet("Sensitivity", pd.DataFrame(rows, columns=["Assumption", "Pessimistic case", "Optimistic case",
+                                                         "Streaming-capable, pessimistic (%)", "Median throughput, pessimistic (Mbps)", "P10 throughput, pessimistic (Mbps)", "Loss of service, pessimistic (km)",
+                                                         "Streaming-capable, optimistic (%)", "Median throughput, optimistic (Mbps)", "P10 throughput, optimistic (Mbps)", "Loss of service, optimistic (km)"]),
+              {"Assumption": 44, "Pessimistic case": 30, "Optimistic case": 26})
     if ev.validation is not None and len(ev.validation):
         sheet("Validation", ev.validation)
     wb.properties.creator = ev.info.get("prepared_by") or "Train Link Simulator"
@@ -523,8 +563,10 @@ def write_xlsx(path: Path, ev, samples: pd.DataFrame, rc: pd.DataFrame, obs: pd.
 
 # ---------------------------------------------------------------- entry point
 def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.DataFrame, rc: pd.DataFrame, stations: pd.DataFrame, out_dir: Path, scenario_label: str,
-                 validation: pd.DataFrame | None = None, weather: str = "nominal", baseline: dict | None = None) -> dict[str, Path]:
-    """baseline: {"title", "obs", "rc"} of the baseline configuration, when this scenario is something else (for the comparison)."""
+                 validation: pd.DataFrame | None = None, weather: str = "nominal", baseline: dict | None = None,
+                 sensitivity: dict | None = None) -> dict[str, Path]:
+    """baseline: {"title", "obs", "rc"} of the baseline configuration, when this scenario is something else (for the comparison).
+    sensitivity: tcs.sensitivity.run() for this scenario, for the ranges and the sensitivity section."""
     from .report_docx import POLICIES, VEHICLES, Evidence, write_docx
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -555,6 +597,8 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
     ]
     charts = {"capacity": _chart_capacity(samples, rc, stations), "sections": _chart_sections(sec), "links": _chart_links(links),
               "heatmap": _chart_heatmap(samples, stations, bands), "networks": _chart_networks(samples, stations, obs, names, bands["signal"])}
+    if sensitivity:
+        charts["sensitivity"] = _chart_sensitivity(sensitivity)
     design = sim.get("train", {}).get("design")
     preset = sim.get("active_preset")
     presets = sim.get("presets", {})
@@ -584,7 +628,8 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
         satcom=(" and ".join(sat) if sat and sim.get("satcom_enabled", True) else "no satellite link"),
         passengers=f"{pw['passengers']} seats; {pw['active_share'] * 100:.0f} % of passengers online, {pw['per_user_demand_mbps']} Mbps demand each",
         operators=[op.get("name", op["id"]) for op in settings.operators], design=design,
-        claims=list(presets.get(preset, {}).get("claims", [])) if preset and not design else [], info=dict(settings.report), baseline=base)
+        claims=list(presets.get(preset, {}).get("claims", [])) if preset and not design else [], info=dict(settings.report), baseline=base,
+        sensitivity=sensitivity)
     stem = f"evidence_{meta['route']['id']}_{(preset or 'baseline')}"
     docx_path, xlsx_path = out_dir / f"{stem}.docx", out_dir / f"{stem}.xlsx"
     reference = write_docx(docx_path, ev)
