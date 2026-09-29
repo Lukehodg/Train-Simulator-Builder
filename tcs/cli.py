@@ -204,20 +204,28 @@ def build_all(offline: bool = typer.Option(False), only: str | None = typer.Opti
 @app.command()
 def report(route: str | None = typer.Option(None, help="Route id (default: config/route.yaml)"), preset: str | None = typer.Option(None, help="Scenario preset, e.g. edge_rail_fleet_connect"),
            train: Path | None = typer.Option(None, help="Train Studio project (*.train.json)"), policy: str | None = typer.Option(None), weather: str = typer.Option("nominal"),
-           out: Path | None = typer.Option(None, help="Output folder (default data/processed/<route>/reports)")):
+           out: Path | None = typer.Option(None, help="Output folder (default data/processed/<route>/reports)"),
+           prepared_for: str | None = typer.Option(None, help="Client named on the cover (overrides config/report.yaml)"),
+           prepared_by: str | None = typer.Option(None, help="Your organisation on the cover"),
+           tender_ref: str | None = typer.Option(None, help="The client's tender reference"),
+           classification: str | None = typer.Option(None, help="Classification in every page header"),
+           doc_version: str | None = typer.Option(None, help="Document version, e.g. 1.0")):
     """Tender evidence pack: Word report + Excel appendix for one route and scenario (re-simulates from the cached route data)."""
-    written = _build_report(route, preset, train, policy, weather, out)
+    info = {"prepared_for": prepared_for, "prepared_by": prepared_by, "tender_reference": tender_ref, "classification": classification, "version": doc_version}
+    written = _build_report(route, preset, train, policy, weather, out, {k: v for k, v in info.items() if v is not None})
     for k, v in written.items():
         console.log(f"[bold]{k}[/bold] {v}")
 
 
-def _build_report(route: str | None, preset: str | None, train: Path | None, policy: str | None, weather: str, out: Path | None) -> dict[str, Path]:
+def _build_report(route: str | None, preset: str | None, train: Path | None, policy: str | None, weather: str, out: Path | None,
+                  info: dict[str, str] | None = None) -> dict[str, Path]:
     from .model import calibration
     from .model.simulate import simulate
     from .pipeline.sample_route import load_bundle
     from .report import build_report
 
     s = load_settings(route_id=route)
+    s.report.update(info or {})                                # cover details given on the command line win over config/report.yaml
     _require_built(s)
     interim, processed = _interim(s), s.paths()["processed"]
     label_parts = []
@@ -257,8 +265,21 @@ def _build_report(route: str | None, preset: str | None, train: Path | None, pol
     meta = json.loads((processed / "web" / "meta.json").read_text(encoding="utf-8"))
     meta["model_version"] = s.sim["model_version"]
     vpath = processed / "validation_by_section.csv"
-    validation = pd.read_csv(vpath) if vpath.exists() else None
-    return build_report(s, meta, b.samples, obs, rc, stations, out or (processed / "reports"), label, validation)
+    validation = None
+    if vpath.exists():                                         # only a validation of this build's predictions counts
+        if vpath.stat().st_mtime >= (processed / "provider_observation.parquet").stat().st_mtime:
+            validation = pd.read_csv(vpath)
+        else:
+            console.log(f"[yellow]{vpath.name} predates the current build of {s.route_id}; run tcs validate again to include it")
+    baseline = None
+    if preset or train or policy or weather != "nominal":   # the report compares this scenario with the baseline configuration
+        from .report_docx import POLICIES, VEHICLES
+
+        base = load_settings(route_id=route)
+        obs_b, rc_b = simulate(base, b.samples, prior, serving, calibration=cal)
+        v, p = base.sim["vehicle"]["profile"], base.sim["wan"]["policy"]
+        baseline = {"title": f"{VEHICLES.get(v, v).lower()}, {POLICIES.get(p, p).split(' (')[0].lower()}", "obs": obs_b, "rc": rc_b}
+    return build_report(s, meta, b.samples, obs, rc, stations, out or (processed / "reports"), label, validation, weather=weather, baseline=baseline)
 
 
 REPORT_SCENARIOS = ("baseline", "edge_rail_fleet_connect")

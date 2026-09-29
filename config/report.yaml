@@ -1,0 +1,9 @@
+# Cover page, headers and document control of the tender evidence pack (tcs report / tcs report-all and the
+# viewer's Report button). Leave a field empty ("") to leave it off the document.
+report:
+  prepared_by: ""                  # your organisation, as it should appear on the cover
+  prepared_for: ""                 # the client, e.g. the train operator or the Department for Transport
+  tender_reference: ""             # the client's tender / invitation-to-tender reference
+  contact: ""                      # who to contact about this document (name, email)
+  classification: "Commercial in confidence"   # printed in every page header; "" for none
+  version: "1.0"
