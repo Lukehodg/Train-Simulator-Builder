@@ -6,6 +6,10 @@ Supported inputs (all CSV; column names mapped through `mapping` so new formats 
 - Network Survey (Android) exports: GPS + RSRP/RSRQ/SINR + MCC/MNC/TAC/CI
 - Onboard modem / multi-WAN controller logs (Peplink, Icomera, Cradlepoint, ...) with GPS
 - Throughput/latency test logs
+- Network Rail Yellow Train LTE scanner logs (Rail Data Marketplace): every carrier of every network each second,
+  reduced to the strongest per network (the one a modem would use); the condensed parquet form is read too
+
+Large files are read in chunks, keeping only the rows inside `bbox` (the route's surroundings).
 
 Canonical columns: timestamp, latitude, longitude, provider_id, radio, rsrp_dbm, rsrq_db, sinr_db,
 throughput_mbps, latency_ms, mcc, mnc, tac, cell_id, source, kind (point | segment)
@@ -35,6 +39,11 @@ PRESETS: dict[str, dict[str, list[str]]] = {
     "ofcom_train_segments": {
         "segment_id": ["segment"], "latitude": ["latitude", "lat"], "longitude": ["longitude", "lon", "lng"], "provider": ["operator", "mno"],
         "pass_rate": ["pass", "rate"], "classification": ["class", "category"],
+    },
+    "yellow_train": {
+        "timestamp": ["datetime"], "latitude": ["latitude"], "longitude": ["longitude"], "provider": ["operator"],
+        "rsrp_dbm": ["cal_rsrp"],                      # RSRP corrected for the measurement antenna, not the raw scanner value
+        "rsrq_db": ["rsrq"], "sinr_db": ["sinr"], "mnc": ["mnc"], "cell_id": ["pci"], "device": ["train"],
     },
     "modem_log": {
         "timestamp": ["time"], "latitude": ["latitude", "lat"], "longitude": ["longitude", "lon", "lng"], "provider": ["carrier", "operator", "sim"],
@@ -78,20 +87,47 @@ def _provider_from(value: str, operators: list[dict]) -> str | None:
     return hits[0] if len(hits) == 1 else None
 
 
-def load_measurements(path: Path, preset: str, operators: list[dict], mapping: dict[str, str] | None = None) -> pd.DataFrame:
-    df = pd.read_csv(path, low_memory=False)
-    cols = list(df.columns)
-    guess: dict[str, str | None] = {}
-    for k, needles in PRESETS[preset].items():            # a column feeds one field only
-        guess[k] = _find(cols, needles, {c for c in guess.values() if c})
-    if mapping:
-        guess.update(mapping)
+# Scanners log every carrier they hear; a modem uses the strongest, so keep that one per second, device and network.
+BEST_SERVER = {"yellow_train"}
+FIXED = {"yellow_train": {"radio": "4G"}}                  # the Yellow Train file is LTE only
+
+
+def load_measurements(path: Path, preset: str, operators: list[dict], mapping: dict[str, str] | None = None,
+                      bbox: tuple[float, float, float, float] | None = None, chunksize: int = 1_000_000) -> pd.DataFrame:
+    """bbox: (lon_min, lat_min, lon_max, lat_max); rows outside it are dropped as each chunk is read."""
+    path = Path(path)
+    chunks = [pd.read_parquet(path)] if path.suffix == ".parquet" else pd.read_csv(path, low_memory=False, chunksize=chunksize, encoding="utf-8-sig")
+    guess: dict[str, str | None] | None = None
+    parts = []
+    for df in chunks:
+        if guess is None:
+            guess = {}
+            for k, needles in PRESETS[preset].items():    # a column feeds one field only
+                guess[k] = _find(list(df.columns), needles, {c for c in guess.values() if c})
+            if mapping:
+                guess.update(mapping)
+        if bbox is not None and guess.get("latitude") in df.columns and guess.get("longitude") in df.columns:
+            lon, lat = pd.to_numeric(df[guess["longitude"]], errors="coerce"), pd.to_numeric(df[guess["latitude"]], errors="coerce")
+            df = df[lon.between(bbox[0], bbox[2]) & lat.between(bbox[1], bbox[3])]   # before any per-row work
+        part = _canonical(df, guess, preset, operators, path)
+        parts.append(_best_server(part) if preset in BEST_SERVER else part)
+    out = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=[*CANON, "device"])
+    return (_best_server(out) if preset in BEST_SERVER else out).reset_index(drop=True)   # a second can straddle two chunks
+
+
+def _best_server(m: pd.DataFrame) -> pd.DataFrame:
+    m = m[m["provider_id"].notna() & m["rsrp_dbm"].notna()]
+    return m.sort_values("rsrp_dbm", ascending=False).drop_duplicates(["timestamp", "device", "provider_id"]).sort_index()
+
+
+def _canonical(df: pd.DataFrame, guess: dict[str, str | None], preset: str, operators: list[dict], path: Path) -> pd.DataFrame:
     out = pd.DataFrame(index=df.index)
     for c in CANON:
         src = guess.get(c)
         out[c] = df[src] if src in df.columns else np.nan
     if "provider" in guess and guess["provider"] in df.columns:
-        out["provider_id"] = df[guess["provider"]].map(lambda v: _provider_from(v, operators))
+        names = df[guess["provider"]]
+        out["provider_id"] = names.map({v: _provider_from(v, operators) for v in names.dropna().unique()})   # each name once
     elif out["mcc"].notna().any():
         mm = {(int(op["mcc"]), int(m)): op["id"] for op in operators for m in op.get("mnc", [])}
         out["provider_id"] = [mm.get((int(a), int(b))) if pd.notna(a) and pd.notna(b) else None for a, b in zip(out["mcc"], out["mnc"])]
@@ -100,11 +136,13 @@ def load_measurements(path: Path, preset: str, operators: list[dict], mapping: d
         out[c] = pd.to_numeric(out[c], errors="coerce")
     out["source"] = f"{preset}:{path.name}"
     out["kind"] = "segment" if preset == "ofcom_train_segments" else "point"
+    out["device"] = df[guess["device"]].astype(str) if guess.get("device") in df.columns else ""
+    for c, v in FIXED.get(preset, {}).items():
+        out[c] = out[c].fillna(v) if c in out else v
     if preset == "ofcom_train_segments":
         out["pass_rate"] = pd.to_numeric(df[guess["pass_rate"]], errors="coerce") if guess.get("pass_rate") else np.nan
         out["classification"] = df[guess["classification"]] if guess.get("classification") else None
-    out = out[out["latitude"].notna() & out["longitude"].notna()]
-    return out.reset_index(drop=True)
+    return out[out["latitude"].notna() & out["longitude"].notna()]
 
 
 def attach_to_route(meas: pd.DataFrame, samples: pd.DataFrame, proj, max_distance_m: float = 250) -> pd.DataFrame:

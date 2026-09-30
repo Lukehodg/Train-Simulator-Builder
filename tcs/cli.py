@@ -104,6 +104,12 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
         console.log(f"[dim]{k}[/dim] {v}")
 
 
+def _route_bbox(samples: pd.DataFrame, margin_deg: float = 0.03) -> tuple[float, float, float, float]:
+    """The route's surroundings (about 2-3 km around it): measurement files covering the whole network are cut to this."""
+    return (float(samples["longitude"].min()) - margin_deg, float(samples["latitude"].min()) - margin_deg,
+            float(samples["longitude"].max()) + margin_deg, float(samples["latitude"].max()) + margin_deg)
+
+
 def _apply_preset(s, preset: str) -> dict:
     """Apply a named scenario preset from simulation.yaml to the settings; returns the preset."""
     pr = s.sim.get("presets", {}).get(preset)
@@ -375,7 +381,7 @@ def probe_ofcom(postcode: str = typer.Argument("N1C4TB")):
 
 @app.command()
 def calibrate(measurements: Path = typer.Argument(..., help="CSV file"), route: str | None = typer.Option(None, help="Route id (default: config/route.yaml)"),
-              preset: str = typer.Option("network_survey", help="network_survey|ofcom_drive|modem_log"), max_distance_m: float = typer.Option(250.0)):
+              preset: str = typer.Option("network_survey", help="network_survey|ofcom_drive|modem_log|yellow_train"), max_distance_m: float = typer.Option(250.0)):
     """Fit score->RSRP and per-operator bias from measurements attached to the route; saves calibration.json."""
     from .model import calibration
     from .model.cellular import cellular_observations
@@ -386,7 +392,7 @@ def calibrate(measurements: Path = typer.Argument(..., help="CSV file"), route: 
     _require_built(s)
     interim = _interim(s)
     b = load_bundle(interim, s.route["country"])
-    meas = load_measurements(measurements, preset, s.operators)
+    meas = load_measurements(measurements, preset, s.operators, bbox=_route_bbox(b.samples))
     meas = attach_to_route(meas, b.samples, b.proj, max_distance_m=max_distance_m)
     # Fit against the uncalibrated model, not the last run's provider_observation: that already carries any earlier
     # calibration, so re-fitting it would measure only the residual and saving it would undo the first calibration.
@@ -401,7 +407,7 @@ def calibrate(measurements: Path = typer.Argument(..., help="CSV file"), route: 
 
 @app.command()
 def validate(measurements: Path = typer.Argument(...), route: str | None = typer.Option(None, help="Route id (default: config/route.yaml)"),
-             preset: str = typer.Option("network_survey"), section_km: float = typer.Option(10.0)):
+             preset: str = typer.Option("network_survey", help="network_survey|ofcom_drive|modem_log|yellow_train"), section_km: float = typer.Option(10.0)):
     """Predicted-vs-observed metrics by route section (MAE/RMSE, outage precision/recall, classification accuracy)."""
     from .pipeline.sample_route import load_bundle
     from .sources.measurements import attach_to_route, load_measurements
@@ -410,7 +416,7 @@ def validate(measurements: Path = typer.Argument(...), route: str | None = typer
     s = load_settings(route_id=route)
     _require_built(s)
     b = load_bundle(_interim(s), s.route["country"])
-    meas = attach_to_route(load_measurements(measurements, preset, s.operators), b.samples, b.proj)
+    meas = attach_to_route(load_measurements(measurements, preset, s.operators, bbox=_route_bbox(b.samples)), b.samples, b.proj)
     obs = pd.read_parquet(s.paths()["processed"] / "provider_observation.parquet").merge(b.samples[["sample_id", "distance_m"]], on="sample_id")
     rep = report(obs, meas, section_km=section_km)
     console.print(rep.to_string())
