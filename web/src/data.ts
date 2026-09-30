@@ -93,3 +93,10 @@ export function liveCoverageShare(m: Meta): number {
   if (m.coverage_share) return Object.entries(m.coverage_share).filter(([k]) => k.startsWith('ofcom')).reduce((a, [, v]) => a + v, 0)
   return m.coverage_sources.some(s => s.startsWith('ofcom')) ? 1 : 0
 }
+
+/** Whether the train has this link: a fitted mobile network (sim.cellular.fitted_networks, null = all of them) or a
+ *  satellite terminal that is switched on. The same rule as fitted_links() in simulate.py and the satcom model. */
+export function linkFitted(m: Meta, p: { id: string; type: string; enabled?: boolean }): boolean {
+  if (p.type === 'cellular') { const f = m.sim.cellular.fitted_networks as string[] | null | undefined; return f == null || f.includes(p.id) }
+  return m.sim.satcom_enabled !== false && p.enabled !== false
+}

@@ -230,6 +230,28 @@ test('the satellite link can be switched off and on again', async ({ page }) => 
   await page.keyboard.press('Escape')
 })
 
+// The ticks under Cellular and Satellite fit or remove a link: an unticked one leaves the onboard router.
+test('unticking a network or the satellite takes it out of the onboard connection', async ({ page }) => {
+  const o2Box = page.locator('#linkList .link-row', { hasText: 'O2' }).locator('input')
+  const satBox = page.locator('#linkList .link-row', { hasText: 'Starlink' }).locator('input')
+  await expect(o2Box).toBeChecked()
+  await o2Box.uncheck()
+  await satBox.uncheck()
+  await expect(page.locator('#liveLinks .lrow', { hasText: 'O2' })).toContainText('not fitted')
+  await expect(page.locator('#liveLinks .lrow', { hasText: 'Starlink' })).toContainText('not fitted')
+  await expect(page.locator('#wanActive')).not.toContainText('O2')
+  await expect(page.locator('#wanActive')).not.toContainText('Starlink')
+  await expect(page.locator('#scenarioSummary')).toContainText('EE+Vodafone+Three')
+  await expect(page.locator('#scenarioSummary')).toContainText('no satcom')
+  await page.locator('#scenarioPill').click()
+  await expect(page.locator('#satcom')).toHaveValue('off')                 // the satellite switch follows the tick
+  await page.keyboard.press('Escape')
+  await o2Box.check()
+  await satBox.check()
+  await expect(page.locator('#liveLinks .lrow', { hasText: 'O2' })).not.toContainText('not fitted')
+  await expect(page.locator('#scenarioSummary')).not.toContainText('no satcom')
+})
+
 // Three EDGE Rail antennas, one network each: the preset leaves O2 without a modem, so the router never uses it.
 test('the EDGE Rail preset fits EE, Vodafone and Three and shows O2 as not fitted', async ({ page }) => {
   await page.locator('#scenarioPill').click()
