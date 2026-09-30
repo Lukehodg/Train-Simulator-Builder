@@ -216,3 +216,10 @@ test('the viewer opens on the policy and weather the route was built with', asyn
   await expect(page.locator('#weather')).toHaveValue('storm')
   await expect(page.locator('#policy')).toHaveValue('FAILOVER')
 })
+
+test('cell sites are shown by default', async ({ page }) => {
+  await page.locator('.rail-btn[data-panel="layers"]').click()
+  await expect(page.locator('#ly_cells')).toBeChecked()
+  await page.locator('#ly_cells').uncheck()                  // and can still be switched off
+  await expect(page.locator('#ly_cells')).not.toBeChecked()
+})
