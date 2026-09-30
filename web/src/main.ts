@@ -49,7 +49,7 @@ async function main() {
   const linkVisible: Record<string, boolean> = { wan: true }
   for (const p of meta.providers) linkVisible[p.id] = true
   const store = new Store({
-    data, sim, scenario, metric: 'quality', linkVisible, layers: { cells: false, sky: true, stations: true, terrain: realTerrain, labels: true, buildings: true, trees: true, track: true },
+    data, sim, scenario, metric: 'quality', linkVisible, layers: { cells: true, sky: true, stations: true, terrain: realTerrain, labels: true, buildings: true, trees: true, track: true },
     camera: 'chase', t: meta.duration_s * CONFIG.playback.startFraction, playing: !reduced, speed: CONFIG.playback.defaultSpeed, selected: null, hover: null, theme,
   } as State)
 
