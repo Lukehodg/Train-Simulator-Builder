@@ -93,6 +93,7 @@ async function main() {
       const m: Meta = JSON.parse(JSON.stringify(baselineMeta)); m.sim.active_preset = name
       if (pr.bonding_efficiency) m.sim.wan.bonding_efficiency = pr.bonding_efficiency
       m.sim.satcom_enabled = pr.satcom_enabled !== false
+      if ('fitted_networks' in pr) m.sim.cellular.fitted_networks = pr.fitted_networks   // one EDGE Rail antenna per network
       rerun(m, { ...store.state.scenario, policy: pr.policy ?? 'PACKET_BONDING', vehicle: pr.vehicle_profile ?? 'EDGE_RAIL_ACTIVE_ANTENNA' })
     } else {
       const m: Meta = JSON.parse(JSON.stringify(baselineMeta)); m.sim.active_preset = 'baseline'
@@ -140,14 +141,16 @@ async function main() {
   const renderTrainTab = () => {
     const cur = store.state.data.meta.sim
     const usingDesign = cur.active_preset === 'design' && design
-    $('trainBody').innerHTML = renderDesign(design, usingDesign ? `${designLabel} · applied to the simulation` : design ? `${designLabel} · not applied (choose the "Train design" preset)` : '')
+    $('trainBody').innerHTML = renderDesign(design, usingDesign ? `${designLabel} · applied to the simulation` : design ? `${designLabel} · not applied (choose the "Train design" preset)` : '', Object.fromEntries(store.state.data.meta.providers.map(p => [p.id, p.name])))
     const pr = baselineMeta.sim.presets?.edge_rail_fleet_connect
     const cl = $('claims') as HTMLElement
     const edgeActive = store.state.scenario.vehicle === 'EDGE_RAIL_ACTIVE_ANTENNA'
     cl.hidden = !edgeActive || !pr?.claims?.length
     if (!cl.hidden) {
       const vp = cur.vehicle.profiles.EDGE_RAIL_ACTIVE_ANTENNA
-      const agg = store.state.scenario.policy === 'PACKET_BONDING' ? `Fleet Connect aggregates every cellular network and the satcom link at once (efficiency ${cur.wan.bonding_efficiency})` : 'aggregation off: choose Packet bonding to model Fleet Connect'
+      const fitted: string[] | null = cur.cellular.fitted_networks ?? null
+      const nets = esc(store.state.data.meta.providers.filter(p => p.type === 'cellular' && (!fitted || fitted.includes(p.id))).map(p => p.name).join(' + '))
+      const agg = store.state.scenario.policy === 'PACKET_BONDING' ? `Fleet Connect aggregates ${fitted ? `the fitted networks (${nets}, one EDGE Rail antenna each)` : 'every mobile network'} and the satcom link at once (efficiency ${cur.wan.bonding_efficiency})` : 'aggregation off: choose Packet bonding to model Fleet Connect'
       cl.innerHTML = `<b>EDGE Rail 5G active antenna · model assumptions</b>Link budget +${vp.db_offset} dB (no coax/splitter losses, 4x4 MIMO diversity) = quality +${vp.score_offset}; throughput x${vp.capacity_factor}; ${agg}.<br>Manufacturer claims, not modelled: ${esc(pr.claims.join(' · '))}.`
     }
   }

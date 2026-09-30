@@ -433,6 +433,19 @@ def _plain(v) -> str:
     return str(v)
 
 
+def networks_text(settings: Settings) -> str:
+    """The networks the train has a modem for, in words: "EE, Vodafone, Three (one EDGE Rail antenna each; O2 not fitted)"."""
+    from .model.simulate import fitted_networks
+
+    fitted = fitted_networks(settings)
+    names = {op["id"]: op.get("name", op["id"]) for op in settings.operators}
+    if fitted is None:
+        return ", ".join(names.values())
+    per = "one EDGE Rail antenna each" if settings.sim["vehicle"]["profile"] == "EDGE_RAIL_ACTIVE_ANTENNA" else "one modem each"
+    left = [n for pid, n in names.items() if pid not in fitted]
+    return ", ".join(names[p] for p in fitted) + f" ({per}" + (f"; {' and '.join(left)} not fitted" if left else "") + ")"
+
+
 def _das_plain(entries: list[str]) -> str:
     """das_tunnels entries for people: 'km:0-2.5' -> 'km 0–2.5'."""
     return ", ".join(f"km {e[3:].replace('-', '–')}" if e.startswith("km:") else e for e in entries)
@@ -454,7 +467,7 @@ def _assumptions(settings: Settings) -> list[tuple[str, str]]:
         ("Minimum link score to carry traffic", str(wan["minimum_link_score"])),
         ("Link score weights", _plain(wan["score_weights"])),
         ("Mobile capacity at excellent signal (Mbps)", "; ".join(f"{op.get('name', op['id'])}: {_plain(op['capacity_prior_mbps'])}" for op in settings.operators)),
-        ("Roof-unit aggregation factor", str(cell.get("units_capacity_factor", 1.0))),
+        ("Mobile networks fitted", networks_text(settings)),
         ("Cutting loss", f"up to −{cell['terrain']['cutting_penalty_max']} quality at {cell['terrain']['cutting_full_depth_m']} m depth"),
         ("Distance from serving cell", f"−{cell['cell_distance']['penalty_per_km']} quality per km beyond {cell['cell_distance']['free_km']} km"),
         ("Handover", f"{cell['handover']['duration_samples']} points (≈{cell['handover']['duration_samples'] * settings.spacing_m:.0f} m), "
@@ -616,9 +629,12 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
     sensitivity: tcs.sensitivity.run() for this scenario, for the ranges and the sensitivity section.
     variant: what else sets the scenario apart (design title, policy, weather), added to the file names so reports on the
     same route and preset don't overwrite each other."""
+    from .model.simulate import fitted_links, fitted_networks
     from .report_docx import POLICIES, VEHICLES, Evidence, write_docx
 
     out_dir.mkdir(parents=True, exist_ok=True)
+    fitted = fitted_networks(settings)
+    obs = fitted_links(settings, obs)                          # the report is about the links this train has
     providers = list(obs["provider_id"].unique())
     spacing = float(settings.spacing_m)
     sim = settings.sim
@@ -673,9 +689,9 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
         vehicle=VEHICLES.get(vname, vname), policy=POLICIES.get(policy, policy),
         satcom=(" and ".join(sat) if sat and sim.get("satcom_enabled", True) else "no satellite link"),
         passengers=f"{pw['passengers']} seats; {pw['active_share'] * 100:.0f} % of passengers online, {pw['per_user_demand_mbps']} Mbps demand each",
-        operators=[op.get("name", op["id"]) for op in settings.operators], design=design,
+        operators=[op.get("name", op["id"]) for op in settings.operators if fitted is None or op["id"] in fitted], design=design,
         claims=list(presets.get(preset, {}).get("claims", [])) if preset and not design else [], info=dict(settings.report), baseline=base,
-        sensitivity=sensitivity)
+        sensitivity=sensitivity, networks=networks_text(settings))
     stem = "_".join([f"evidence_{meta['route']['id']}_{meta['scenario_id']}", *(_slug(v) for v in variant or [])])
     docx_path, xlsx_path = out_dir / f"{stem}.docx", out_dir / f"{stem}.xlsx"
     reference = write_docx(docx_path, ev)

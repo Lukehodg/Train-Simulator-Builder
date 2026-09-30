@@ -234,7 +234,7 @@ def test_sensitivity_moves_results_the_right_way(pipeline):
     assert (s.sim, s.networks, s.starlink) == before                           # each case works on its own copy
     c = sens["central"]
     by = {r["key"]: r for r in sens["cases"]}
-    assert set(by) == {"cellular", "coverage", "satellite", "demand"}          # passive antenna, one roof unit
+    assert set(by) == {"cellular", "coverage", "satellite", "demand"}          # passive antenna: no antenna case
     for key in ("cellular", "coverage", "satellite"):
         assert by[key]["low_kpis"]["bonded_median_mbps"] <= c["bonded_median_mbps"] <= by[key]["high_kpis"]["bonded_median_mbps"]
     assert by["cellular"]["low_kpis"]["bonded_median_mbps"] < c["bonded_median_mbps"]    # capacity really is scaled
@@ -245,8 +245,7 @@ def test_sensitivity_moves_results_the_right_way(pipeline):
 
     edge = copy.deepcopy(s)
     edge.sim["vehicle"]["profile"] = "EDGE_RAIL_ACTIVE_ANTENNA"
-    edge.sim["cellular"]["units_capacity_factor"] = 2.0
-    assert {c.key for c in cases(edge)} == {"cellular", "coverage", "satellite", "demand", "antenna", "units"}
+    assert {c.key for c in cases(edge)} == {"cellular", "coverage", "satellite", "demand", "antenna"}
     # The all-pessimistic case adds up: the full coverage error on top of half the antenna gain, whatever the order.
     offset = edge.sim["vehicle"]["profiles"]["EDGE_RAIL_ACTIVE_ANTENNA"]["score_offset"]
     both = copy.deepcopy(edge)
