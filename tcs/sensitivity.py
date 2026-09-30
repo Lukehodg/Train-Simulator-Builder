@@ -72,7 +72,8 @@ def cases(s: Settings) -> list[Case]:
              _scale_cellular(0.6), _scale_cellular(1.3)),
         Case("coverage", "Accuracy of operators' coverage predictions", "the accuracy of the operators' coverage predictions", f"signal {COVERAGE_ERROR_DB:.0f} dB weaker",
              f"signal {COVERAGE_ERROR_DB:.0f} dB stronger", _shift_signal(-COVERAGE_ERROR_DB), _shift_signal(COVERAGE_ERROR_DB)),
-        Case("satellite", "Satellite capacity (beam load)", "satellite capacity", "×0.5", "×1.25", _scale_satellite(0.5), _scale_satellite(1.25)),
+        *([Case("satellite", "Satellite capacity (beam load)", "satellite capacity", "×0.5", "×1.25", _scale_satellite(0.5), _scale_satellite(1.25))]
+          if s.sim.get("satcom_enabled", True) and any(p.get("enabled", True) for p in s.starlink["satcom"]["providers"]) else []),
         Case("demand", "Passengers online at once", "how many passengers are online at once", f"{max(online, 0.5) * 100:.0f} % of passengers",
              f"{min(online, 0.25) * 100:.0f} % of passengers", _online_share(max(online, 0.5)), _online_share(min(online, 0.25))),
     ]

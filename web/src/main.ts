@@ -81,7 +81,11 @@ async function main() {
   let design: TrainDesign | null = designFromMeta(meta)
   let designLabel = design ? `from pipeline run${design.source_file ? ' · ' + design.source_file.split(/[\\/]/).pop() : ''}` : ''
   const presetSel = $('preset') as HTMLSelectElement
-  const syncSelects = () => { for (const k of ['policy', 'vehicle', 'weather'] as const) ($(k) as HTMLSelectElement).value = (store.state.scenario as any)[k] }
+  const satOn = () => store.state.data.meta.sim.satcom_enabled !== false
+  const syncSelects = () => {
+    for (const k of ['policy', 'vehicle', 'weather'] as const) ($(k) as HTMLSelectElement).value = (store.state.scenario as any)[k]
+    ;($('satcom') as HTMLSelectElement).value = satOn() ? 'on' : 'off'   // presets and train designs set it too
+  }
   const rerun = (m: Meta, sc: typeof scenario) => { const d = { ...store.state.data, meta: m }; store.set({ data: d, scenario: sc, sim: simulate(d, sc) }); syncSelects() }
   const applyPreset = (name: string) => {
     const pr = baselineMeta.sim.presets?.[name]
@@ -106,7 +110,16 @@ async function main() {
     const el = $(k) as HTMLSelectElement; el.value = (scenario as any)[k]
     el.addEventListener('change', () => { const sc = { ...store.state.scenario, [k]: el.value }; store.set({ scenario: sc, sim: simulate(store.state.data, sc) }); renderTrainTab(); renderScenario() })
   })
-  // The four selects live in a popover; the pill states the current scenario in one line.
+  // Satellite link on or off: part of the simulation config (like the presets), not of the per-run scenario.
+  const satSel = $('satcom') as HTMLSelectElement
+  satSel.value = satOn() ? 'on' : 'off'
+  satSel.addEventListener('change', () => {
+    const m: Meta = JSON.parse(JSON.stringify(store.state.data.meta)), on = satSel.value === 'on'
+    m.sim.satcom_enabled = on
+    if (on) for (const p of m.providers) if (p.type === 'satcom') p.enabled = true   // e.g. a train design without a terminal
+    rerun(m, store.state.scenario); renderTrainTab(); renderScenario()
+  })
+  // The selects live in a popover; the pill states the current scenario in one line.
   const pill = $('scenarioPill'), pop = $('scenarioPopover') as HTMLElement
   const VEHICLE_SHORT: Record<string, string> = { EDGE_RAIL_ACTIVE_ANTENNA: 'EDGE Rail antenna', EXTERNAL_ROOFTOP_ANTENNA: 'rooftop antenna', PASSENGER_HANDSET_INSIDE_CARRIAGE: 'handset' }
   const POLICY_SHORT: Record<string, string> = { PACKET_BONDING: 'bonding', WEIGHTED_LOAD_BALANCING: 'load balancing', FAILOVER: 'failover', CELLULAR_PRIMARY_STARLINK_BACKUP: 'cellular first', STARLINK_PRIMARY_CELLULAR_BACKUP: 'satcom first' }
@@ -115,6 +128,7 @@ async function main() {
     const presetLabel = presetSel.options[presetSel.selectedIndex]?.text.split(' · ')[0] ?? 'Baseline'
     const bits = [presetLabel, VEHICLE_SHORT[sc.vehicle] ?? sc.vehicle, POLICY_SHORT[sc.policy] ?? sc.policy]
     if (sc.weather !== 'nominal') bits.push(sc.weather)
+    if (!satOn()) bits.push('no satcom')
     $('scenarioSummary').textContent = bits.join(' · ')
   }
   const setPopover = (open: boolean, returnFocus = false) => {
@@ -132,6 +146,7 @@ async function main() {
       if (sc.weather !== 'nominal' || !ids.includes(p)) return null
       const pr = p === 'baseline' ? {} : baselineMeta.sim.presets?.[p]
       if (!pr) return null
+      if (satOn() !== ((pr.satcom_enabled ?? baselineMeta.sim.satcom_enabled) !== false)) return null   // packs are built with their preset's satellite link
       return sc.policy === (pr.policy ?? baselineScenario.policy) && sc.vehicle === (pr.vehicle_profile ?? baselineScenario.vehicle) ? p : null
     },
   })
@@ -324,7 +339,7 @@ function exportScenario(store: Store) {
   const save = (name: string, text: string, type: string) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000) }
   save(`${stem}.csv`, rows.join(String.fromCharCode(10)), 'text/csv')
   const s = kpiStats(store, sim)
-  save(`${stem}.summary.json`, JSON.stringify({ route: m.route, generated: new Date().toISOString(), model_version: m.model_version, scenario, preset: m.sim.active_preset ?? 'baseline', train_design: m.sim.train?.design ?? null,
+  save(`${stem}.summary.json`, JSON.stringify({ route: m.route, generated: new Date().toISOString(), model_version: m.model_version, scenario, preset: m.sim.active_preset ?? 'baseline', satcom_fitted: m.sim.satcom_enabled !== false, train_design: m.sim.train?.design ?? null,
     sources: { geometry: m.geometry_source, terrain: m.terrain_source, coverage: m.coverage_sources, cells: m.cell_source }, kpis: s, note: 'Model predictions, not measurements. See docs/model.md and the Sources tab for provenance and confidence.' }, null, 1), 'application/json')
 }
 

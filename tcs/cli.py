@@ -31,13 +31,15 @@ def run(offline: bool = typer.Option(False, help="Use cached/synthetic sources o
         weather: str = typer.Option("nominal"), policy: str | None = typer.Option(None), limit_postcodes: int | None = typer.Option(None, help="Dev: cap Ofcom API calls"),
         copy_to_web: bool = typer.Option(True, help="Copy the web bundle into web/public/data/"),
         train: Path | None = typer.Option(None, help="Train Studio project (*.train.json) describing the onboard architecture"),
-        preset: str | None = typer.Option(None, help="Scenario preset from simulation.yaml `presets` (e.g. edge_rail_fleet_connect)")):
+        preset: str | None = typer.Option(None, help="Scenario preset from simulation.yaml `presets` (e.g. edge_rail_fleet_connect)"),
+        no_satcom: bool = typer.Option(False, "--no-satcom", help="Model the train without its satellite link")):
     """Full pipeline: route -> terrain -> coverage -> cells -> movement -> simulate -> export."""
-    run_pipeline(offline=offline, route=route, weather=weather, policy=policy, limit_postcodes=limit_postcodes, copy_to_web=copy_to_web, train=train, preset=preset)
+    run_pipeline(offline=offline, route=route, weather=weather, policy=policy, limit_postcodes=limit_postcodes, copy_to_web=copy_to_web, train=train, preset=preset,
+                 satcom=not no_satcom)
 
 
 def run_pipeline(offline: bool = False, route: str | None = None, weather: str = "nominal", policy: str | None = None, limit_postcodes: int | None = None,
-                 copy_to_web: bool = True, train: Path | None = None, preset: str | None = None):
+                 copy_to_web: bool = True, train: Path | None = None, preset: str | None = None, satcom: bool = True):
     from .model import calibration
     from .model.simulate import simulate
     from .pipeline.export import export_all
@@ -69,6 +71,8 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
         s.sim["wan"]["policy"] = policy                        # recorded in meta.json: the viewer opens on the scenario simulated here
     if weather != "nominal":
         s.sim["weather"] = weather                             # absent for nominal, so a plain run's meta.sim is simulation.yaml itself
+    if not satcom:
+        s.sim["satcom_enabled"] = False                        # recorded in meta.json like the policy: the viewer opens without it
     b = build_route(s)
     console.log(f"route: {len(b.samples)} samples at {s.spacing_m:.0f} m, {b.samples['distance_m'].max() / 1000:.1f} km, geometry={b.geometry_source}")
     for w in b.warnings:
@@ -237,16 +241,17 @@ def report(route: str | None = typer.Option(None, help="Route id (default: confi
            prepared_by: str | None = typer.Option(None, help="Your organisation on the cover"),
            tender_ref: str | None = typer.Option(None, help="The client's tender reference"),
            classification: str | None = typer.Option(None, help="Classification in every page header"),
-           doc_version: str | None = typer.Option(None, help="Document version, e.g. 1.0")):
+           doc_version: str | None = typer.Option(None, help="Document version, e.g. 1.0"),
+           no_satcom: bool = typer.Option(False, "--no-satcom", help="Model the train without its satellite link")):
     """Tender evidence pack: Word report + Excel appendix for one route and scenario (re-simulates from the cached route data)."""
     info = {"prepared_for": prepared_for, "prepared_by": prepared_by, "tender_reference": tender_ref, "classification": classification, "version": doc_version}
-    written = _build_report(route, preset, train, policy, weather, out, {k: v for k, v in info.items() if v is not None})
+    written = _build_report(route, preset, train, policy, weather, out, {k: v for k, v in info.items() if v is not None}, satcom=not no_satcom)
     for k, v in written.items():
         console.log(f"[bold]{k}[/bold] {v}")
 
 
 def _build_report(route: str | None, preset: str | None, train: Path | None, policy: str | None, weather: str, out: Path | None,
-                  info: dict[str, str] | None = None) -> dict[str, Path]:
+                  info: dict[str, str] | None = None, satcom: bool = True) -> dict[str, Path]:
     from .model import calibration
     from .model.simulate import simulate
     from .pipeline.sample_route import load_bundle
@@ -275,6 +280,10 @@ def _build_report(route: str | None, preset: str | None, train: Path | None, pol
     if weather != "nominal":
         label_parts.append(f"weather {weather}")
         variant.append(weather)
+    if not satcom:
+        s.sim["satcom_enabled"] = False
+        label_parts.append("no satellite link")
+        variant.append("no-satcom")
     if not label_parts:
         label_parts.append("baseline configuration")
     label = " · ".join(label_parts) + f" · policy {s.sim['wan']['policy'].lower().replace('_', ' ')} · {s.sim['vehicle']['profile'].lower().replace('_', ' ')}"
@@ -294,7 +303,7 @@ def _build_report(route: str | None, preset: str | None, train: Path | None, pol
         else:
             console.log(f"[yellow]{vpath.name} predates the current build of {s.route_id}; run tcs validate again to include it")
     baseline = None
-    if preset or train or policy or weather != "nominal":   # the report compares this scenario with the baseline configuration
+    if preset or train or policy or weather != "nominal" or not satcom:   # the report compares this scenario with the baseline configuration
         from .report_docx import POLICIES, VEHICLES
 
         base = load_settings(route_id=route)

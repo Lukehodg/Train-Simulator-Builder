@@ -10,7 +10,8 @@ import pandas as pd
 
 from ..config import Settings
 
-REASONS = ["OPEN_SKY", "TUNNEL", "DEEP_CUTTING", "STATION_CANOPY", "URBAN_OBSTRUCTION", "TEMPORARY_HANDOVER", "WEATHER_PENALTY", "SERVICE_UNAVAILABLE"]
+REASONS = ["OPEN_SKY", "TUNNEL", "DEEP_CUTTING", "STATION_CANOPY", "URBAN_OBSTRUCTION", "TEMPORARY_HANDOVER", "WEATHER_PENALTY", "SERVICE_UNAVAILABLE",
+           "NOT_FITTED"]
 
 
 def satcom_observations(settings: Settings, samples: pd.DataFrame, weather: str = "nominal") -> pd.DataFrame:
@@ -18,7 +19,8 @@ def satcom_observations(settings: Settings, samples: pd.DataFrame, weather: str 
     for p in settings.starlink["satcom"]["providers"]:
         term = p["terminal"]
         wcfg = p["availability"]["weather"].get(weather, p["availability"]["weather"]["nominal"])
-        in_service = settings.route["country"].upper() in {c.upper() for c in p["service_area"]["countries"]} and settings.sim.get("satcom_enabled", True) and p.get("enabled", True)
+        fitted = bool(settings.sim.get("satcom_enabled", True) and p.get("enabled", True))   # switched off, or no terminal in the design
+        in_service = fitted and settings.route["country"].upper() in {c.upper() for c in p["service_area"]["countries"]}
         sky = samples["sky_visibility"].values.astype(np.float32)
         tun = samples["in_tunnel"].values.astype(bool)
         canopy = samples["canopy_probability"].values
@@ -44,7 +46,7 @@ def satcom_observations(settings: Settings, samples: pd.DataFrame, weather: str 
         reason[canopy > 0.5] = "STATION_CANOPY"
         reason[tun] = "TUNNEL"
         if not in_service:
-            reason[:] = "SERVICE_UNAVAILABLE"
+            reason[:] = "SERVICE_UNAVAILABLE" if fitted else "NOT_FITTED"
         conf_cfg = settings.sim["confidence"]
         conf = np.where(tun, conf_cfg["tunnel_deterministic"], conf_cfg["starlink_predictive"]).astype(np.float32)
         frames.append(pd.DataFrame({

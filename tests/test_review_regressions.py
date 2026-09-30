@@ -411,3 +411,32 @@ def test_edge_rail_bonds_only_the_three_fitted_networks():
     s.sim["cellular"]["fitted_networks"] = ["ee", "o3"]
     with pytest.raises(ValueError, match="o3"):
         simulate(s, b.samples, prior, serving)
+
+
+def test_satcom_can_be_switched_off():
+    """With the satellite link switched off it is never used, is labelled not fitted (not 'out of service area'), and
+    the sensitivity analysis stops varying its capacity."""
+    from tcs.model.simulate import simulate
+    from tcs.pipeline.join_cells import candidate_cells, corridor_cells, serving_cells
+    from tcs.pipeline.join_coverage import coverage_prior
+    from tcs.pipeline.movement import movement
+    from tcs.pipeline.obstruction import enrich_terrain
+    from tcs.pipeline.sample_route import build_route
+    from tcs.sensitivity import cases
+
+    s = load_settings(offline=True)
+    s.route["sample_spacing_m"] = 2000
+    s.terrain["horizon_azimuths"], s.terrain["horizon_reach_m"] = 4, 1000
+    b = build_route(s)
+    b.samples = enrich_terrain(s, b)
+    prior, b.samples = coverage_prior(s, b)
+    serving = serving_cells(s, b.samples, candidate_cells(s, b.samples, corridor_cells(s, b, b.samples)))
+    b.samples, _ = movement(s, b.samples, b.stations)
+    assert "satellite" in {c.key for c in cases(s)}
+
+    s.sim["satcom_enabled"] = False
+    obs, rc = simulate(s, b.samples, prior, serving)
+    sat = obs[obs["provider_type"] == "satcom"]
+    assert not sat["available"].any() and set(sat["reason_code"]) == {"NOT_FITTED"}
+    assert not any("starlink" in str(a) for a in rc["active_links"])
+    assert "satellite" not in {c.key for c in cases(s)}

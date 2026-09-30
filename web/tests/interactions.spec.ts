@@ -217,6 +217,19 @@ test('the viewer opens on the policy and weather the route was built with', asyn
   await expect(page.locator('#policy')).toHaveValue('FAILOVER')
 })
 
+// The satellite link can be switched off for a scenario without one; it then shows as not fitted.
+test('the satellite link can be switched off and on again', async ({ page }) => {
+  const starlink = page.locator('#liveLinks .lrow', { hasText: 'Starlink' })
+  await page.locator('#scenarioPill').click()
+  await page.locator('#satcom').selectOption('off')
+  await expect(starlink).toContainText('not fitted')
+  await expect(page.locator('#scenarioSummary')).toContainText('no satcom')
+  await page.locator('#satcom').selectOption('on')
+  await expect(starlink).not.toContainText('not fitted')
+  await expect(page.locator('#scenarioSummary')).not.toContainText('no satcom')
+  await page.keyboard.press('Escape')
+})
+
 // Three EDGE Rail antennas, one network each: the preset leaves O2 without a modem, so the router never uses it.
 test('the EDGE Rail preset fits EE, Vodafone and Three and shows O2 as not fitted', async ({ page }) => {
   await page.locator('#scenarioPill').click()
