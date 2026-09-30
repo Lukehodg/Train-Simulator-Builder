@@ -2,7 +2,7 @@ import './styles.css'
 import type { PickingInfo } from '@deck.gl/core'
 import { CONFIG } from './config'
 import { esc } from './html'
-import { indexAtTime, LIVE_COVERAGE_MIN, liveCoverageShare, loadRoute } from './data'
+import { indexAtTime, linkFitted, LIVE_COVERAGE_MIN, liveCoverageShare, loadRoute } from './data'
 import { createMap } from './map/map'
 import { buildRuns, cellLayers, labelFontReady, ribbonLayers, stationLayers, trainLayers, type Run } from './map/layers'
 import { setBuildings, trackLayers, treeLayer } from './map/environment'
@@ -46,8 +46,9 @@ async function main() {
   const sim = simulate(data, scenario)
   const realTerrain = meta.terrain_source !== 'synthetic_terrain'
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
+  // A link's tick on the left says whether the train has it: an unticked link is out of the router and off the map.
   const linkVisible: Record<string, boolean> = { wan: true }
-  for (const p of meta.providers) linkVisible[p.id] = true
+  for (const p of meta.providers) linkVisible[p.id] = linkFitted(meta, p)
   const store = new Store({
     data, sim, scenario, metric: 'quality', linkVisible, layers: { cells: true, sky: true, stations: true, terrain: realTerrain, labels: true, buildings: true, trees: true, track: true },
     camera: 'chase', t: meta.duration_s * CONFIG.playback.startFraction, playing: !reduced, speed: CONFIG.playback.defaultSpeed, selected: null, hover: null, theme,
@@ -81,8 +82,38 @@ async function main() {
   let design: TrainDesign | null = designFromMeta(meta)
   let designLabel = design ? `from pipeline run${design.source_file ? ' · ' + design.source_file.split(/[\\/]/).pop() : ''}` : ''
   const presetSel = $('preset') as HTMLSelectElement
-  const syncSelects = () => { for (const k of ['policy', 'vehicle', 'weather'] as const) ($(k) as HTMLSelectElement).value = (store.state.scenario as any)[k] }
-  const rerun = (m: Meta, sc: typeof scenario) => { const d = { ...store.state.data, meta: m }; store.set({ data: d, scenario: sc, sim: simulate(d, sc) }); syncSelects() }
+  const satOn = () => store.state.data.meta.providers.some(p => p.type === 'satcom' && linkFitted(store.state.data.meta, p))
+  // the fitted mobile networks as a comparable key ('' = every network)
+  const fittedKey = (f: string[] | null | undefined) => {
+    const all = store.state.data.meta.providers.filter(p => p.type === 'cellular').map(p => p.id)
+    const on = all.filter(id => f == null || f.includes(id))
+    return on.length === all.length ? '' : on.join('+')
+  }
+  const presetFitted = () => { const p = presetSel.value; return p === 'baseline' ? null : baselineMeta.sim.presets?.[p]?.fitted_networks ?? null }
+  const syncSelects = () => {
+    for (const k of ['policy', 'vehicle', 'weather'] as const) ($(k) as HTMLSelectElement).value = (store.state.scenario as any)[k]
+    ;($('satcom') as HTMLSelectElement).value = satOn() ? 'on' : 'off'   // presets and train designs set it too
+  }
+  const rerun = (m: Meta, sc: typeof scenario) => {
+    const d = { ...store.state.data, meta: m }, lv = { ...store.state.linkVisible }
+    for (const p of m.providers) lv[p.id] = linkFitted(m, p)          // presets, designs and the satellite switch set the ticks too
+    store.set({ data: d, scenario: sc, sim: simulate(d, sc), linkVisible: lv }); syncSelects()
+  }
+  // A tick on the left fits or removes one link: a mobile network (fitted_networks) or a satellite terminal.
+  const setLinkFitted = (id: string, on: boolean) => {
+    const m: Meta = JSON.parse(JSON.stringify(store.state.data.meta)), p = m.providers.find(x => x.id === id)
+    if (!p) return
+    if (p.type === 'cellular') {
+      const all = m.providers.filter(x => x.type === 'cellular').map(x => x.id), cur: string[] = m.sim.cellular.fitted_networks ?? all
+      const next = all.filter(x => (x === id ? on : cur.includes(x)))
+      m.sim.cellular.fitted_networks = next.length === all.length ? null : next      // null = every network, as the baseline
+    } else {
+      p.enabled = on
+      if (on) m.sim.satcom_enabled = true
+      else if (!m.providers.some(x => x.type === 'satcom' && x.enabled !== false)) m.sim.satcom_enabled = false
+    }
+    rerun(m, store.state.scenario); renderTrainTab(); renderScenario()
+  }
   const applyPreset = (name: string) => {
     const pr = baselineMeta.sim.presets?.[name]
     if (name === 'design') {
@@ -106,7 +137,16 @@ async function main() {
     const el = $(k) as HTMLSelectElement; el.value = (scenario as any)[k]
     el.addEventListener('change', () => { const sc = { ...store.state.scenario, [k]: el.value }; store.set({ scenario: sc, sim: simulate(store.state.data, sc) }); renderTrainTab(); renderScenario() })
   })
-  // The four selects live in a popover; the pill states the current scenario in one line.
+  // Satellite link on or off: part of the simulation config (like the presets), not of the per-run scenario.
+  const satSel = $('satcom') as HTMLSelectElement
+  satSel.value = satOn() ? 'on' : 'off'
+  satSel.addEventListener('change', () => {
+    const m: Meta = JSON.parse(JSON.stringify(store.state.data.meta)), on = satSel.value === 'on'
+    m.sim.satcom_enabled = on
+    if (on) for (const p of m.providers) if (p.type === 'satcom') p.enabled = true   // e.g. a train design without a terminal
+    rerun(m, store.state.scenario); renderTrainTab(); renderScenario()
+  })
+  // The selects live in a popover; the pill states the current scenario in one line.
   const pill = $('scenarioPill'), pop = $('scenarioPopover') as HTMLElement
   const VEHICLE_SHORT: Record<string, string> = { EDGE_RAIL_ACTIVE_ANTENNA: 'EDGE Rail antenna', EXTERNAL_ROOFTOP_ANTENNA: 'rooftop antenna', PASSENGER_HANDSET_INSIDE_CARRIAGE: 'handset' }
   const POLICY_SHORT: Record<string, string> = { PACKET_BONDING: 'bonding', WEIGHTED_LOAD_BALANCING: 'load balancing', FAILOVER: 'failover', CELLULAR_PRIMARY_STARLINK_BACKUP: 'cellular first', STARLINK_PRIMARY_CELLULAR_BACKUP: 'satcom first' }
@@ -115,6 +155,11 @@ async function main() {
     const presetLabel = presetSel.options[presetSel.selectedIndex]?.text.split(' · ')[0] ?? 'Baseline'
     const bits = [presetLabel, VEHICLE_SHORT[sc.vehicle] ?? sc.vehicle, POLICY_SHORT[sc.policy] ?? sc.policy]
     if (sc.weather !== 'nominal') bits.push(sc.weather)
+    const fitted = store.state.data.meta.sim.cellular.fitted_networks
+    if (presetSel.value !== 'design' && fittedKey(fitted) !== fittedKey(presetFitted())) {   // networks changed from the preset's
+      bits.push(store.state.data.meta.providers.filter(p => p.type === 'cellular' && linkFitted(store.state.data.meta, p)).map(p => p.name).join('+') || 'no mobile')
+    }
+    if (!satOn()) bits.push('no satcom')
     $('scenarioSummary').textContent = bits.join(' · ')
   }
   const setPopover = (open: boolean, returnFocus = false) => {
@@ -132,6 +177,8 @@ async function main() {
       if (sc.weather !== 'nominal' || !ids.includes(p)) return null
       const pr = p === 'baseline' ? {} : baselineMeta.sim.presets?.[p]
       if (!pr) return null
+      if (satOn() !== ((pr.satcom_enabled ?? baselineMeta.sim.satcom_enabled) !== false)) return null   // packs are built with their preset's satellite link
+      if (fittedKey(store.state.data.meta.sim.cellular.fitted_networks) !== fittedKey(presetFitted())) return null   // ...and its networks
       return sc.policy === (pr.policy ?? baselineScenario.policy) && sc.vehicle === (pr.vehicle_profile ?? baselineScenario.vehicle) ? p : null
     },
   })
@@ -213,7 +260,7 @@ async function main() {
   mapCtx.onUserInteract(() => { if (store.state.camera === 'chase' || store.state.camera === 'oblique') store.set({ camera: 'free' }) })
 
   // ---- panels ---------------------------------------------------------------------------------
-  initRail(store)
+  initRail(store, setLinkFitted)
   const inspector = initInspector(store)
   const timeline = initTimeline(store, i => seek(data.t[i]))
   const seek = (t: number) => store.set({ t: Math.max(0, Math.min(meta.duration_s, t)) })
@@ -324,7 +371,7 @@ function exportScenario(store: Store) {
   const save = (name: string, text: string, type: string) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000) }
   save(`${stem}.csv`, rows.join(String.fromCharCode(10)), 'text/csv')
   const s = kpiStats(store, sim)
-  save(`${stem}.summary.json`, JSON.stringify({ route: m.route, generated: new Date().toISOString(), model_version: m.model_version, scenario, preset: m.sim.active_preset ?? 'baseline', train_design: m.sim.train?.design ?? null,
+  save(`${stem}.summary.json`, JSON.stringify({ route: m.route, generated: new Date().toISOString(), model_version: m.model_version, scenario, preset: m.sim.active_preset ?? 'baseline', fitted_links: m.providers.filter(p => linkFitted(m, p)).map(p => p.id), train_design: m.sim.train?.design ?? null,
     sources: { geometry: m.geometry_source, terrain: m.terrain_source, coverage: m.coverage_sources, cells: m.cell_source }, kpis: s, note: 'Model predictions, not measurements. See docs/model.md and the Sources tab for provenance and confidence.' }, null, 1), 'application/json')
 }
 

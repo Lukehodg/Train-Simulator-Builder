@@ -211,9 +211,10 @@ def test_report_all_places_packs_beside_the_viewer_bundle(pipeline, tmp_path, mo
 
     # A one-off report with a policy (or weather, or design) of its own gets its own file names, not the baseline pack's.
     single = tmp_path / "single"
-    res = CliRunner().invoke(app, ["report", "--policy", "FAILOVER", "--out", str(single)])
+    res = CliRunner().invoke(app, ["report", "--policy", "FAILOVER", "--no-satcom", "--out", str(single)])
     assert res.exit_code == 0, res.output
-    assert sorted(p.suffix for p in single.glob(f"evidence_{s.route_id}_baseline_failover.*")) == [".docx", ".xlsx"]
+    assert sorted(p.suffix for p in single.glob(f"evidence_{s.route_id}_baseline_failover_no-satcom.*")) == [".docx", ".xlsx"]
+    assert "no satellite link" in " ".join(p.text for p in Document(str(single / f"evidence_{s.route_id}_baseline_failover_no-satcom.docx")).paragraphs)
 
     # A viewer bundle from another build is refused rather than described by the wrong pack.
     (web_data / s.route_id / "meta.json").write_text("{}", encoding="utf-8")

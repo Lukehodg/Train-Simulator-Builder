@@ -18,7 +18,9 @@ const LEGENDS: Record<Metric, { kind: 'classes' | 'ramp'; rows?: string[]; ends?
   conf: { kind: 'ramp', ends: ['0.0 unknown', '1.0 measured'], note: 'How much of the estimate rests on measured rather than predicted or synthetic inputs.' },
 }
 
-export function initRail(store: Store) {
+/** onLink: fits or removes a network / satellite terminal (the ticks under Cellular and Satellite); the Combined Wi-Fi
+ *  tick only shows or hides its line. */
+export function initRail(store: Store, onLink?: (id: string, on: boolean) => void) {
   const s = store.state
 
   // ---- icon rail: one panel open at a time, clicking the active icon collapses it ------------
@@ -51,14 +53,24 @@ export function initRail(store: Store) {
     else rows.push({ group: 'Satellite', key: p.id, label: p.name, sub: p.terminal ? `${p.terminal} terminal` : '', tag: 'sky' })
   }
   let group = ''
+  const boxes: Record<string, HTMLInputElement> = {}
   for (const r of rows) {
     if (r.group !== group) { group = r.group; const h = document.createElement('div'); h.className = 'grp-h'; h.textContent = group; list.appendChild(h) }
     const el = document.createElement('label')
     el.className = 'link-row'
+    const fits = r.key !== 'wan' && !!onLink
+    if (fits) el.title = 'Ticked: fitted on the train and used by the onboard router. Untick to take it off the train.'
     el.innerHTML = `<input type="checkbox" ${s.linkVisible[r.key] ? 'checked' : ''}><span class="name">${esc(r.label)}${r.sub ? `<small>${esc(r.sub)}</small>` : ''}</span><span class="lane">${esc(r.tag)}</span>`
-    el.querySelector('input')!.addEventListener('change', e => store.set({ linkVisible: { ...store.state.linkVisible, [r.key]: (e.target as HTMLInputElement).checked } }))
+    const box = el.querySelector('input')!
+    boxes[r.key] = box
+    box.addEventListener('change', () => {
+      if (fits) onLink!(r.key, box.checked)
+      else store.set({ linkVisible: { ...store.state.linkVisible, [r.key]: box.checked } })
+    })
     list.appendChild(el)
   }
+  // presets, train designs and the satellite switch change which links are fitted: keep the ticks in step
+  store.on((st, changed) => { if (changed.has('linkVisible')) for (const [k, b] of Object.entries(boxes)) b.checked = !!st.linkVisible[k] })
 
   // ---- metric + legend ------------------------------------------------------------------------
   const metricSel = $('metric') as HTMLSelectElement

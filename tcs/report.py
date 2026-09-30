@@ -477,7 +477,7 @@ def _assumptions(settings: Settings) -> list[tuple[str, str]]:
                        if cell["tunnels"].get("das_tunnels") else "no tunnel on this route is assumed to have it")),
         ("Satellite", "; ".join(f"{p.get('name', p['id'])}: {p['terminal'].replace('_', ' ')} terminal, {p['capacity_prior_mbps'][p['terminal']]} Mbps, "
                                 f"minimum elevation {p['min_elevation_deg'][p['terminal']]}°, sky-visibility threshold {p['availability']['sky_threshold']}"
-                                for p in settings.starlink["satcom"]["providers"]) + ("" if sim.get("satcom_enabled", True) else " (not fitted in this design)")),
+                                for p in settings.starlink["satcom"]["providers"]) + ("" if sim.get("satcom_enabled", True) else " (not fitted in this scenario)")),
         ("Passenger demand", f"{pw['passengers']} seats, load factor {lo}–{hi} along the route, {pw['active_share'] * 100:.0f} % online, "
                              f"{pw['per_user_demand_mbps']} Mbps each; access points {pw['ap_capacity_mbps']} Mbps in total"),
         ("Service-class thresholds (score out of 100)", ", ".join(f"{c} ≥ {v}" for c, v in pw["classes"].items())),

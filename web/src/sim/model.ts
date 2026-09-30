@@ -63,8 +63,8 @@ export function simulate(data: RouteData, sc: Scenario): SimResult {
       }
     } else {
       const av = p.availability!, w = av.weather[sc.weather] ?? av.weather.nominal, prior = p.capacity_prior_mbps as number, lp = p.latency_prior_ms!
-      const satEnabled = sim.satcom_enabled !== false && p.enabled !== false
-        && (!p.service_area || p.service_area.countries.some(c => c.toUpperCase() === meta.route.country.toUpperCase()))
+      const satFitted = sim.satcom_enabled !== false && p.enabled !== false   // switched off, or no terminal in the design
+      const satEnabled = satFitted && (!p.service_area || p.service_area.countries.some(c => c.toUpperCase() === meta.route.country.toUpperCase()))
       for (let i = 0; i < n; i++) {
         const tun = data.inTunnel[i] === 1
         let sky = clamp(b.qb[i] - w.sky_penalty - 0.18 * data.urban[i] * (1 - data.canopy[i]), 0, 1)
@@ -83,7 +83,7 @@ export function simulate(data: RouteData, sc: Scenario): SimResult {
         if (data.cutting[i] > 10) reason = 'DEEP_CUTTING'
         if (data.canopy[i] > 0.5) reason = 'STATION_CANOPY'
         if (tun) reason = 'TUNNEL'
-        if (!satEnabled) reason = 'SERVICE_UNAVAILABLE'
+        if (!satEnabled) reason = satFitted ? 'SERVICE_UNAVAILABLE' : 'NOT_FITTED'
         r.reason[i] = reason
       }
     }

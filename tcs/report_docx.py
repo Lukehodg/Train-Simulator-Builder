@@ -623,7 +623,7 @@ class _Report:
         if "one EDGE Rail antenna each" in ev.networks:            # one antenna per network, e.g. three on EE, Vodafone and Three
             count = {1: "one", 2: "two", 3: "three", 4: "four"}.get(len(ev.operators), str(len(ev.operators)))
             kit = (f"{count} {ev.vehicle}{'s' if len(ev.operators) != 1 else ''}, one each on the {_and(ev.operators)} mobile networks, "
-                   f"combined with {sat} by {policy}")
+                   + (f"combined with {sat} by {policy}" if ev.satcom != "no satellite link" else f"combined by {policy}, with no satellite link"))
         else:
             kit = (f"{_a(ev.vehicle.lower() if not ev.vehicle.startswith('EDGE') else ev.vehicle)} with {policy}, "
                    f"across the {_and(ev.operators)} mobile networks and {sat}")
