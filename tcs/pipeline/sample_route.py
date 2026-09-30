@@ -101,6 +101,9 @@ def build_route(settings: Settings) -> RouteBundle:
         x1, y1 = proj.to_xy(seg["lon1"].values, seg["lat1"].values)
         seg_len = np.hypot(x1 - x0, y1 - y0)
         cum = np.concatenate([[0.0], np.cumsum(seg_len)])
+        if abs(cum[-1] - line_xy.length) > max(1.0, 1e-4 * line_xy.length):   # the segments must tile the line exactly
+            warnings.append(f"OSM segments total {cum[-1]:.0f} m but the line is {line_xy.length:.0f} m; tunnel and cutting positions may be off")
+            console.log(f"[yellow]{warnings[-1]}")
         idx = np.clip(np.searchsorted(cum, samples["distance_m"].values, side="right") - 1, 0, len(seg) - 1)
         in_tunnel = seg["tunnel"].values[idx].astype(bool)
         tunnel_name = np.where(in_tunnel, seg["tunnel_name"].values[idx], None)
@@ -134,7 +137,7 @@ def build_route(settings: Settings) -> RouteBundle:
     samples["urban_density"] = _station_proximity_urban(samples, st)
     samples["geometry_source"] = geom.source
 
-    prov = {"route": geom.provenance.__dict__, "warnings": warnings + geom.warnings}
+    prov = {"route": geom.provenance.__dict__, "warnings": warnings + geom.warnings, "straight_legs": geom.straight_legs}
     return RouteBundle(samples=samples, stations=st, proj=proj, line_lonlat=list(geom.line.coords), geometry_source=geom.source,
                        provenance=prov, warnings=warnings + geom.warnings)
 

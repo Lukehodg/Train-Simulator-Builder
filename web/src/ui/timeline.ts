@@ -1,6 +1,7 @@
 import { fmtHM, type Store } from '../state'
 import { CLASS_NAMES, CLASS_VARS, CONF_VARS, WIFI_CLASSES, classOf, confStep, cssVar, wifiToClass } from '../sim/classify'
 import { indexAtDistance } from '../data'
+import { esc } from '../html'
 import { envText } from './inspector'
 
 const GL = 78, GR = 12          // gutters: lane labels on the left, breathing room on the right
@@ -157,11 +158,11 @@ export function initTimeline(store: Store, onSeek: (i: number) => void) {
   function showTip(x: number) {
     const st = store.state, d = st.data, r = st.sim, i = indexAtDistance(d.distance, hoverM!)
     const cls = CLASS_VARS.map(cssVar)
-    let h = `<div class="row hd"><span>${(d.distance[i] / 1000).toFixed(1)} km · ${fmtHM(d.meta.departure, d.t[i])}</span><b>${envText(store, i)}</b></div>`
+    let h = `<div class="row hd"><span>${(d.distance[i] / 1000).toFixed(1)} km · ${fmtHM(d.meta.departure, d.t[i])}</span><b>${esc(envText(store, i))}</b></div>`
     h += `<div class="row"><span><i style="background:${cls[wifiToClass(r.wifiClass[i])]}"></i>Wi-Fi · ${WIFI_CLASSES[r.wifiClass[i]]}</span><b>${Math.round(r.bonded[i])} Mbps</b></div>`
     for (const p of d.meta.providers) {
       const L = r.links[p.id], c = classOf('quality', p.id, i, d, r)
-      h += `<div class="row"><span><i style="background:${cls[c]}"></i>${p.name} · ${CLASS_NAMES[c]}</span><b>${L.avail[i] ? Math.round(L.cap[i]) + ' Mbps' : L.reason[i].toLowerCase().replace(/_/g, ' ')}</b></div>`
+      h += `<div class="row"><span><i style="background:${cls[c]}"></i>${esc(p.name)} · ${CLASS_NAMES[c]}</span><b>${L.avail[i] ? Math.round(L.cap[i]) + ' Mbps' : L.reason[i].toLowerCase().replace(/_/g, ' ')}</b></div>`
     }
     tip.innerHTML = h; tip.style.display = 'block'
     const tw = tip.offsetWidth

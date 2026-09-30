@@ -22,8 +22,7 @@ cellular:
     penalty_per_km: 0.06
   tunnels:
     default_score: 0.04                 # no dedicated infrastructure
-    das_score: 0.52                     # tunnels tagged with in-tunnel coverage (config/route overrides)
-    das_tunnels: ["km:0-2.5", "km:632-640"]   # names or km ranges; London approach + Edinburgh approach tunnels assumed covered
+    das_score: 0.52                     # tunnels with in-tunnel coverage: each route lists its own (das_tunnels in its route config)
   units_capacity_factor: 1.0          # set from the Train Studio design: sum(decay^k) over roof cellular units
   # score -> radio metric mapping (flagged synthetic unless calibrated against measurements)
   rsrp_dbm: {at_zero: -120, at_one: -74}

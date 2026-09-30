@@ -29,6 +29,7 @@ export interface TunnelMeta { name: string; from_m: number; to_m: number; das: b
 export interface Meta {
   route: { id: string; name: string; country: string; operator?: string; service_id?: string; direction?: string; origin_crs: string; destination_crs: string; sample_spacing_m: number }
   geometry_source: string
+  geometry_straight_legs?: string[]         // OSM legs with no rail path, drawn straight ('BWK-DUN')
   terrain_source: string
   length_m: number
   duration_s: number
@@ -42,6 +43,7 @@ export interface Meta {
   sim_defaults?: any
   provenance: any
   coverage_sources: string[]
+  coverage_share?: Record<string, number>   // share of sample-operator pairs per coverage source (bundles from late 2026 on)
   cell_source: string
   model_version: string
   warnings: string[]

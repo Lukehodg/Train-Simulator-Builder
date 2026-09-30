@@ -142,3 +142,225 @@ def test_packaging_missing_build_preserves_existing_output(tmp_path, monkeypatch
     with pytest.raises(RuntimeError, match="no index.html"):
         package.package(skip_build=True)
     assert marker.read_text(encoding="utf-8") == "keep"
+
+
+def test_osm_segments_tile_the_routed_line_across_platform_hops(tmp_path, monkeypatch):
+    """A leg ending on one track and the next starting on a parallel one adds a lateral hop to the line. The segment
+    table must include it, or every tunnel/cutting flag after the station is looked up at the wrong distance."""
+    from shapely.geometry import Point
+
+    from tcs.geo import Projector, local_crs
+    from tcs.sources import osm_route
+
+    lat0, off = 51.5, 0.0007                                    # second track about 78 m north of the first
+    nodes = {1: (-0.10, lat0), 2: (-0.09, lat0), 3: (-0.08, lat0),                         # track 1: A -> B
+             4: (-0.08, lat0 + off), 5: (-0.07, lat0 + off), 6: (-0.06, lat0 + off), 7: (-0.05, lat0 + off)}   # track 2: B -> C
+    ways = [{"type": "way", "id": 10, "nodes": [1, 2, 3], "tags": {"railway": "rail"}},
+            {"type": "way", "id": 11, "nodes": [4, 5], "tags": {"railway": "rail"}},
+            {"type": "way", "id": 12, "nodes": [5, 6], "tags": {"railway": "rail", "tunnel": "yes", "tunnel:name": "Test Tunnel"}},
+            {"type": "way", "id": 13, "nodes": [6, 7], "tags": {"railway": "rail"}}]
+    stations = [("AAA", -0.10, lat0), ("BBB", -0.08, lat0 + off / 2), ("CCC", -0.05, lat0 + off)]   # B sits between both tracks
+
+    def fake_overpass(query, raw_dir, name, url, offline, timeout):
+        if name == "osm_stations":
+            return {"elements": [{"type": "node", "lat": la, "lon": lo, "tags": {"ref:crs": c, "name": c}} for c, lo, la in stations]}
+        return {"elements": [{"type": "node", "id": k, "lon": lo, "lat": la} for k, (lo, la) in nodes.items()] + ways}
+
+    monkeypatch.setattr(osm_route, "_overpass", fake_overpass)
+    geom = osm_route.fetch_route(["AAA", "BBB", "CCC"], "GB", tmp_path)
+    proj = Projector(local_crs(-0.075, lat0, "GB"))
+    line = proj.line_to_xy(geom.line)
+    seg = geom.segments
+    x0, y0 = proj.to_xy(seg["lon0"].values, seg["lat0"].values)
+    x1, y1 = proj.to_xy(seg["lon1"].values, seg["lat1"].values)
+    cum = np.concatenate([[0.0], np.cumsum(np.hypot(x1 - x0, y1 - y0))])
+    assert cum[-1] == pytest.approx(line.length, abs=0.5)      # the segments tile the whole line, hop included
+    k = int(np.flatnonzero(seg["tunnel"].values)[0])
+    portal = line.project(Point(*proj.to_xy(*nodes[5])))
+    assert cum[k] == pytest.approx(portal, abs=0.5)            # the tunnel starts where it really is, not ~78 m early
+
+
+def test_ofcom_quota_refusal_stops_the_source_instead_of_filling_stand_ins(tmp_path, monkeypatch):
+    """A 403/429 mid-route is a quota or key problem, not 'no data for this postcode': the source must stop so the
+    route falls back to a labelled source, rather than carrying on and labelling neutral stand-ins as Ofcom."""
+    from tcs.sources import ofcom_coverage
+
+    settings = load_settings(offline=True)
+    settings.offline = False
+    monkeypatch.setenv("OFCOM_API_KEY", "test-key")
+    calls = []
+
+    def refused(url, **kw):
+        calls.append(url)
+        raise base.SourceUnavailable("ofcom_api: HTTP 403 for https://example.invalid")
+    monkeypatch.setattr(ofcom_coverage, "http_get", refused)
+    postcodes = pd.DataFrame({"postcode": ["AB1 2CD", "AB1 2CE", "AB1 2CF"]})
+    with pytest.raises(base.SourceUnavailable, match="refused"):
+        ofcom_coverage.fetch_ofcom_api(postcodes, settings, tmp_path)
+    assert len(calls) == 1                                      # no point spending the rest of the route on refusals
+
+    def not_found(url, **kw):
+        raise base.SourceUnavailable("ofcom_api: HTTP 404 for https://example.invalid")
+    monkeypatch.setattr(ofcom_coverage, "http_get", not_found)
+    with pytest.raises(base.SourceUnavailable, match="no parsable"):   # a genuine gap is still skipped, postcode by postcode
+        ofcom_coverage.fetch_ofcom_api(postcodes, settings, tmp_path)
+
+
+def test_coverage_counts_as_live_only_when_most_of_it_is_ofcom():
+    from tcs.report import _coverage_row, live_coverage_share
+
+    full = {"coverage_sources": ["no_coverage_record", "ofcom_predicted"], "coverage_share": {"ofcom_predicted": 0.97, "no_coverage_record": 0.03}}
+    partial = {"coverage_sources": ["no_coverage_record", "ofcom_predicted"], "coverage_share": {"ofcom_predicted": 0.116, "no_coverage_record": 0.884}}
+    assert _coverage_row(full)[2] == "live"
+    assert _coverage_row(partial)[2] == "partly stand-in" and "12 %" in _coverage_row(partial)[1]
+    assert _coverage_row({"coverage_sources": ["synthetic_prior"], "coverage_share": {"synthetic_prior": 1.0}})[2] == "synthetic stand-in"
+    assert live_coverage_share({"coverage_sources": ["ofcom_predicted"]}) == 1.0   # bundles built before the share was recorded
+
+
+def test_in_tunnel_coverage_is_listed_per_route_not_shared():
+    """The ECML's King's Cross and Edinburgh km ranges used to apply to every route, giving other routes' first
+    2.5 km of tunnels phantom in-tunnel coverage."""
+    from tcs.model.cellular import das_mask
+
+    ecml = load_settings(offline=True)
+    other = load_settings(offline=True, route_id="tfw_cdf_man")
+    assert ecml.sim["cellular"]["tunnels"]["das_tunnels"]
+    assert other.sim["cellular"]["tunnels"]["das_tunnels"] == []
+    assert other.sim_defaults["cellular"]["tunnels"]["das_tunnels"] == []     # what the viewer re-simulates from
+    names, km = np.array(["Tunnel"], dtype=object), np.array([1.0])
+    assert das_mask(set(ecml.sim["cellular"]["tunnels"]["das_tunnels"]), names, km).all()
+    assert not das_mask(set(other.sim["cellular"]["tunnels"]["das_tunnels"]), names, km).any()
+
+
+def test_measured_network_names_are_matched_on_whole_words():
+    """'Three' contains 'ee', so every Three measurement used to be calibrated as EE."""
+    from tcs.sources.measurements import _provider_from
+
+    ops = load_settings(offline=True).operators
+    cases = {"Three": "three", "3": "three", "Three UK": "three", "EE": "ee", "EE Limited": "ee", "O2 - UK": "o2", "Vodafone UK": "vodafone",
+             "vodafone": "vodafone", "TH": "three", "Unknown MVNO": None, "": None, "Vodafone / Three": None}
+    assert {v: _provider_from(v, ops) for v in cases} == cases
+
+
+def test_measurement_columns_are_not_confused_by_similar_names(tmp_path):
+    """A 'latency' column used to be read as latitude (it starts with 'lat'), dropping or misplacing every point."""
+    from tcs.sources.measurements import load_measurements
+
+    ops = load_settings(offline=True).operators
+    f = tmp_path / "modem.csv"
+    f.write_text("time,latency_ms,carrier,gps_lat,gps_lon,rsrp,throughput_mbps\n"
+                 "2026-09-01T10:00:00Z,48,Three,51.53,-0.12,-95,42.5\n"
+                 "2026-09-01T10:00:05Z,52,EE,51.54,-0.13,-90,60.1\n")
+    m = load_measurements(f, "modem_log", ops)
+    assert m["latitude"].tolist() == [51.53, 51.54] and m["longitude"].tolist() == [-0.12, -0.13]
+    assert m["latency_ms"].tolist() == [48, 52] and m["provider_id"].tolist() == ["three", "ee"]
+
+    f2 = tmp_path / "survey.csv"                                # 'ci' must not be read out of 'precision'
+    f2.write_text("timestamp,precision_m,latitude,longitude,mcc,mnc,cellId,rsrp\n2026-09-01T10:00:00Z,5,51.5,-0.1,234,20,1234,-99\n")
+    s = load_measurements(f2, "network_survey", ops)
+    assert s["cell_id"].tolist() == [1234] and s["provider_id"].tolist() == ["three"]
+
+
+def test_overpass_error_answers_are_not_cached_as_the_railway(tmp_path, monkeypatch):
+    """Overpass answers 200 with an HTML error page or a 'timed out' remark when busy. Those used to crash the build
+    (or, cached, return an empty railway for 30 days); now the route source is unavailable and the cache is dropped."""
+    from tcs.sources import osm_route
+
+    cached = tmp_path / "answer.json"
+    monkeypatch.setattr(osm_route, "http_get", lambda *a, **kw: cached)
+    for body, why in [("<html>Too many requests</html>", "other than JSON"),
+                      ('{"elements": [], "remark": "runtime error: Query timed out in \\"query\\" at line 2 after 181 seconds."}', "could not finish")]:
+        cached.write_text(body)
+        with pytest.raises(base.SourceUnavailable, match=why):
+            osm_route._overpass("q", tmp_path, "osm_rail", None, False, 180)
+        assert not cached.exists()
+    cached.write_text('{"elements": []}')
+    monkeypatch.setattr(osm_route, "_overpass", lambda *a, **kw: {"elements": []})
+    with pytest.raises(base.SourceUnavailable, match="AAA"):          # no station found: a clear gap, not a KeyError
+        osm_route.fetch_stations(["AAA"], "GB", tmp_path, overpass_url=None, offline=False, timeout=10)
+
+
+def test_a_leg_without_rail_path_is_retried_wider_then_labelled_straight(tmp_path, monkeypatch):
+    from tcs.report import _geometry_row
+    from tcs.sources import osm_route
+
+    lat = 51.5
+    nodes = {1: (-0.10, lat), 2: (-0.09, lat), 3: (-0.08, lat), 4: (-0.07, lat), 5: (-0.06, lat)}
+    split = [{"type": "way", "id": 10, "nodes": [1, 2, 3], "tags": {}}, {"type": "way", "id": 11, "nodes": [4, 5], "tags": {}}]
+    joined = split + [{"type": "way", "id": 12, "nodes": [3, 4], "tags": {}}]
+    stations = [("AAA", -0.10, lat), ("BBB", -0.08, lat), ("CCC", -0.06, lat)]
+    answers: list[list[dict]] = []
+
+    def fake_overpass(query, raw_dir, name, url, offline, timeout):
+        if name == "osm_stations":
+            return {"elements": [{"type": "node", "lat": la, "lon": lo, "tags": {"ref:crs": c, "name": c}} for c, lo, la in stations]}
+        return {"elements": [{"type": "node", "id": k, "lon": lo, "lat": la} for k, (lo, la) in nodes.items()] + answers.pop(0)}
+
+    monkeypatch.setattr(osm_route, "_overpass", fake_overpass)
+    answers[:] = [split, joined]                                  # the line leaves the first corridor; the wider one has it
+    geom = osm_route.fetch_route(["AAA", "BBB", "CCC"], "GB", tmp_path)
+    assert geom.straight_legs == [] and not answers and not geom.warnings
+
+    answers[:] = [split, split]                                   # nowhere to be found: drawn straight, and said so
+    geom = osm_route.fetch_route(["AAA", "BBB", "CCC"], "GB", tmp_path)
+    assert geom.straight_legs == ["BBB-CCC"] and "BBB-CCC" in geom.warnings[0]
+    row = _geometry_row({"geometry_source": "osm", "geometry_straight_legs": geom.straight_legs})
+    assert row[2] == "partly stand-in" and "BBB–CCC" in row[1]
+    assert _geometry_row({"geometry_source": "synthetic"})[2] == "synthetic stand-in"
+    assert _geometry_row({"geometry_source": "osm"})[2] == "live"
+
+
+def test_the_terminus_is_reached_at_its_timetabled_time():
+    """Calling-point times are departures and the terminus time an arrival; the dwell used to be taken off the last
+    leg too, so every train reached its terminus one dwell early."""
+    from tcs.pipeline.movement import movement
+
+    s = load_settings(offline=True)
+    s.route = {**s.route, "line_speed_kph": {"default": 200, "restrictions": []},
+               "timetable": {"source": "yaml", "departure": "09:00", "calls": {"AAA": "09:00", "BBB": "09:20", "CCC": "09:40"}, "dwell_s": 120}}
+    n = int(40000 / s.spacing_m) + 1
+    samples = pd.DataFrame({"sample_id": np.arange(n), "distance_m": np.arange(n) * s.spacing_m})
+    ids = [0, n // 2, n - 1]
+    stations = pd.DataFrame({"crs": ["AAA", "BBB", "CCC"], "stop": True, "sample_id": ids, "distance_m": [i * s.spacing_m for i in ids]})
+    out, _ = movement(s, samples, stations)
+    t = out["sim_seconds"].values
+    assert t[ids[1]] == pytest.approx(20 * 60 - 120, abs=1)       # arrives a dwell before its 09:20 departure
+    assert t[ids[2]] == pytest.approx(40 * 60, abs=1)             # and reaches the terminus at 09:40, not 09:38
+
+
+def test_unknown_policy_or_weather_is_refused():
+    """Both used to run silently with the default while the output was labelled with the name asked for."""
+    import typer
+
+    from tcs.cli import _check_overrides
+
+    s = load_settings(offline=True)
+    _check_overrides(s, "FAILOVER", "rain")
+    with pytest.raises(typer.BadParameter, match="policy"):
+        _check_overrides(s, "FAILOVR", "nominal")
+    with pytest.raises(typer.BadParameter, match="weather"):
+        _check_overrides(s, None, "snow")
+
+
+def test_run_records_the_policy_and_weather_it_simulated(tmp_path, monkeypatch):
+    """`tcs run --policy/--weather` simulated the override but wrote the default into meta.json, so the viewer re-ran
+    and showed a different scenario from the one built."""
+    import json
+
+    from tcs import cli, config
+
+    for name in ("RAW", "INTERIM", "PROCESSED"):
+        monkeypatch.setattr(config, name, tmp_path / name.lower())
+    real = cli.load_settings
+
+    def coarse(**kw):
+        s = real(**kw)
+        s.route["sample_spacing_m"] = 2000
+        s.terrain["horizon_azimuths"], s.terrain["horizon_reach_m"] = 4, 1000
+        return s
+    monkeypatch.setattr(cli, "load_settings", coarse)
+    cli.run_pipeline(offline=True, policy="FAILOVER", weather="rain", copy_to_web=False)
+    s = real(offline=True)
+    meta = json.loads((s.paths()["web"] / "meta.json").read_text(encoding="utf-8"))
+    assert meta["sim"]["wan"]["policy"] == "FAILOVER" and meta["sim"]["weather"] == "rain"
+    assert meta["sim_defaults"]["wan"]["policy"] == s.sim["wan"]["policy"] != "FAILOVER"   # the baseline stays the config's

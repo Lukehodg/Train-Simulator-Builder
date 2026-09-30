@@ -42,6 +42,10 @@ route:
     - {crs: DUN, name: "Dunbar",              stop: false, trainshed: false}
     - {crs: EDB, name: "Edinburgh Waverley",  stop: true,  trainshed: true}
 
+  # Tunnels with in-tunnel mobile coverage (a distributed antenna system), by OSM tunnel name or "km:<from>-<to>"
+  # (OSM rarely names tunnels). Every other tunnel is assumed to have none. Route files list their own; none by default.
+  das_tunnels: ["km:0-2.5", "km:630-640"]   # King's Cross approach (Gasworks, Copenhagen) and Calton Tunnel into Waverley
+
   # Timetable. Version 1 interpolates between these times with accel/decel curves and line-speed caps.
   # Replace with a CIF schedule (tcs fetch-timetable --cif <file>) when available.
   timetable:

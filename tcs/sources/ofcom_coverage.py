@@ -131,6 +131,12 @@ def fetch_ofcom_api(postcodes: pd.DataFrame, settings, raw_dir: Path, *, limit: 
             p = http_get(url_tpl.format(postcode=norm), raw_dir=raw_dir, name="ofcom_api", ext="json",
                          headers={header: key, "Accept": "application/json"}, offline=settings.offline, ttl_days=90)
         except SourceUnavailable as exc:
+            if re.search(r"HTTP (401|403|429)", str(exc)):
+                # A refusal (call quota used up, or a bad key) is not "no data for this postcode": carrying on would
+                # fill the rest of the route with neutral stand-ins labelled as Ofcom. Stop; the answers fetched so
+                # far are cached, so a run after the quota resets picks up where this one stopped.
+                raise SourceUnavailable(f"Ofcom API refused the request after {n_done} of {len(uniq)} postcodes "
+                                        f"(call quota used up, or the key is wrong): {exc}") from exc
             missing += 1
             if missing <= 5:
                 console.log(f"[yellow]Ofcom API {pc}: {exc}")

@@ -755,7 +755,7 @@ class _Report:
     def sections_and_links(self) -> None:
         ev = self.ev
         self.h1("Station-to-station performance")
-        self.para("Each row is the section between consecutive calling points. Throughput and latency are for the combined onboard connection; "
+        self.para("Each row is the section between consecutive listed stations (calling points and the stations passed through). Throughput and latency are for the combined onboard connection; "
                   "streaming-capable is the share of the section's length in the EXCELLENT or GOOD class; the least available link is the "
                   "network or satellite link usable over the smallest share of the section. Appendix A adds per-passenger throughput, the "
                   "usable share, tunnels and confidence for each section.")
@@ -797,18 +797,33 @@ class _Report:
                       "not enter the model, which uses the link-budget and throughput assumptions in section 9.", size=9, color=MUTED)
 
     def methodology(self) -> None:
+        ev, m = self.ev, self.ev.meta
         self.h1("Methodology")
+        # Said as it was for this build: the sources table (section 7) is the record of which inputs were live.
+        status = {name: st for name, _, st in ev.sources}
+        legs = [str(x).replace("-", "–") for x in m.get("geometry_straight_legs") or []]
+        route = {
+            "osm": "The railway centreline, stations, tunnels and cuttings come from OpenStreetMap, routed station to station"
+                   + (f", except {', '.join(legs)}, drawn as a straight line where no rail path was found" if legs else "") + ".",
+            "file": "The railway centreline comes from a route file supplied for this assessment; stations are placed from OpenStreetMap.",
+        }.get(m.get("geometry_source"), "The railway centreline is an approximate line through the stations, a stand-in used because the "
+                                         "OpenStreetMap track was not available for this build, so tunnel and cutting positions are approximate.")
+        coverage = {"live": "the operator's predicted coverage (Ofcom)",
+                    "partly stand-in": "the operator's predicted coverage (Ofcom) where it was available and a neutral stand-in elsewhere",
+                    }.get(status.get("Mobile coverage", ""), "a stand-in coverage estimate, as Ofcom's predictions were not available for this build")
+        cells = "sites from OpenCellID" if status.get("Cell sites and handovers") == "live" else "a stand-in site layout"
+        horizon = ("a 30 m terrain model's horizon around each point" if status.get("Terrain and sky visibility") == "live"
+                   else "the horizon around each point on flat stand-in terrain (hills are not modelled for this build)")
+        spacing = m.get("route", {}).get("sample_spacing_m") or 50
         for title, text in [
-            ("Route and journey", "The railway centreline, stations, tunnels and cuttings come from OpenStreetMap, routed station to station. The "
-                                  "route is sampled every 50 m; a speed model driven by line speed, station stops and the timetable gives the "
-                                  "time the train passes each point."),
-            ("Mobile networks", "For each operator at each point, the model starts from the operator's predicted coverage (Ofcom), then applies "
-                                "losses for deep cuttings and for distance from the serving cell site, handover effects as the train passes "
+            ("Route and journey", f"{route} The route is sampled every {spacing:g} m; a speed model driven by line speed, station stops and the "
+                                  "timetable gives the time the train passes each point."),
+            ("Mobile networks", f"For each operator at each point, the model starts from {coverage}, then applies losses for deep cuttings and "
+                                f"for distance from the serving cell site ({cells}), handover effects as the train passes "
                                 "from one site to the next, and the gain or loss of the train's antenna. Tunnels have no coverage unless an "
                                 "in-tunnel system is listed. Signal (RSRP), throughput, latency and packet loss follow from the resulting quality."),
-            ("Satellite", "Sky visibility is calculated from a 30 m terrain model's horizon around each point, reduced for cuttings, station "
-                          "canopies and urban obstruction; tunnels block the link. Availability, throughput and latency follow from sky visibility "
-                          "and the terminal's characteristics."),
+            ("Satellite", f"Sky visibility is calculated from {horizon}, reduced for cuttings, station canopies and urban obstruction; tunnels "
+                          "block the link. Availability, throughput and latency follow from sky visibility and the terminal's characteristics."),
             ("Onboard link management", "The onboard router scores every link on capacity, latency, loss, stability and confidence, and "
                                         "combines the usable ones according to the policy: packet bonding aggregates them, failover uses the best "
                                         "single link."),
@@ -824,10 +839,11 @@ class _Report:
     def provenance(self) -> None:
         ev = self.ev
         self.h1("Data sources and confidence")
-        status = {"live": "Live", "synthetic stand-in": "Stand-in (synthetic)", "predictive": "Predictive model", "configured": "Configured"}
+        status = {"live": "Live", "synthetic stand-in": "Stand-in (synthetic)", "partly stand-in": "Partly stand-in", "predictive": "Predictive model",
+                  "configured": "Configured"}
         self.table([("Input", 5.4, "l"), ("Source", 7.6, "l"), ("Status", 3.6, "l")],
                    [[a, b, status.get(c, c)] for a, b, c in ev.sources], "Data sources behind this assessment", size=8.5)
-        stand_ins = [a for a, _, c in ev.sources if c == "synthetic stand-in"]
+        stand_ins = [a for a, _, c in ev.sources if c in ("synthetic stand-in", "partly stand-in")]
         if stand_ins:
             self.para("Stand-in data was used for: " + "; ".join(stand_ins).lower() + ". Estimates that rest on it carry a lower confidence.",
                       color=MUTED, size=9)
@@ -913,7 +929,7 @@ class _Report:
         sec = self.doc.add_section(WD_SECTION.NEW_PAGE)
         self._page(sec, landscape=True)
         self.h1("Station-to-station results", number="Appendix A")
-        self.para("Full predicted results for each section between consecutive calling points (combined onboard connection).", keep=True)
+        self.para("Full predicted results for each section between consecutive listed stations (combined onboard connection).", keep=True)
         self.table([("Section", 6.4, "l"), ("km", 1.3, "r"), ("min", 1.2, "r"), ("Speed km/h", 1.6, "r"), ("Mean Mbps", 1.6, "r"),
                     ("P10 Mbps", 1.5, "r"), ("Min Mbps", 1.5, "r"), ("Per user Mbps", 1.7, "r"), ("Latency ms", 1.6, "r"),
                     ("Streaming %", 1.8, "r"), ("Usable %", 1.6, "r"), ("Loss km", 1.4, "r"), ("Tunnels", 1.4, "r"),

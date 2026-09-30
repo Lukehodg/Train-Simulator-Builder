@@ -10,7 +10,7 @@ name: publish
 #   CLOUDFLARE_ACCOUNT_ID                 from the Cloudflare dashboard
 #
 # Nothing is published, and the previous version stays live, if: the Ofcom API refuses a test call up front (its
-# call quota is used up), any route fails to build, or any route's coverage fell back to stand-in data.
+# call quota is used up), any route fails to build, or less than 90 % of any route's coverage is live Ofcom data.
 # A full rebuild makes about 18,000 Ofcom calls (one per postcode near the track), so run it at most once per quota
 # period: this key's quota was used up on 26 Sep 2026 and resets around the 16th, hence the 17th below.
 
@@ -70,10 +70,13 @@ jobs:
           fi
 
       # Downloads and Ofcom answers from a run in the past week are reused, so re-running a failed publish is cheap.
-      - uses: actions/cache@v4
+      # Restore and save are separate steps so a failed run (e.g. the quota ran out part-way) still keeps what it
+      # fetched; the all-in-one cache action only saves after a successful job.
+      - name: Restore downloads and Ofcom answers from recent runs
+        uses: actions/cache/restore@v4
         with:
           path: data/raw
-          key: raw-${{ github.run_id }}
+          key: raw-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: raw-
 
       - name: Rebuild every route from the live feeds
@@ -82,20 +85,31 @@ jobs:
           OPENCELLID_TOKEN: ${{ secrets.OPENCELLID_TOKEN }}
         run: tcs build-all
 
+      - name: Keep this run's downloads and Ofcom answers, even if the rebuild failed
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/raw
+          key: raw-${{ github.run_id }}-${{ github.run_attempt }}
+
       - name: Summarise which feeds each route used
         if: always()
         shell: python
         run: |
           import glob, json, os
+          from tcs.report import LIVE_COVERAGE_MIN, live_coverage_share
           rows, degraded, no_coverage = [], [], []
           for path in sorted(glob.glob("web/public/data/*/meta.json")):
               m = json.load(open(path, encoding="utf-8"))
-              cov = ", ".join(m.get("coverage_sources") or []) or "-"
-              cells = [m.get("geometry_source"), m.get("terrain_source"), cov, m.get("cell_source")]
+              share = live_coverage_share(m)
+              cov = f"{share:.0%} Ofcom ({', '.join(m.get('coverage_sources') or []) or '-'})"
+              legs = m.get("geometry_straight_legs") or []   # OSM legs with no rail path, drawn straight
+              track = f"{m.get('geometry_source')}" + (f" (straight: {', '.join(legs)})" if legs else "")
+              cells = [track, m.get("terrain_source"), cov, m.get("cell_source")]
               rows.append("| " + " | ".join([m["route"]["id"], *map(str, cells)]) + " |")
-              if any("synthetic" in str(c) for c in cells):
+              if any("synthetic" in str(c) for c in cells) or share < LIVE_COVERAGE_MIN or legs:
                   degraded.append(m["route"]["id"])
-              if "synthetic_prior" in (m.get("coverage_sources") or []):
+              if share < LIVE_COVERAGE_MIN:   # also catches a quota that ran out part-way through a route
                   no_coverage.append(m["route"]["id"])
           out = ["## Feeds used per route", "", "| route | track | terrain | coverage | cell sites |", "|---|---|---|---|---|", *rows]
           if degraded:
@@ -103,12 +117,12 @@ jobs:
               print(f"::warning::Stand-in data used for: {', '.join(degraded)}")
           if no_coverage:
               # Coverage is the core input: publishing stand-ins would replace good live data on the site.
-              out += ["", f"**Not published:** Ofcom coverage fell back to stand-in data for {', '.join(no_coverage)} "
+              out += ["", f"**Not published:** less than {LIVE_COVERAGE_MIN:.0%} of the coverage is live Ofcom data for {', '.join(no_coverage)} "
                           "(usually the Ofcom call quota ran out part-way). The current site stays live."]
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
               fh.write("\n".join(out) + "\n")
           if no_coverage:
-              print(f"::error::Ofcom coverage fell back to stand-in data for: {', '.join(no_coverage)}. Not publishing.")
+              print(f"::error::Less than {LIVE_COVERAGE_MIN:.0%} live Ofcom coverage for: {', '.join(no_coverage)}. Not publishing.")
               raise SystemExit(1)
 
       # Word report + Excel appendix per route for the baseline and EDGE Rail + Fleet Connect scenarios, placed beside

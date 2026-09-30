@@ -116,6 +116,7 @@ def export_all(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame, s
     meta = {
         "route": {k: settings.route.get(k) for k in ("id", "name", "country", "operator", "service_id", "direction", "origin_crs", "destination_crs", "sample_spacing_m")},
         "geometry_source": bundle.geometry_source,
+        "geometry_straight_legs": list(bundle.provenance.get("straight_legs") or []),   # OSM legs drawn straight: no rail path found
         "terrain_source": str(samples["terrain_source"].iloc[0]) if "terrain_source" in samples else "unknown",
         "length_m": float(samples["distance_m"].max()),
         "duration_s": float(samples["sim_seconds"].max()),
@@ -131,6 +132,7 @@ def export_all(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame, s
         "sim_defaults": settings.sim_defaults or settings.sim,
         "provenance": bundle.provenance,
         "coverage_sources": sorted(set(prior["source"].dropna().astype(str))),
+        "coverage_share": {str(k): round(float(v), 4) for k, v in prior["source"].fillna("no_coverage_record").value_counts(normalize=True).items()},
         "cell_source": str(cells["source"].iloc[0]) if len(cells) else "none",
         "model_version": settings.sim["model_version"],
         "warnings": bundle.warnings,

@@ -195,6 +195,9 @@ def test_report_all_places_packs_beside_the_viewer_bundle(pipeline, tmp_path, mo
     for h in ("Executive summary", "1   Introduction", "2.4   Route heat maps", "8   Validation status", "Appendix A   Station-to-station results", "Appendix B   Glossary"):
         assert h in headings
     assert "9.2   Sensitivity to the main assumptions" in headings
+    text = " ".join(p.text for p in base.paragraphs).replace("\xa0", " ")   # the methodology describes the sources this build really used
+    assert "approximate line through the stations" in text and "come from OpenStreetMap" not in text
+    assert "a stand-in coverage estimate" in text and "sampled every 500 m" in text
     assert len(base.inline_shapes) == 6                        # throughput, sections, heat maps, per-network strip, links, sensitivity
     assert base.core_properties.author == "Train Link Simulator"   # not python-docx's default
     footer = "".join(t.text for t in base.sections[1].footer._element.iter() if t.tag.endswith("}t"))
@@ -205,6 +208,12 @@ def test_report_all_places_packs_beside_the_viewer_bundle(pipeline, tmp_path, mo
     assert not any("compared with the baseline" in p.text for p in base.paragraphs if p.style.name == "Caption")
     workbook = __import__("openpyxl").load_workbook(out / idx["reports"][0]["xlsx"]["file"], read_only=True)
     assert workbook.sheetnames[:3] == ["Read me", "Summary", "Sections"] and "Sensitivity" in workbook.sheetnames
+
+    # A one-off report with a policy (or weather, or design) of its own gets its own file names, not the baseline pack's.
+    single = tmp_path / "single"
+    res = CliRunner().invoke(app, ["report", "--policy", "FAILOVER", "--out", str(single)])
+    assert res.exit_code == 0, res.output
+    assert sorted(p.suffix for p in single.glob(f"evidence_{s.route_id}_baseline_failover.*")) == [".docx", ".xlsx"]
 
     # A viewer bundle from another build is refused rather than described by the wrong pack.
     (web_data / s.route_id / "meta.json").write_text("{}", encoding="utf-8")

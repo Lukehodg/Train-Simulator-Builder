@@ -10,7 +10,7 @@ q_base = prior_score                       # Ofcom level → score, or Connected
        − penalty_per_km · max(0, serving_cell_distance_km − 3)
        + calibration_bias[operator]        # from tcs calibrate
 q      = clip(q_base + vehicle_offset)     # rooftop 0 · handset −0.18 (≈ −18 dB penetration)
-tunnel: q = 0.04 (no infrastructure) or 0.52 (DAS assumed: km ranges / names in config)
+tunnel: q = 0.04 (no infrastructure) or 0.52 (DAS assumed: km ranges / names in the route's `das_tunnels`; none by default)
 
 capacity = capacity_prior[tech] · ((q − 0.12)/0.88)^1 · (1 − 0.08·speed/200) · (1 − 0.4·handover_penalty)
 latency  = 24 + 110·(1 − q) + 80·handover_penalty        (ms)

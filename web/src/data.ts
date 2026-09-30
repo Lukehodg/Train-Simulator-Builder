@@ -83,3 +83,13 @@ export function indexAtDistance(d: Float64Array, dist: number): number {
   while (lo < hi) { const m = (lo + hi + 1) >> 1; if (d[m] <= dist) lo = m; else hi = m - 1 }
   return lo
 }
+
+/** A route's coverage counts as live when at least this share of it comes from Ofcom (same rule as tcs/report.py). */
+export const LIVE_COVERAGE_MIN = 0.9
+
+/** Share of the route's coverage prior that comes from Ofcom (API or Connected Nations). Bundles built before the
+ *  share was recorded count as fully live when any Ofcom source is listed, as they used to. */
+export function liveCoverageShare(m: Meta): number {
+  if (m.coverage_share) return Object.entries(m.coverage_share).filter(([k]) => k.startsWith('ofcom')).reduce((a, [, v]) => a + v, 0)
+  return m.coverage_sources.some(s => s.startsWith('ofcom')) ? 1 : 0
+}

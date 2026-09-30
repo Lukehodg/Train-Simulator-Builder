@@ -3,6 +3,7 @@
  * derive the onboard architecture and apply it to the simulation config in the browser. Mirrors
  * tcs/sources/train_studio.py; the mapping constants come from meta.sim.train (simulation.yaml).
  */
+import { esc } from './html'
 import type { Meta, Policy, Vehicle } from './types'
 
 export interface Carriage { index: number; type: string; aps: number; switch: boolean; cellular_units: number; fleet_connect: boolean; satcom_units: number; custom: string[]; aps_connected: number }
@@ -118,7 +119,6 @@ export function designFromMeta(meta: Meta): TrainDesign | null {
 
 /** Consist strip + equipment table + derived parameters, as HTML. */
 export function renderDesign(d: TrainDesign | null, sourceLabel: string): string {
-  const esc = (s: string) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
   if (!d) {
     return `<div class="empty">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="12" rx="2"/><path d="M7 20l-2 2M17 20l2 2M4 10h16"/></svg>
@@ -139,8 +139,8 @@ export function renderDesign(d: TrainDesign | null, sourceLabel: string): string
   const kv = (k: string, v: string) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`
   let h = `<div class="train-head"><div><div class="train-title">${esc(d.title)}</div><div class="hint" style="margin:0">${esc(sourceLabel)}</div></div></div>`
   h += `<div class="consist">${cars}</div>`
-  h += `<h4>Equipment</h4><div class="wan">${kv('Carriages', String(d.carriages.length))}${kv('EDGE Rail (cellular roof units)', String(d.cellular_units))}${kv('SATCOM terminals', d.satcom_units ? `${d.satcom_units} · ${d.satcom_terminal}` : 'none')}${kv('Access points (connected)', `${d.aps_connected} / ${d.aps_total}`)}${kv('Fleet Connect', d.fleet_connect ? 'yes' : 'no')}</div>`
-  h += `<h4>What the model uses</h4><div class="wan">${kv('Vehicle profile', d.vehicle_profile === 'EDGE_RAIL_ACTIVE_ANTENNA' ? 'EDGE Rail active antenna' : d.vehicle_profile === 'EXTERNAL_ROOFTOP_ANTENNA' ? 'passive rooftop antenna' : 'handset in carriage')}${kv('Link policy', d.policy.toLowerCase().replace(/_/g, ' '))}${kv('Cellular capacity factor', `×${d.units_capacity_factor.toFixed(2)}`)}${kv('Wi-Fi AP capacity', `${d.ap_capacity_mbps.toFixed(0)} Mbps`)}${kv('Seats (demand model)', String(d.passengers))}${kv('Satcom', d.satcom_units ? `enabled · ${d.satcom_terminal} terminal` : 'disabled')}</div>`
+  h += `<h4>Equipment</h4><div class="wan">${kv('Carriages', String(d.carriages.length))}${kv('EDGE Rail (cellular roof units)', String(d.cellular_units))}${kv('SATCOM terminals', d.satcom_units ? `${d.satcom_units} · ${esc(d.satcom_terminal)}` : 'none')}${kv('Access points (connected)', `${d.aps_connected} / ${d.aps_total}`)}${kv('Fleet Connect', d.fleet_connect ? 'yes' : 'no')}</div>`
+  h += `<h4>What the model uses</h4><div class="wan">${kv('Vehicle profile', d.vehicle_profile === 'EDGE_RAIL_ACTIVE_ANTENNA' ? 'EDGE Rail active antenna' : d.vehicle_profile === 'EXTERNAL_ROOFTOP_ANTENNA' ? 'passive rooftop antenna' : 'handset in carriage')}${kv('Link policy', d.policy.toLowerCase().replace(/_/g, ' '))}${kv('Cellular capacity factor', `×${d.units_capacity_factor.toFixed(2)}`)}${kv('Wi-Fi AP capacity', `${d.ap_capacity_mbps.toFixed(0)} Mbps`)}${kv('Seats (demand model)', String(d.passengers))}${kv('Satcom', d.satcom_units ? `enabled · ${esc(d.satcom_terminal)} terminal` : 'disabled')}</div>`
   if (d.warnings.length) h += `<h4>Notes</h4><ul class="train-warn">${d.warnings.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`
   h += `<p class="hint">Terminal field of view (Mini 35°, Performance 20°) changes the sky-visibility mask, which is computed by the pipeline: run <code>tcs run --train &lt;file&gt;</code> for that part; everything else applies here instantly.</p>`
   return h

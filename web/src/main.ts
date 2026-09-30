@@ -1,7 +1,8 @@
 import './styles.css'
 import type { PickingInfo } from '@deck.gl/core'
 import { CONFIG } from './config'
-import { indexAtTime, loadRoute } from './data'
+import { esc } from './html'
+import { indexAtTime, LIVE_COVERAGE_MIN, liveCoverageShare, loadRoute } from './data'
 import { createMap } from './map/map'
 import { buildRuns, cellLayers, labelFontReady, ribbonLayers, stationLayers, trainLayers, type Run } from './map/layers'
 import { setBuildings, trackLayers, treeLayer } from './map/environment'
@@ -40,7 +41,8 @@ async function main() {
     return
   }
   const meta = data.meta
-  const scenario = { policy: (meta.sim.wan.policy as Policy) ?? 'PACKET_BONDING', vehicle: (meta.sim.vehicle.profile as Vehicle) ?? 'EXTERNAL_ROOFTOP_ANTENNA', weather: 'nominal' }
+  // open on the scenario the bundle was simulated with (tcs run --policy / --weather record theirs in meta.sim)
+  const scenario = { policy: (meta.sim.wan.policy as Policy) ?? 'PACKET_BONDING', vehicle: (meta.sim.vehicle.profile as Vehicle) ?? 'EXTERNAL_ROOFTOP_ANTENNA', weather: (meta.sim.weather as string) ?? 'nominal' }
   const sim = simulate(data, scenario)
   const realTerrain = meta.terrain_source !== 'synthetic_terrain'
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -56,12 +58,12 @@ async function main() {
   fetch(`${CONFIG.dataRoot}/index.json`).then(r => (r.ok ? r.json() : null)).then((idx: any) => {
     const sel = $('routePick') as HTMLSelectElement
     const routes: any[] = idx?.routes?.length ? idx.routes : [{ id: routeId, name: meta.route.name, origin: meta.stations[0]?.name, destination: meta.stations[meta.stations.length - 1]?.name, length_km: meta.length_m / 1000 }]
-    sel.innerHTML = routes.map(r => `<option value="${r.id}">${r.name ?? r.id} · ${r.origin} → ${r.destination} (${Math.round(r.length_km)} km)</option>`).join('')
+    sel.innerHTML = routes.map(r => `<option value="${esc(r.id)}">${esc(r.name ?? r.id)} · ${esc(r.origin)} → ${esc(r.destination)} (${Math.round(r.length_km)} km)</option>`).join('')
     sel.value = routeId
     sel.addEventListener('change', () => { const u = new URL(location.href); u.searchParams.set('route', sel.value); location.href = u.toString() })
   }).catch(() => {})
   $('btnExport').addEventListener('click', () => exportScenario(store))
-  const liveFlags = [meta.geometry_source === 'osm' || meta.geometry_source === 'file', realTerrain, meta.coverage_sources.some(s => s.startsWith('ofcom')), meta.cell_source === 'opencellid']
+  const liveFlags = [meta.geometry_source === 'osm' || meta.geometry_source === 'file', realTerrain, liveCoverageShare(meta) >= LIVE_COVERAGE_MIN, meta.cell_source === 'opencellid']
   const liveCount = liveFlags.filter(Boolean).length
   $('provDots').innerHTML = liveFlags.map(ok => `<i class="${ok ? 'live' : ''}"></i>`).join('')
   $('provText').textContent = liveCount === 4 ? 'Live data' : liveCount === 0 ? 'Synthetic' : `${liveCount}/4 live`
@@ -146,7 +148,7 @@ async function main() {
     if (!cl.hidden) {
       const vp = cur.vehicle.profiles.EDGE_RAIL_ACTIVE_ANTENNA
       const agg = store.state.scenario.policy === 'PACKET_BONDING' ? `Fleet Connect aggregates every cellular network and the satcom link at once (efficiency ${cur.wan.bonding_efficiency})` : 'aggregation off: choose Packet bonding to model Fleet Connect'
-      cl.innerHTML = `<b>EDGE Rail 5G active antenna · model assumptions</b>Link budget +${vp.db_offset} dB (no coax/splitter losses, 4x4 MIMO diversity) = quality +${vp.score_offset}; throughput x${vp.capacity_factor}; ${agg}.<br>Manufacturer claims, not modelled: ${pr.claims.join(' · ')}.`
+      cl.innerHTML = `<b>EDGE Rail 5G active antenna · model assumptions</b>Link budget +${vp.db_offset} dB (no coax/splitter losses, 4x4 MIMO diversity) = quality +${vp.score_offset}; throughput x${vp.capacity_factor}; ${agg}.<br>Manufacturer claims, not modelled: ${esc(pr.claims.join(' · '))}.`
     }
   }
   ;($('designFile') as HTMLInputElement).addEventListener('change', async e => {
@@ -194,9 +196,9 @@ async function main() {
   // ---- map ------------------------------------------------------------------------------------
   const tooltip = (info: PickingInfo) => {
     const o: any = info.object; if (!o) return null
-    if (o.key && o.provider) return { html: `<b>${o.provider.toUpperCase()}</b> cell ${o.key}<br>${o.radio} · ${o.samples} obs · ${o.source}`, style: tipStyle() }
-    if (o.crs) return { html: `<b>${o.name}</b> (${o.crs})<br>${(o.distance_m / 1000).toFixed(1)} km${o.scheduled ? ' · ' + o.scheduled : ''}${o.stop ? ' · stop' : ' · pass'}`, style: tipStyle() }
-    if (o.lane) return { html: `<b>${o.lane === 'wan' ? 'Combined Wi-Fi' : o.lane}</b> · click to inspect sample`, style: tipStyle() }
+    if (o.key && o.provider) return { html: `<b>${esc(String(o.provider).toUpperCase())}</b> cell ${esc(o.key)}<br>${esc(o.radio)} · ${esc(o.samples)} obs · ${esc(o.source)}`, style: tipStyle() }
+    if (o.crs) return { html: `<b>${esc(o.name)}</b> (${esc(o.crs)})<br>${(o.distance_m / 1000).toFixed(1)} km${o.scheduled ? ' · ' + esc(o.scheduled) : ''}${o.stop ? ' · stop' : ' · pass'}`, style: tipStyle() }
+    if (o.lane) return { html: `<b>${o.lane === 'wan' ? 'Combined Wi-Fi' : esc(o.lane)}</b> · click to inspect sample`, style: tipStyle() }
     return null
   }
   const mapCtx = createMap($('map'), data, theme, tooltip,
@@ -230,7 +232,7 @@ async function main() {
   scrub.addEventListener('input', () => { scrubbing = true; seek(Number(scrub.value) / 100000 * meta.duration_s) })
   scrub.addEventListener('change', () => { scrubbing = false })
   const jump = $('jump') as HTMLSelectElement
-  jump.innerHTML = '<option value="">station…</option>' + meta.stations.map((s, k) => `<option value="${k}">${s.name}</option>`).join('')
+  jump.innerHTML = '<option value="">station…</option>' + meta.stations.map((s, k) => `<option value="${k}">${esc(s.name)}</option>`).join('')
   jump.addEventListener('change', () => { const s = meta.stations[Number(jump.value)]; if (s) seek(Math.max(0, data.t[s.sample_id] - 30)); jump.value = '' })
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') { closeHelp(); setPopover(false, true); reports.set(false, true); return }

@@ -6,6 +6,7 @@ Everything in it is a model prediction unless the validation section says otherw
 from __future__ import annotations
 
 import io
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -101,6 +102,18 @@ def kpis(rc: pd.DataFrame, samples: pd.DataFrame, spacing_m: float) -> dict:
         "mean_confidence": round(float(rc["confidence"].mean()), 2),
         "class_share": {c: round(100 * float(cls.get(c, 0)), 1) for c in WIFI_CLASSES},
     }
+
+
+LIVE_COVERAGE_MIN = 0.9       # a route's coverage counts as live when at least this share of it comes from Ofcom
+
+
+def live_coverage_share(meta: dict) -> float:
+    """Share of sample-operator pairs whose coverage prior comes from Ofcom (API or Connected Nations). Bundles built
+    before the share was recorded count as fully live when any Ofcom source is listed, as they used to."""
+    share = meta.get("coverage_share")
+    if share:
+        return float(sum(v for k, v in share.items() if str(k).startswith("ofcom")))
+    return 1.0 if any(str(c).startswith("ofcom") for c in meta.get("coverage_sources", [])) else 0.0
 
 
 def rsrp_band(dbm: np.ndarray) -> np.ndarray:
@@ -420,6 +433,11 @@ def _plain(v) -> str:
     return str(v)
 
 
+def _das_plain(entries: list[str]) -> str:
+    """das_tunnels entries for people: 'km:0-2.5' -> 'km 0–2.5'."""
+    return ", ".join(f"km {e[3:].replace('-', '–')}" if e.startswith("km:") else e for e in entries)
+
+
 def _assumptions(settings: Settings) -> list[tuple[str, str]]:
     from .report_docx import POLICIES, VEHICLES
 
@@ -441,8 +459,9 @@ def _assumptions(settings: Settings) -> list[tuple[str, str]]:
         ("Distance from serving cell", f"−{cell['cell_distance']['penalty_per_km']} quality per km beyond {cell['cell_distance']['free_km']} km"),
         ("Handover", f"{cell['handover']['duration_samples']} points (≈{cell['handover']['duration_samples'] * settings.spacing_m:.0f} m), "
                      f"+{cell['handover']['latency_spike_ms']} ms, capacity ×{cell['handover']['capacity_factor']}"),
-        ("Tunnels", f"quality {cell['tunnels']['default_score']} without in-tunnel coverage; {cell['tunnels']['das_score']} where it is assumed "
-                    f"({_plain(cell['tunnels']['das_tunnels'])})"),
+        ("Tunnels", f"quality {cell['tunnels']['default_score']} without in-tunnel coverage; "
+                    + (f"{cell['tunnels']['das_score']} where it is assumed ({_das_plain(cell['tunnels']['das_tunnels'])})"
+                       if cell["tunnels"].get("das_tunnels") else "no tunnel on this route is assumed to have it")),
         ("Satellite", "; ".join(f"{p.get('name', p['id'])}: {p['terminal'].replace('_', ' ')} terminal, {p['capacity_prior_mbps'][p['terminal']]} Mbps, "
                                 f"minimum elevation {p['min_elevation_deg'][p['terminal']]}°, sky-visibility threshold {p['availability']['sky_threshold']}"
                                 for p in settings.starlink["satcom"]["providers"]) + ("" if sim.get("satcom_enabled", True) else " (not fitted in this design)")),
@@ -561,12 +580,42 @@ def write_xlsx(path: Path, ev, samples: pd.DataFrame, rc: pd.DataFrame, obs: pd.
     wb.save(path)
 
 
+def _coverage_row(meta: dict) -> tuple[str, str, str]:
+    share = live_coverage_share(meta)
+    what = "Ofcom operator coverage predictions" + (" (with Connected Nations open data)" if "ofcom_connected_nations" in meta.get("coverage_sources", []) else "")
+    if share >= LIVE_COVERAGE_MIN:
+        return ("Mobile coverage", what, "live")
+    if share > 0:
+        return ("Mobile coverage", f"{what} for {share * 100:.0f} % of the route; the rest a neutral stand-in", "partly stand-in")
+    return ("Mobile coverage", "Stand-in coverage prior", "synthetic stand-in")
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")[:40] or "x"
+
+
+def _geometry_row(meta: dict) -> tuple[str, str, str]:
+    what = "Route centreline, stations, tunnels, cuttings, line speed"
+    src = meta["geometry_source"]
+    if src == "osm":
+        legs = [str(x).replace("-", "–") for x in meta.get("geometry_straight_legs") or []]
+        if legs:
+            return (what, f"OpenStreetMap (ODbL), routed station to station, except {', '.join(legs)}: no rail path was found there, so that stretch "
+                          "is a straight line without tunnels, cuttings or line speeds", "partly stand-in")
+        return (what, "OpenStreetMap (ODbL), routed station to station", "live")
+    if src == "file":
+        return (what, "Route file supplied", "live")
+    return (what, "Approximate line through the stations (stand-in)", "synthetic stand-in")
+
+
 # ---------------------------------------------------------------- entry point
 def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.DataFrame, rc: pd.DataFrame, stations: pd.DataFrame, out_dir: Path, scenario_label: str,
                  validation: pd.DataFrame | None = None, weather: str = "nominal", baseline: dict | None = None,
-                 sensitivity: dict | None = None) -> dict[str, Path]:
+                 sensitivity: dict | None = None, variant: list[str] | None = None) -> dict[str, Path]:
     """baseline: {"title", "obs", "rc"} of the baseline configuration, when this scenario is something else (for the comparison).
-    sensitivity: tcs.sensitivity.run() for this scenario, for the ranges and the sensitivity section."""
+    sensitivity: tcs.sensitivity.run() for this scenario, for the ranges and the sensitivity section.
+    variant: what else sets the scenario apart (design title, policy, weather), added to the file names so reports on the
+    same route and preset don't overwrite each other."""
     from .report_docx import POLICIES, VEHICLES, Evidence, write_docx
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -583,14 +632,11 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
     bands = heat_bands(samples, rc, obs)
     shares = {m: band_shares(b) for m, b in bands.items()}
     live = lambda ok: "live" if ok else "synthetic stand-in"
-    cov = meta.get("coverage_sources", [])
-    geometry = {"osm": "OpenStreetMap (ODbL), routed station to station", "file": "Route file supplied", "synthetic_route": "Approximate line through the stations (stand-in)"}
     sources = [
-        ("Route centreline, stations, tunnels, cuttings, line speed", geometry.get(meta["geometry_source"], meta["geometry_source"]), live(meta["geometry_source"] in ("osm", "file"))),
+        _geometry_row(meta),
         ("Terrain and sky visibility", {"copernicus_glo30": "Copernicus DEM GLO-30 (30 m)", "synthetic_terrain": "Flat stand-in terrain"}.get(meta["terrain_source"], meta["terrain_source"]),
          live(meta["terrain_source"] != "synthetic_terrain")),
-        ("Mobile coverage", "Ofcom operator coverage predictions" if any(c.startswith("ofcom") for c in cov) else (", ".join(cov) or "Stand-in coverage prior"),
-         live(any(c.startswith("ofcom") for c in cov))),
+        _coverage_row(meta),
         ("Cell sites and handovers", {"opencellid": "OpenCellID"}.get(meta.get("cell_source", ""), meta.get("cell_source", "") or "Stand-in cell sites"), live(meta.get("cell_source") == "opencellid")),
         ("Satellite", "Predictive sky-visibility model" + (" with terminal telemetry" if any("telemetry" in str(x) for x in obs["source_flags"].unique()) else ""), "predictive"),
         ("Timetable", "Route configuration" if settings.route.get("timetable", {}).get("source", "yaml") == "yaml" else str(settings.route["timetable"]["source"]), "configured"),
@@ -630,7 +676,7 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
         operators=[op.get("name", op["id"]) for op in settings.operators], design=design,
         claims=list(presets.get(preset, {}).get("claims", [])) if preset and not design else [], info=dict(settings.report), baseline=base,
         sensitivity=sensitivity)
-    stem = f"evidence_{meta['route']['id']}_{(preset or 'baseline')}"
+    stem = "_".join([f"evidence_{meta['route']['id']}_{meta['scenario_id']}", *(_slug(v) for v in variant or [])])
     docx_path, xlsx_path = out_dir / f"{stem}.docx", out_dir / f"{stem}.xlsx"
     reference = write_docx(docx_path, ev)
     write_xlsx(xlsx_path, ev, samples, rc, obs, reference)
