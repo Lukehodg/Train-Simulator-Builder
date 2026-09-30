@@ -104,6 +104,19 @@ jobs:
           path: data/raw
           key: raw-${{ github.run_id }}-${{ github.run_attempt }}
 
+      # Each route's model inputs and outputs (route samples, coverage, serving cells, predictions; not the raw downloads)
+      # for calibrating and validating the model against field measurements, which never come to GitHub. Kept for 7 days.
+      - name: Keep each route's model data for calibration and validation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: route-data
+          path: |
+            data/interim/
+            data/processed/
+          retention-days: 7
+          if-no-files-found: ignore
+
       - name: Summarise which feeds each route used
         if: always()
         shell: python
