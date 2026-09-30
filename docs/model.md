@@ -36,7 +36,8 @@ figures (5x downloads, 10x uploads, 80 % fewer blackspots) are displayed as clai
 ## Train Studio designs
 
 `train_studio.derive()` maps a `*.train.json` consist onto: vehicle profile (EDGE Rail units -> active antenna,
-none -> handset), `units_capacity_factor = sum(0.85^k)` over roof units, satcom enabled + terminal class
+none -> handset), fitted networks = one per EDGE Rail unit in `edge_rail_networks` order (EE, Vodafone, Three, O2;
+units beyond that are not modelled), satcom enabled + terminal class
 (EDGE Mini -> Starlink Mini: 100 Mbps prior, 35° minimum elevation), AP capacity = 120 Mbps per *connected* AP
 (carriages without a switch are excluded), seats per carriage type (cab 56 / intermediate 76), and policy
 (Fleet Connect -> bonding, otherwise failover).
@@ -53,6 +54,10 @@ reason    ∈ {OPEN_SKY, TUNNEL, DEEP_CUTTING, STATION_CANOPY, URBAN_OBSTRUCTION
 ```
 
 ## Link manager
+
+Only links the train has a modem for take part: every satellite link, and the mobile networks in
+`cellular.fitted_networks` (null = all of them, a multi-SIM router; the EDGE Rail preset fits EE, Vodafone and Three,
+one antenna each). The other networks are still simulated and shown, marked "not fitted".
 
 ```
 score = 0.35·cap/250 + 0.25·(1 − lat/200) + 0.20·(1 − loss/10) + 0.10·stability + 0.10·confidence

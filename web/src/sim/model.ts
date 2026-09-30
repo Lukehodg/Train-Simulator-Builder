@@ -29,6 +29,9 @@ export function simulate(data: RouteData, sc: Scenario): SimResult {
   const cfg = sim.cellular
   const vprof = sim.vehicle.profiles[sc.vehicle]
   const das: string[] = cfg.tunnels.das_tunnels ?? []
+  // networks with a modem on the train (one per EDGE Rail antenna); null = every network. Mirrors fitted_links() in simulate.py.
+  const fittedIds: string[] | null = cfg.fitted_networks ?? null
+  const fitted = (p: { id: string; type: string }) => p.type !== 'cellular' || fittedIds === null || fittedIds.includes(p.id)
 
   for (const p of meta.providers) {
     const b = data.base[p.id]
@@ -36,7 +39,8 @@ export function simulate(data: RouteData, sc: Scenario): SimResult {
     if (p.type === 'cellular') {
       const floor = cfg.throughput.score_floor, expo = cfg.throughput.curve_exponent, h = cfg.handover
       const capPrior = p.capacity_prior_mbps as Record<string, number>
-      const unitsFactor = (Number(cfg.units_capacity_factor ?? 1) || 1) * (Number(vprof.capacity_factor ?? 1) || 1)
+      const unitsFactor = Number(vprof.capacity_factor ?? 1) || 1
+      const onTrain = fitted(p)
       for (let i = 0; i < n; i++) {
         const tun = data.inTunnel[i] === 1
         const isDas = tun && dasAt(das, data.tunnelName[i], data.distance[i] / 1000)
@@ -55,6 +59,7 @@ export function simulate(data: RouteData, sc: Scenario): SimResult {
         r.avail[i] = q > floor ? 1 : 0
         r.rsrp[i] = (b.rsrpIntercept?.[i] ?? cfg.rsrp_dbm.at_zero) + (b.rsrpSlope?.[i] ?? (cfg.rsrp_dbm.at_one - cfg.rsrp_dbm.at_zero)) * q
         r.reason[i] = tun && !isDas ? 'TUNNEL' : r.avail[i] ? 'OK' : 'NO_COVERAGE'
+        if (!onTrain) { r.avail[i] = 0; r.reason[i] = 'NOT_FITTED' }    // the network's own signal still shows; the train cannot use it
       }
     } else {
       const av = p.availability!, w = av.weather[sc.weather] ?? av.weather.nominal, prior = p.capacity_prior_mbps as number, lp = p.latency_prior_ms!
@@ -89,6 +94,7 @@ export function simulate(data: RouteData, sc: Scenario): SimResult {
   const wcfg = sim.wan, wts = wcfg.score_weights, nrm = wcfg.normalisation
   const ids = meta.providers.map(p => p.id)
   const isCell = meta.providers.map(p => p.type === 'cellular')
+  const onTrain = meta.providers.map(fitted)
   const P = ids.length
   const out: SimResult = {
     links, active: new Uint32Array(n), bonded: new Float32Array(n), lat: new Float32Array(n), loss: new Float32Array(n), conf: new Float32Array(n),
@@ -100,6 +106,7 @@ export function simulate(data: RouteData, sc: Scenario): SimResult {
     let best = -1, bs = -1, bestCell = -1, bcs = -1, bestSat = -1, bss = -1
     for (let k = 0; k < P; k++) {
       const r = links[ids[k]], conf = data.base[ids[k]].conf[i]
+      if (!onTrain[k]) { r.score[i] = score[k] = 0; continue }        // not in the router's link set at all, as in Python
       const nc = clamp(r.cap[i] / nrm.capacity_mbps, 0, 1), nl = clamp(1 - r.lat[i] / nrm.latency_ms, 0, 1), np_ = clamp(1 - r.loss[i] / nrm.packet_loss_pct, 0, 1)
       const handover = isCell[k] ? data.base[ids[k]].hp[i] > 0 : satHandover(data.distance[i] / 1000, r.q[i], data.inTunnel[i] === 1)
       const stab = handover ? 0.3 : 1

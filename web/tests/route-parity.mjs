@@ -47,7 +47,9 @@ try {
   const linkNames = mask => ids.filter((_, k) => mask & (1 << k)).join('+') || '-'
 
   for (const sc of expected.scenarios) {
-    const r = simulate(data, { policy: sc.policy, vehicle: sc.vehicle, weather: sc.weather })
+    // the fitted networks live in meta.sim, as a viewer preset or train design sets them (null = every network)
+    const run = { ...data, meta: { ...data.meta, sim: { ...data.meta.sim, cellular: { ...data.meta.sim.cellular, fitted_networks: sc.networks ?? null } } } }
+    const r = simulate(run, { policy: sc.policy, vehicle: sc.vehicle, weather: sc.weather })
     const worst = { bonded: 0, wifi: 0, conf: 0 }
     let clsBad = 0, activeBad = 0, first = null
     for (let i = 0; i < data.n; i++) {
@@ -61,7 +63,7 @@ try {
           `links ${linkNames(r.active[i])} vs ${linkNames(sc.active[i])}`
       }
     }
-    const name = `${sc.policy} / ${sc.vehicle} / ${sc.weather}`
+    const name = `${sc.policy} / ${sc.vehicle} / ${sc.weather}` + (sc.networks ? ` / ${sc.networks.join('+')} fitted` : '')
     if (first === null) continue
     failures++
     console.error(`FAIL ${name}: max diff bonded ${worst.bonded.toFixed(4)} Mbps, wifi ${worst.wifi.toFixed(4)}, conf ${worst.conf.toFixed(4)}; ` +

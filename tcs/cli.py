@@ -51,18 +51,7 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     interim = _interim(s)
     console.rule(f"[bold]{s.route['name']} · {s.route['origin_crs']} → {s.route['destination_crs']}")
     if preset:
-        pr = s.sim.get("presets", {}).get(preset)
-        if pr is None:
-            raise typer.BadParameter(f"unknown preset '{preset}'; available: {', '.join(s.sim.get('presets', {}))}")
-        if pr.get("vehicle_profile"):
-            s.sim["vehicle"]["profile"] = pr["vehicle_profile"]
-        if pr.get("policy"):
-            s.sim["wan"]["policy"] = pr["policy"]
-        if pr.get("bonding_efficiency"):
-            s.sim["wan"]["bonding_efficiency"] = float(pr["bonding_efficiency"])
-        if "satcom_enabled" in pr:
-            s.sim["satcom_enabled"] = bool(pr["satcom_enabled"])
-        s.sim["active_preset"] = preset
+        pr = _apply_preset(s, preset)
         console.log(f"preset: {pr.get('label', preset)}")
     design_path = train or (Path(s.sim.get("train", {}).get("design_file")) if s.sim.get("train", {}).get("design_file") else None)
     if design_path:
@@ -109,6 +98,25 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     _summary(rc, obs)
     for k, v in written.items():
         console.log(f"[dim]{k}[/dim] {v}")
+
+
+def _apply_preset(s, preset: str) -> dict:
+    """Apply a named scenario preset from simulation.yaml to the settings; returns the preset."""
+    pr = s.sim.get("presets", {}).get(preset)
+    if pr is None:
+        raise typer.BadParameter(f"unknown preset '{preset}'; available: {', '.join(s.sim.get('presets', {}))}")
+    if pr.get("vehicle_profile"):
+        s.sim["vehicle"]["profile"] = pr["vehicle_profile"]
+    if pr.get("policy"):
+        s.sim["wan"]["policy"] = pr["policy"]
+    if pr.get("bonding_efficiency"):
+        s.sim["wan"]["bonding_efficiency"] = float(pr["bonding_efficiency"])
+    if "satcom_enabled" in pr:
+        s.sim["satcom_enabled"] = bool(pr["satcom_enabled"])
+    if "fitted_networks" in pr:                                # e.g. three EDGE Rail antennas, one network each
+        s.sim["cellular"]["fitted_networks"] = None if pr["fitted_networks"] is None else list(pr["fitted_networks"])
+    s.sim["active_preset"] = preset
+    return pr
 
 
 def _check_overrides(s, policy: str | None, weather: str) -> None:
@@ -251,18 +259,7 @@ def _build_report(route: str | None, preset: str | None, train: Path | None, pol
     label_parts = []
     variant = []                                               # what else sets this scenario apart, for the file name
     if preset:
-        pr = s.sim.get("presets", {}).get(preset)
-        if pr is None:
-            raise typer.BadParameter(f"unknown preset '{preset}'")
-        if pr.get("vehicle_profile"):
-            s.sim["vehicle"]["profile"] = pr["vehicle_profile"]
-        if pr.get("policy"):
-            s.sim["wan"]["policy"] = pr["policy"]
-        if pr.get("bonding_efficiency"):
-            s.sim["wan"]["bonding_efficiency"] = float(pr["bonding_efficiency"])
-        if "satcom_enabled" in pr:
-            s.sim["satcom_enabled"] = bool(pr["satcom_enabled"])
-        s.sim["active_preset"] = preset
+        pr = _apply_preset(s, preset)
         label_parts.append(pr.get("label", preset))
     if train:
         from .sources.train_studio import apply_to_settings, load_design

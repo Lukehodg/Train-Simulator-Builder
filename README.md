@@ -57,10 +57,11 @@ Two optional inputs shape the onboard side:
 - `tcs run --train examples/azuma-5car.train.json` reads a **Train Studio** project (the Train Diagram Builder is
   hosted in the viewer at `/train-builder/index.html`): carriages, EDGE Rail roof units, EDGE Mini / SATCOM
   terminals, switches, access points and Fleet Connect become the vehicle profile, satcom terminal class, AP
-  capacity, seat count, cellular aggregation factor and link policy (`simulation.yaml` -> `train:`).
+  capacity, seat count, fitted mobile networks (one per EDGE Rail unit, in the order of `edge_rail_networks`) and
+  link policy (`simulation.yaml` -> `train:`).
 - `tcs run --preset edge_rail_fleet_connect` applies the **EDGE Rail 5G active antenna + Fleet Connect** scenario
-  (active-antenna link budget, 4x4 MIMO throughput factor, aggregation of every cellular network and the satcom
-  link at once). Both are also available live in the viewer, with KPIs shown against the baseline.
+  (active-antenna link budget, 4x4 MIMO throughput factor; three antennas, one each on EE, Vodafone and Three,
+  aggregated with the satcom link at once; O2 has no modem on the train). Both are also available live in the viewer, with KPIs shown against the baseline.
 
 ## Giving it to someone else
 
@@ -103,7 +104,7 @@ A Word report laid out for a tender submission, and an Excel data appendix, per 
   - validation status, assumptions and limitations
   - sensitivity to the main assumptions: the simulation re-run with each uncertain assumption (mobile capacity,
     coverage prediction error, satellite capacity, passengers online, and where they apply the EDGE Rail antenna
-    benefit and extra roof units) set pessimistically and optimistically, one at a time and all together. The
+    benefit) set pessimistically and optimistically, one at a time and all together. The
     resulting ranges are quoted on the cover, in the headline table and in the executive summary.
 - **Appendices:** a landscape table of results by section, and a glossary.
 

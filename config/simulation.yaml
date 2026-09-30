@@ -23,7 +23,10 @@ cellular:
   tunnels:
     default_score: 0.04                 # no dedicated infrastructure
     das_score: 0.52                     # tunnels with in-tunnel coverage: each route lists its own (das_tunnels in its route config)
-  units_capacity_factor: 1.0          # set from the Train Studio design: sum(decay^k) over roof cellular units
+  # Networks with a modem on the train: each EDGE Rail antenna carries one network's SIM, and only these take part in
+  # the onboard link management. null = every network in networks.yaml (a multi-SIM rack router); set by the presets
+  # and by a Train Studio design.
+  fitted_networks: null
   # score -> radio metric mapping (flagged synthetic unless calibrated against measurements)
   rsrp_dbm: {at_zero: -120, at_one: -74}
   sinr_db:  {at_zero: -5,   at_one: 25}
@@ -79,7 +82,7 @@ train:
   design_file: null
   seats: {cabL: 56, mid: 76, cabR: 56}          # passengers per carriage type (used for the Wi-Fi demand model)
   ap_capacity_mbps_each: 120                     # usable throughput per connected access point
-  unit_capacity_decay: 0.85                      # 2nd, 3rd... EDGE Rail unit adds 0.85, 0.72... of one unit's capacity per operator
+  edge_rail_networks: [ee, vodafone, three, o2]  # network of the 1st, 2nd, 3rd... EDGE Rail unit (one SIM each)
   satcom_terminal_by_preset: {edge-mini: mini, starlink: performance, oneweb: performance, satcom: performance}
   default_satcom_terminal: performance
   edge_rail_profile: EDGE_RAIL_ACTIVE_ANTENNA    # vehicle profile when the design has EDGE Rail units
@@ -93,7 +96,8 @@ presets:
   edge_rail_fleet_connect:
     label: "EDGE Rail 5G active antenna + Fleet Connect"
     vehicle_profile: EDGE_RAIL_ACTIVE_ANTENNA
-    policy: PACKET_BONDING           # Fleet Connect aggregates every cellular network and the satcom link at once
+    policy: PACKET_BONDING           # Fleet Connect aggregates the fitted networks and the satcom link at once
     bonding_efficiency: 0.85         # assumption for Fleet Connect's aggregation vs the generic 0.82
+    fitted_networks: [ee, vodafone, three]   # three EDGE Rail antennas, each on its own network
     satcom_enabled: true
     claims: ["5x faster downloads", "10x faster uploads", "80% reduced blackspots"]   # Motion Applied marketing figures, not used by the model

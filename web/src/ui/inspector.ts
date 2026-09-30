@@ -123,7 +123,7 @@ function renderSample(store: Store, i: number) {
       if (dp > 0.005) rows.push([`cell ${dk.toFixed(1)} km away`, `−${dp.toFixed(2)}`])
       if (vprof.score_offset) rows.push([vprof.score_offset < 0 ? 'carriage penetration loss' : `active antenna (+${vprof.db_offset} dB)`, `${vprof.score_offset > 0 ? '+' : ''}${vprof.score_offset.toFixed(2)}`])
       if (vprof.capacity_factor && vprof.capacity_factor !== 1) rows.push(['antenna / MIMO factor', `×${vprof.capacity_factor}`])
-      if (cfg.units_capacity_factor && cfg.units_capacity_factor !== 1) rows.push(['roof units aggregation', `×${Number(cfg.units_capacity_factor).toFixed(2)}`])
+      if (L.reason[i] === 'NOT_FITTED') rows.push(['on this train', 'not fitted: no modem for this network, so the router cannot use it'])
       if (d.inTunnel[i]) rows.push(['tunnel', L.q[i] > 0.1 ? `in-tunnel coverage assumed → ${cfg.tunnels.das_score}` : `no coverage → ${cfg.tunnels.default_score}`])
       if (b.hp[i] > 0) rows.push(['handover', `+${cfg.handover.latency_spike_ms} ms · ×${cfg.handover.capacity_factor}`])
     } else {

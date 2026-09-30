@@ -375,3 +375,39 @@ def test_build_all_refuses_unknown_route_ids():
 
     res = CliRunner().invoke(app, ["build-all", "--offline", "--only", "tpe_man_nc"])
     assert res.exit_code != 0 and "tpe_man_nc" in res.output
+
+
+def test_edge_rail_bonds_only_the_three_fitted_networks():
+    """Three EDGE Rail antennas, each on its own network (EE, Vodafone, Three), bonded with the satellite: O2 has no
+    modem on the train, so it must never be an active link, while the viewer bundle still carries all four."""
+    from tcs.cli import _apply_preset
+    from tcs.model.simulate import simulate
+    from tcs.pipeline.join_cells import candidate_cells, corridor_cells, serving_cells
+    from tcs.pipeline.join_coverage import coverage_prior
+    from tcs.pipeline.movement import movement
+    from tcs.pipeline.obstruction import enrich_terrain
+    from tcs.pipeline.sample_route import build_route
+    from tcs.report import networks_text
+
+    s = load_settings(offline=True)
+    s.route["sample_spacing_m"] = 2000
+    s.terrain["horizon_azimuths"], s.terrain["horizon_reach_m"] = 4, 1000
+    b = build_route(s)
+    b.samples = enrich_terrain(s, b)
+    prior, b.samples = coverage_prior(s, b)
+    serving = serving_cells(s, b.samples, candidate_cells(s, b.samples, corridor_cells(s, b, b.samples)))
+    b.samples, _ = movement(s, b.samples, b.stations)
+    _, rc_all = simulate(s, b.samples, prior, serving)
+
+    _apply_preset(s, "edge_rail_fleet_connect")
+    assert s.sim["cellular"]["fitted_networks"] == ["ee", "vodafone", "three"]
+    obs, rc = simulate(s, b.samples, prior, serving)
+    assert set(obs["provider_id"]) >= {"ee", "o2", "vodafone", "three"}               # every network, for the viewer
+    active = {p for a in rc["active_links"] for p in str(a).split("+") if p}
+    assert "o2" not in active and {"ee", "vodafone", "three"} & active
+    assert "o2" in {p for a in rc_all["active_links"] for p in str(a).split("+") if p}   # the baseline router has all four
+    assert networks_text(s) == "EE, Vodafone, Three (one EDGE Rail antenna each; O2 not fitted)"
+
+    s.sim["cellular"]["fitted_networks"] = ["ee", "o3"]
+    with pytest.raises(ValueError, match="o3"):
+        simulate(s, b.samples, prior, serving)
