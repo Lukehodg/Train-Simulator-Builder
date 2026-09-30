@@ -12,9 +12,30 @@ from .satcom import satcom_observations
 from .wifi import passenger_wifi
 
 
+def fitted_networks(settings: Settings) -> list[str] | None:
+    """Mobile networks with a modem on the train (one per EDGE Rail antenna), or None when every network has one."""
+    ids = settings.sim["cellular"].get("fitted_networks")
+    if ids is None:
+        return None
+    known = {op["id"] for op in settings.operators}
+    unknown = sorted(set(ids) - known)
+    if unknown:
+        raise ValueError(f"fitted_networks names unknown network(s) {unknown}; networks.yaml has {sorted(known)}")
+    return [op["id"] for op in settings.operators if op["id"] in set(ids)]      # in networks.yaml order
+
+
+def fitted_links(settings: Settings, obs: pd.DataFrame) -> pd.DataFrame:
+    """The observations the onboard router can use: every satellite link, and the fitted mobile networks."""
+    fitted = fitted_networks(settings)
+    if fitted is None:
+        return obs
+    return obs[(obs["provider_type"] != "cellular") | obs["provider_id"].isin(fitted)]
+
+
 def simulate(settings: Settings, samples: pd.DataFrame, prior: pd.DataFrame, serving: pd.DataFrame, *, calibration: dict | None = None,
              measured_sample_ids: set[int] | None = None, weather: str = "nominal", policy: str | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Returns (provider_observation long table, route_connectivity table)."""
+    """Returns (provider_observation long table, route_connectivity table). The observations cover every network, so the
+    viewer can switch scenarios; the connectivity uses only the fitted ones (fitted_links)."""
     cell = cellular_observations(settings, samples, prior, serving, calibration=calibration)
     cell["confidence"] = cellular_confidence(settings, cell, measured_sample_ids, calibrated=bool(calibration))
     cell = cell.drop(columns=[c for c in cell.columns if c.startswith("_")])
@@ -22,11 +43,12 @@ def simulate(settings: Settings, samples: pd.DataFrame, prior: pd.DataFrame, ser
     obs = pd.concat([cell, sat], ignore_index=True)
     obs["serving_distance_m"] = obs["serving_distance_m"].astype(np.float32)
 
-    wan = link_manager(settings, obs, policy=policy)
+    links = fitted_links(settings, obs)                      # only networks with a modem on the train reach the router
+    wan = link_manager(settings, links, policy=policy)
     wifi = passenger_wifi(settings, samples, wan)
     rc = wan.merge(wifi, on="sample_id").merge(samples[["sample_id", "timestamp_sim", "distance_m"]], on="sample_id")
     rc["route_id"] = settings.route_id
-    flags = obs.groupby("sample_id")["source_flags"].agg(lambda s: "|".join(sorted({f for x in s for f in str(x).split("|")})))
+    flags = links.groupby("sample_id")["source_flags"].agg(lambda s: "|".join(sorted({f for x in s for f in str(x).split("|")})))
     rc["source_flags"] = rc["sample_id"].map(flags)
     rc["model_version"] = settings.sim["model_version"]
     cols = ["sample_id", "route_id", "timestamp_sim", "distance_m", "active_links", "wan_policy", "bonded_capacity_mbps", "effective_latency_ms",

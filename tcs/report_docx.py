@@ -94,6 +94,7 @@ class Evidence:
     info: dict                                   # config/report.yaml
     baseline: dict | None = None                 # {"title", "k", "shares"} when this scenario is not the baseline
     sensitivity: dict | None = None              # tcs.sensitivity.run(): results with the main assumptions varied
+    networks: str = ""                           # the fitted networks in words, e.g. "EE, Vodafone, Three (one EDGE Rail antenna each; O2 not fitted)"
     generated: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -617,11 +618,18 @@ class _Report:
         whom = f" for {ev.info['prepared_for']}" if ev.info.get("prepared_for") else ""
         ref = f" ({ev.info['tender_reference']})" if ev.info.get("tender_reference") else ""
         sat = f"the {ev.satcom} satellite link" if ev.satcom != "no satellite link" else "no satellite link"
+        scenario = 'the baseline configuration' if ev.scenario_title.startswith('Baseline') else 'the ' + ev.scenario_title + ('' if ev.design else ' scenario')
+        policy = ev.policy.split(' (')[0].lower()
+        if "one EDGE Rail antenna each" in ev.networks:            # one antenna per network, e.g. three on EE, Vodafone and Three
+            count = {1: "one", 2: "two", 3: "three", 4: "four"}.get(len(ev.operators), str(len(ev.operators)))
+            kit = (f"{count} {ev.vehicle}{'s' if len(ev.operators) != 1 else ''}, one each on the {_and(ev.operators)} mobile networks, "
+                   f"combined with {sat} by {policy}")
+        else:
+            kit = (f"{_a(ev.vehicle.lower() if not ev.vehicle.startswith('EDGE') else ev.vehicle)} with {policy}, "
+                   f"across the {_and(ev.operators)} mobile networks and {sat}")
         self.para(f"This document sets out the predicted onboard connectivity{whom}{ref} for passengers travelling on the {ev.route_name} "
                   f"between {ev.origin} and {ev.destination}: {k['route_length_km']:.0f} km in {_hours(k['journey_minutes'])}. It models "
-                  f"{'the baseline configuration' if ev.scenario_title.startswith('Baseline') else 'the ' + ev.scenario_title + ('' if ev.design else ' scenario')}, "
-                  f"{_a(ev.vehicle.lower() if not ev.vehicle.startswith('EDGE') else ev.vehicle)} with {ev.policy.split(' (')[0].lower()}, "
-                  f"across the {_and(ev.operators)} mobile networks and {sat}.")
+                  f"{scenario}, {kit}.")
         self.doc.add_heading("Key findings", 3)
         findings: list[list[tuple[str, bool]]] = [
             [("Video calls and streaming ", False), (f"are supported over {_share(k['streaming_share_pct'])} % of the journey", True),
@@ -698,7 +706,7 @@ class _Report:
                  ("Length and journey time", f"{k['route_length_km']:.1f} km; {_hours(k['journey_minutes'])} from departure to arrival"),
                  ("Calling pattern", ", ".join(calling)),
                  ("Scenario", ev.scenario_title), ("Onboard antenna", ev.vehicle), ("Link management", ev.policy),
-                 ("Mobile networks", ", ".join(ev.operators)), ("Satellite", ev.satcom), ("Passenger load", ev.passengers),
+                 ("Mobile networks", ev.networks or ", ".join(ev.operators)), ("Satellite", ev.satcom), ("Passenger load", ev.passengers),
                  ("Resolution", f"Every {ev.meta['route']['sample_spacing_m']} m along the railway ({ev.meta['n_samples']:,} points)")],
                 "Scope of the assessment")
         self.h2("How to read this document")
@@ -780,7 +788,7 @@ class _Report:
         ev = self.ev
         self.h1("Onboard configuration")
         rows = [("Scenario", ev.scenario_title), ("Antenna and modem", ev.vehicle), ("Link management", ev.policy),
-                ("Mobile networks", ", ".join(ev.operators)), ("Satellite", ev.satcom), ("Passenger load", ev.passengers)]
+                ("Mobile networks", ev.networks or ", ".join(ev.operators)), ("Satellite", ev.satcom), ("Passenger load", ev.passengers)]
         d = ev.design
         if d:
             rows += [("Train design", f"{d.get('title')}: {d.get('n_carriages')} carriages"),

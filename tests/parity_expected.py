@@ -47,22 +47,28 @@ def main() -> int:
     order = [p["id"] for p in meta["providers"]]
     bit = {pid: 1 << k for k, pid in enumerate(order)}
     weathers = sorted({w for p in s.starlink["satcom"]["providers"] for w in p["availability"]["weather"]} | {"nominal"})
+    # every network (a multi-SIM router), and the networks the EDGE Rail preset fits (one antenna each)
+    fitted_sets = [None, *{tuple(pr["fitted_networks"]) for pr in s.sim.get("presets", {}).values() if pr.get("fitted_networks")}]
 
     scenarios = []
     for policy in POLICIES:
         for vehicle in s.sim["vehicle"]["profiles"]:
             for weather in weathers:
-                s.sim["vehicle"]["profile"] = vehicle
-                _, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, policy=policy)
-                scenarios.append({
-                    "policy": policy, "vehicle": vehicle, "weather": weather,
-                    # float32 -> float64 before rounding, or the JSON keeps float32 artefacts (765.2064819335938)
-                    "bonded": rc["bonded_capacity_mbps"].astype(float).round(4).tolist(),
-                    "wifi": rc["wifi_service_score"].astype(float).round(4).tolist(),
-                    "conf": rc["confidence"].astype(float).round(4).tolist(),
-                    "cls": [CLASSES.index(c) for c in rc["service_class"]],
-                    "active": [sum(bit[p] for p in a.split("+")) if a else 0 for a in rc["active_links"]],
-                })
+                for networks in fitted_sets:
+                    if networks and policy not in ("PACKET_BONDING", "FAILOVER"):
+                        continue                                      # the fitted set only changes which links compete
+                    s.sim["vehicle"]["profile"] = vehicle
+                    s.sim["cellular"]["fitted_networks"] = list(networks) if networks else None
+                    _, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, policy=policy)
+                    scenarios.append({
+                        "policy": policy, "vehicle": vehicle, "weather": weather, "networks": list(networks) if networks else None,
+                        # float32 -> float64 before rounding, or the JSON keeps float32 artefacts (765.2064819335938)
+                        "bonded": rc["bonded_capacity_mbps"].astype(float).round(4).tolist(),
+                        "wifi": rc["wifi_service_score"].astype(float).round(4).tolist(),
+                        "conf": rc["confidence"].astype(float).round(4).tolist(),
+                        "cls": [CLASSES.index(c) for c in rc["service_class"]],
+                        "active": [sum(bit[p] for p in a.split("+")) if a else 0 for a in rc["active_links"]],
+                    })
     out = args.out or (s.paths()["processed"] / "parity_expected.json")
     out.write_text(json.dumps({"route_id": s.route_id, "n": len(b.samples), "providers": order, "scenarios": scenarios}), encoding="utf-8")
     print(f"{len(scenarios)} scenarios x {len(b.samples)} samples -> {out}")

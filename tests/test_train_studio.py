@@ -34,7 +34,7 @@ def test_derive_design(tmp_path):
     assert d.passengers == 56 + 76 * 3 + 56
     assert d.fleet_connect and d.policy == "PACKET_BONDING"
     assert d.vehicle_profile == "EDGE_RAIL_ACTIVE_ANTENNA"
-    assert abs(d.units_capacity_factor - (1 + 0.85 + 0.85 ** 2)) < 1e-6
+    assert d.fitted_networks == ["ee", "vodafone", "three"]     # three EDGE Rail units, one network each
     assert d.ap_capacity_mbps == 120 * 5
     assert any("no switch" in w for w in d.warnings)
 
@@ -51,6 +51,7 @@ def test_apply_to_settings(tmp_path):
     assert s.starlink["satcom"]["providers"][0]["terminal"] == "mini"
     assert s.sim["satcom_enabled"] is True
     assert s.sim["train"]["design"]["n_carriages"] == 5
+    assert s.sim["cellular"]["fitted_networks"] == ["ee", "vodafone", "three"]
 
 
 def test_no_satcom_no_units(tmp_path):
@@ -63,7 +64,7 @@ def test_no_satcom_no_units(tmp_path):
     d = derive(load_project(f), s.sim["train"])
     assert d.cellular_units == 0 and d.vehicle_profile == "PASSENGER_HANDSET_INSIDE_CARRIAGE" and d.policy == "FAILOVER"
     apply_to_settings(s, d)
-    assert s.sim["satcom_enabled"] is False and s.sim["cellular"]["units_capacity_factor"] == 1.0
+    assert s.sim["satcom_enabled"] is False and s.sim["cellular"]["fitted_networks"] is None   # passengers' own phones
 
 
 def test_rejects_foreign_file(tmp_path):

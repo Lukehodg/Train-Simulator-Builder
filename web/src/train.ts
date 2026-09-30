@@ -9,7 +9,7 @@ import type { Meta, Policy, Vehicle } from './types'
 export interface Carriage { index: number; type: string; aps: number; switch: boolean; cellular_units: number; fleet_connect: boolean; satcom_units: number; custom: string[]; aps_connected: number }
 export interface TrainDesign {
   title: string; carriages: Carriage[]; cellular_units: number; satcom_units: number; satcom_terminal: string | null; aps_total: number; aps_connected: number
-  fleet_connect: boolean; passengers: number; vehicle_profile: Vehicle; policy: Policy; units_capacity_factor: number; ap_capacity_mbps: number; warnings: string[]; source_file?: string | null
+  fleet_connect: boolean; passengers: number; vehicle_profile: Vehicle; policy: Policy; fitted_networks: string[] | null; ap_capacity_mbps: number; warnings: string[]; source_file?: string | null
 }
 
 const SAT_PRESETS = new Set(['starlink', 'oneweb', 'satcom', 'edge-mini'])
@@ -73,9 +73,9 @@ export function derive(project: any, tcfg: any): TrainDesign {
     satUnits += satHere
   })
   const cellUnits = cars.reduce((a, c) => a + c.cellular_units, 0)
-  const decay = Number(tcfg?.unit_capacity_decay ?? 0.85)
-  if (!Number.isFinite(decay) || decay < 0 || decay > 1) throw new Error('unit_capacity_decay must be between 0 and 1')
-  const unitsFactor = decay === 1 ? cellUnits : (1 - Math.pow(decay, cellUnits)) / (1 - decay)
+  // each EDGE Rail unit carries one network's SIM: the 1st unit the first network in the list, and so on (as train_studio.py)
+  const order: string[] = (tcfg?.edge_rail_networks ?? ['ee', 'vodafone', 'three', 'o2']).map(String)
+  if (cellUnits > order.length) warnings.push(`${cellUnits} EDGE Rail units but ${order.length} networks to put them on: the extra ${cellUnits - order.length} are not modelled`)
   const fleet = cars.some(c => c.fleet_connect)
   const apsConnected = cars.reduce((a, c) => a + c.aps_connected, 0)
   const d: TrainDesign = {
@@ -84,7 +84,7 @@ export function derive(project: any, tcfg: any): TrainDesign {
     passengers: cars.reduce((a, c) => a + Number(seats[c.type] ?? seats.mid ?? 76), 0),
     vehicle_profile: cellUnits > 0 ? (tcfg?.edge_rail_profile ?? 'EDGE_RAIL_ACTIVE_ANTENNA') : 'PASSENGER_HANDSET_INSIDE_CARRIAGE',
     policy: (fleet ? tcfg?.fleet_connect_policy ?? 'PACKET_BONDING' : tcfg?.no_fleet_connect_policy ?? 'FAILOVER') as Policy,
-    units_capacity_factor: Math.round(unitsFactor * 1e4) / 1e4, ap_capacity_mbps: Number(tcfg?.ap_capacity_mbps_each ?? 120) * apsConnected, warnings,
+    fitted_networks: cellUnits ? order.slice(0, cellUnits) : null, ap_capacity_mbps: Number(tcfg?.ap_capacity_mbps_each ?? 120) * apsConnected, warnings,
   }
   if (cellUnits === 0) d.warnings.push('No EDGE Rail units: cellular modelled as passenger handsets inside the carriage')
   if (satUnits === 0) d.warnings.push('No SATCOM terminal: satellite link disabled')
@@ -98,7 +98,7 @@ export function applyDesign(meta: Meta, d: TrainDesign | null, baseline: Meta): 
   if (!d) return m
   m.sim.vehicle.profile = d.vehicle_profile
   m.sim.wan.policy = d.policy
-  m.sim.cellular.units_capacity_factor = d.cellular_units ? d.units_capacity_factor : 1
+  m.sim.cellular.fitted_networks = d.fitted_networks
   m.sim.passenger_wifi.passengers = d.passengers
   m.sim.passenger_wifi.ap_capacity_mbps = Math.max(0, d.ap_capacity_mbps)
   m.sim.satcom_enabled = d.satcom_units > 0
@@ -118,7 +118,7 @@ export function designFromMeta(meta: Meta): TrainDesign | null {
 }
 
 /** Consist strip + equipment table + derived parameters, as HTML. */
-export function renderDesign(d: TrainDesign | null, sourceLabel: string): string {
+export function renderDesign(d: TrainDesign | null, sourceLabel: string, names: Record<string, string> = {}): string {
   if (!d) {
     return `<div class="empty">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="12" rx="2"/><path d="M7 20l-2 2M17 20l2 2M4 10h16"/></svg>
@@ -140,7 +140,7 @@ export function renderDesign(d: TrainDesign | null, sourceLabel: string): string
   let h = `<div class="train-head"><div><div class="train-title">${esc(d.title)}</div><div class="hint" style="margin:0">${esc(sourceLabel)}</div></div></div>`
   h += `<div class="consist">${cars}</div>`
   h += `<h4>Equipment</h4><div class="wan">${kv('Carriages', String(d.carriages.length))}${kv('EDGE Rail (cellular roof units)', String(d.cellular_units))}${kv('SATCOM terminals', d.satcom_units ? `${d.satcom_units} · ${esc(d.satcom_terminal)}` : 'none')}${kv('Access points (connected)', `${d.aps_connected} / ${d.aps_total}`)}${kv('Fleet Connect', d.fleet_connect ? 'yes' : 'no')}</div>`
-  h += `<h4>What the model uses</h4><div class="wan">${kv('Vehicle profile', d.vehicle_profile === 'EDGE_RAIL_ACTIVE_ANTENNA' ? 'EDGE Rail active antenna' : d.vehicle_profile === 'EXTERNAL_ROOFTOP_ANTENNA' ? 'passive rooftop antenna' : 'handset in carriage')}${kv('Link policy', d.policy.toLowerCase().replace(/_/g, ' '))}${kv('Cellular capacity factor', `×${d.units_capacity_factor.toFixed(2)}`)}${kv('Wi-Fi AP capacity', `${d.ap_capacity_mbps.toFixed(0)} Mbps`)}${kv('Seats (demand model)', String(d.passengers))}${kv('Satcom', d.satcom_units ? `enabled · ${esc(d.satcom_terminal)} terminal` : 'disabled')}</div>`
+  h += `<h4>What the model uses</h4><div class="wan">${kv('Vehicle profile', d.vehicle_profile === 'EDGE_RAIL_ACTIVE_ANTENNA' ? 'EDGE Rail active antenna' : d.vehicle_profile === 'EXTERNAL_ROOFTOP_ANTENNA' ? 'passive rooftop antenna' : 'handset in carriage')}${kv('Link policy', d.policy.toLowerCase().replace(/_/g, ' '))}${kv('Mobile networks', d.fitted_networks ? esc(d.fitted_networks.map(id => names[id] ?? id).join(' + ')) + ' (one per unit)' : 'passengers\' own phones')}${kv('Wi-Fi AP capacity', `${d.ap_capacity_mbps.toFixed(0)} Mbps`)}${kv('Seats (demand model)', String(d.passengers))}${kv('Satcom', d.satcom_units ? `enabled · ${esc(d.satcom_terminal)} terminal` : 'disabled')}</div>`
   if (d.warnings.length) h += `<h4>Notes</h4><ul class="train-warn">${d.warnings.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`
   h += `<p class="hint">Terminal field of view (Mini 35°, Performance 20°) changes the sky-visibility mask, which is computed by the pipeline: run <code>tcs run --train &lt;file&gt;</code> for that part; everything else applies here instantly.</p>`
   return h

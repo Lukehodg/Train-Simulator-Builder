@@ -104,9 +104,8 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
     usable = np.clip((q - floor) / (1 - floor), 0, 1) ** cfg["throughput"]["curve_exponent"]
     # Mild speed effect (Doppler / scheduler) and multi-cell variance from the serving distance.
     speed_f = 1 - 0.08 * np.clip(df["speed_kph"].fillna(0).values / 200, 0, 1)
-    units = float(cfg.get("units_capacity_factor", 1.0) or 1.0)       # several roof units per operator (Train Studio design)
     vcap = float(vprof.get("capacity_factor", 1.0) or 1.0)             # antenna/MIMO class (EDGE Rail 4x4 vs passive 2x2)
-    cap = cap_prior * usable * speed_f * (1 - (1 - hcfg["capacity_factor"]) * hp) * units * vcap
+    cap = cap_prior * usable * speed_f * (1 - (1 - hcfg["capacity_factor"]) * hp) * vcap
     lat = cfg["latency_ms"]["base"] + cfg["latency_ms"]["at_zero_extra"] * (1 - q) + hcfg["latency_spike_ms"] * hp
     loss = _interp_loss(q, cfg["packet_loss_pct"]) + hcfg["packet_loss_pct"] * hp
     avail = q > floor

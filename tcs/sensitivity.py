@@ -65,7 +65,7 @@ def _online_share(share: float):
 
 
 def cases(s: Settings) -> list[Case]:
-    """The assumptions varied for this scenario; the antenna and roof-unit cases apply only where they are in play."""
+    """The assumptions varied for this scenario; the antenna case applies only where EDGE Rail antennas are fitted."""
     online = float(s.sim["passenger_wifi"]["active_share"])
     out = [
         Case("cellular", "Mobile network capacity (cell load, spectrum)", "mobile network capacity", "×0.6 (busy cells)", "×1.3",
@@ -88,12 +88,6 @@ def cases(s: Settings) -> list[Case]:
             tv["capacity_factor"] = 1 + (factor - 1) / 2            # the coverage shift in the all-together case
         out.append(Case("antenna", "EDGE Rail antenna benefit", "the EDGE Rail antenna's assumed benefit", f"half the assumed gain (+{gain / 2:g} dB, ×{1 + (factor - 1) / 2:.2f})",
                         "as assumed", weaker_antenna, None))
-    units = float(s.sim["cellular"].get("units_capacity_factor", 1.0) or 1.0)
-    if units > 1.0:
-        def fewer_units(t: Settings) -> None:
-            t.sim["cellular"]["units_capacity_factor"] = 1 + (units - 1) / 2
-        out.append(Case("units", "Capacity added by extra roof units", "the capacity added by extra roof units", f"half the assumed gain (×{1 + (units - 1) / 2:.2f})",
-                        f"as assumed (×{units:.2f})", fewer_units, None))
     return out
 
 

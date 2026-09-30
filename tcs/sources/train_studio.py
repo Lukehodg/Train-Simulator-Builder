@@ -93,7 +93,7 @@ class TrainDesign:
     passengers: int
     vehicle_profile: str
     policy: str
-    units_capacity_factor: float
+    fitted_networks: list[str] | None                    # one network per EDGE Rail unit; None = no units (passenger handsets)
     ap_capacity_mbps: float
     warnings: list[str] = field(default_factory=list)
     source_file: str | None = None
@@ -143,10 +143,10 @@ def derive(project: dict, tcfg: dict, satcom_cfg: dict | None = None) -> TrainDe
                              satcom_units=sat_here, custom=[types[t]["name"] for t in custom_on], aps_connected=aps if sw else 0))
         sat_units += sat_here
     cell_units = sum(c.cellular_units for c in cars)
-    decay = float(tcfg.get("unit_capacity_decay", 0.85))
-    if not math.isfinite(decay) or not 0 <= decay <= 1:
-        raise ValueError("unit_capacity_decay must be between 0 and 1")
-    units_factor = float(cell_units) if decay == 1 else (1 - decay ** cell_units) / (1 - decay)
+    # Each EDGE Rail unit carries one network's SIM: the 1st unit the first network in the list, and so on.
+    order = [str(x) for x in tcfg.get("edge_rail_networks", ["ee", "vodafone", "three", "o2"])]
+    if cell_units > len(order):
+        warnings.append(f"{cell_units} EDGE Rail units but {len(order)} networks to put them on: the extra {cell_units - len(order)} are not modelled")
     fleet = any(c.fleet_connect for c in cars)
     aps_connected = sum(c.aps_connected for c in cars)
     passengers = sum(int(seats.get(c.type, seats.get("mid", 76))) for c in cars)
@@ -155,7 +155,7 @@ def derive(project: dict, tcfg: dict, satcom_cfg: dict | None = None) -> TrainDe
         satcom_terminal=sat_terminal if sat_units else None, aps_total=sum(c.aps for c in cars), aps_connected=aps_connected, fleet_connect=fleet,
         passengers=passengers, vehicle_profile=tcfg.get("edge_rail_profile", "EDGE_RAIL_ACTIVE_ANTENNA") if cell_units > 0 else "PASSENGER_HANDSET_INSIDE_CARRIAGE",
         policy=tcfg.get("fleet_connect_policy", "PACKET_BONDING") if fleet else tcfg.get("no_fleet_connect_policy", "FAILOVER"),
-        units_capacity_factor=round(units_factor, 4), ap_capacity_mbps=float(tcfg.get("ap_capacity_mbps_each", 120)) * aps_connected, warnings=warnings,
+        fitted_networks=order[:cell_units] if cell_units else None, ap_capacity_mbps=float(tcfg.get("ap_capacity_mbps_each", 120)) * aps_connected, warnings=warnings,
     )
     if cell_units == 0:
         design.warnings.append("no EDGE Rail units: cellular modelled as passenger handsets inside the carriage")
@@ -171,7 +171,7 @@ def apply_to_settings(settings, design: TrainDesign) -> None:
     sim = settings.sim
     sim["vehicle"]["profile"] = design.vehicle_profile
     sim["wan"]["policy"] = design.policy
-    sim["cellular"]["units_capacity_factor"] = design.units_capacity_factor if design.cellular_units else 1.0
+    sim["cellular"]["fitted_networks"] = design.fitted_networks
     sim["passenger_wifi"]["passengers"] = design.passengers
     sim["passenger_wifi"]["ap_capacity_mbps"] = max(0.0, design.ap_capacity_mbps)
     sim["satcom_enabled"] = design.satcom_units > 0

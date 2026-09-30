@@ -216,3 +216,17 @@ test('the viewer opens on the policy and weather the route was built with', asyn
   await expect(page.locator('#weather')).toHaveValue('storm')
   await expect(page.locator('#policy')).toHaveValue('FAILOVER')
 })
+
+// Three EDGE Rail antennas, one network each: the preset leaves O2 without a modem, so the router never uses it.
+test('the EDGE Rail preset fits EE, Vodafone and Three and shows O2 as not fitted', async ({ page }) => {
+  await page.locator('#scenarioPill').click()
+  await page.locator('#preset').selectOption('edge_rail_fleet_connect')
+  await page.keyboard.press('Escape')
+  const o2 = page.locator('#liveLinks .lrow', { hasText: 'O2' })
+  await expect(o2).toContainText('not fitted')
+  await expect(page.locator('#liveLinks .lrow', { hasText: 'Vodafone' })).not.toContainText('not fitted')
+  await page.locator('#scenarioPill').click()
+  await page.locator('#preset').selectOption('baseline')
+  await page.keyboard.press('Escape')
+  await expect(o2).not.toContainText('not fitted')
+})
