@@ -13,11 +13,20 @@ name: publish
 # call quota is used up), any route fails to build, or less than 90 % of any route's coverage is live Ofcom data.
 # A full rebuild makes about 18,000 Ofcom calls (one per postcode near the track), so run it at most once per quota
 # period: this key's quota was used up on 26 Sep 2026 and resets around the 16th, hence the 17th below.
+#
+# "Run workflow" also takes a list of route ids (e.g. tpe_man_ncl) to rebuild just those. Such a run does not publish,
+# since the runner holds only those routes and publishing would drop the rest: it uploads their bundles, evidence packs
+# included, as the run's "route-bundles" artifact, to drop into web/public/data/ next to the others and deploy from there.
 
 on:
   schedule:
     - cron: "17 3 17 * *"   # 03:17 UTC on the 17th of every month, just after the Ofcom quota resets
   workflow_dispatch:
+    inputs:
+      routes:
+        description: "Route ids to rebuild on their own, comma-separated (e.g. tpe_man_ncl). Leave empty to rebuild and publish every route."
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -31,6 +40,8 @@ jobs:
     name: Rebuild routes from live feeds and publish
     runs-on: ubuntu-latest
     timeout-minutes: 350   # a full rebuild is mostly Ofcom API calls (about one per corridor postcode): roughly 5 h
+    env:
+      ROUTES: ${{ inputs.routes || '' }}   # empty on the monthly schedule: every route
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -79,11 +90,12 @@ jobs:
           key: raw-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: raw-
 
-      - name: Rebuild every route from the live feeds
+      - name: Rebuild the routes from the live feeds
         env:
           OFCOM_API_KEY: ${{ secrets.OFCOM_API_KEY }}
           OPENCELLID_TOKEN: ${{ secrets.OPENCELLID_TOKEN }}
-        run: tcs build-all
+        run: |
+          if [ -n "$ROUTES" ]; then tcs build-all --only "$ROUTES"; else tcs build-all; fi
 
       - name: Keep this run's downloads and Ofcom answers, even if the rebuild failed
         if: always()
@@ -134,13 +146,27 @@ jobs:
             echo "::warning::Some evidence packs failed to build (see the log above); those routes are published without a Report download."
           fi
 
+      # A selected-routes run stops here: its bundles go to an artifact instead of the site (see the header).
+      - name: Hand over the rebuilt routes instead of publishing
+        if: env.ROUTES != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: route-bundles
+          path: |
+            web/public/data/
+            !web/public/data/index.json
+          retention-days: 7
+          if-no-files-found: error
+
       - name: Build the viewer
+        if: env.ROUTES == ''
         working-directory: web
         run: |
           npm ci
           npm run build
 
       - name: Publish to Cloudflare
+        if: env.ROUTES == ''
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

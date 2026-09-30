@@ -198,7 +198,11 @@ def build_all(offline: bool = typer.Option(False), only: str | None = typer.Opti
     """Run the pipeline for every route in the catalogue (continues past failures; writes index.json)."""
     ids = [r["id"] for r in list_routes()]
     if only:
-        ids = [i for i in ids if i in {x.strip() for x in only.split(",")}]
+        wanted = {x.strip() for x in only.split(",") if x.strip()}
+        unknown = sorted(wanted - set(ids))
+        if unknown or not wanted:                              # a typo would otherwise build nothing and report success
+            raise typer.BadParameter(f"unknown route id(s): {', '.join(unknown) or '(none given)'}; `tcs routes` lists them")
+        ids = [i for i in ids if i in wanted]
     built = {p.parent.name for p in (ROOT / "web" / "public" / "data").glob("*/meta.json")}
     failures = []
     for rid in ids:
