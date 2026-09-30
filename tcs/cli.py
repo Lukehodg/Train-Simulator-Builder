@@ -78,7 +78,8 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     _check_overrides(s, policy, weather)
     if policy:
         s.sim["wan"]["policy"] = policy                        # recorded in meta.json: the viewer opens on the scenario simulated here
-    s.sim["weather"] = weather
+    if weather != "nominal":
+        s.sim["weather"] = weather                             # absent for nominal, so a plain run's meta.sim is simulation.yaml itself
     b = build_route(s)
     console.log(f"route: {len(b.samples)} samples at {s.spacing_m:.0f} m, {b.samples['distance_m'].max() / 1000:.1f} km, geometry={b.geometry_source}")
     for w in b.warnings:
