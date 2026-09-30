@@ -87,6 +87,10 @@ Secrets are write-only: nobody, including you, can read them back from GitHub, a
   baseline and EDGE Rail + Fleet Connect scenarios; colleagues download them from the viewer's **Report** button.
   They add about 66 MB to the site and a few minutes to the run. A pack that fails to build does not stop the
   publish: the run shows a warning and that route's Report menu says it has no pack.
+- **Rebuilding only some routes:** in **Run workflow**, enter their ids in **routes** (comma-separated, e.g.
+  `tpe_man_ncl`). That run does not publish, because it holds only those routes and publishing would drop the others.
+  It uploads their bundles and evidence packs as the run's `route-bundles` artifact. Unzip it into
+  `web/public/data/` next to the other routes, then build and deploy from there (`npm run build`, `npx wrangler deploy`).
 - **Adding or removing people:** edit the `Colleagues` policy in Zero Trust → Access → Applications. No rebuild needed.
 - **If a run fails:** nothing is published and the previous version stays live. Open the failed run and use
   **Re-run failed jobs**. Downloads and Ofcom answers from the past week are reused, so a re-run is cheaper.

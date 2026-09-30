@@ -364,3 +364,14 @@ def test_run_records_the_policy_and_weather_it_simulated(tmp_path, monkeypatch):
     meta = json.loads((s.paths()["web"] / "meta.json").read_text(encoding="utf-8"))
     assert meta["sim"]["wan"]["policy"] == "FAILOVER" and meta["sim"]["weather"] == "rain"
     assert meta["sim_defaults"]["wan"]["policy"] == s.sim["wan"]["policy"] != "FAILOVER"   # the baseline stays the config's
+
+
+def test_build_all_refuses_unknown_route_ids():
+    """`build-all --only tpe_man_nc` (a typo) used to build nothing and exit 0, so a selected-routes publish run would
+    upload an empty bundle."""
+    from typer.testing import CliRunner
+
+    from tcs.cli import app
+
+    res = CliRunner().invoke(app, ["build-all", "--offline", "--only", "tpe_man_nc"])
+    assert res.exit_code != 0 and "tpe_man_nc" in res.output
