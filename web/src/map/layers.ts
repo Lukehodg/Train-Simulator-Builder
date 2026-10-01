@@ -3,7 +3,7 @@ import { SimpleMeshLayer } from '@deck.gl/mesh-layers'
 import type { Layer } from '@deck.gl/core'
 import { CONFIG } from '../config'
 import type { State } from '../state'
-import { classOf, palette } from '../sim/classify'
+import { classOf, networkColor, palette } from '../sim/classify'
 import { offsetLonLat, offsetRight } from './map'
 import { carriageMesh, edgeRailMesh, satcomMesh, type MeshData } from './train-mesh'
 import { poseAt } from './environment'
@@ -107,10 +107,19 @@ export function cellLayers(s: State, i: number, useTerrain: boolean): Layer[] {
     lines.push({ from: [d.lon[i], d.lat[i], z0 + 14], to: [c.lon, c.lat, z0 + 40], provider: p.id, key })
   }
   const visible = new Set(d.meta.providers.filter(p => s.linkVisible[p.id]).map(p => p.id))
+  // Each network in its own colour: a serving line runs to a tower of the same colour, which stands out from that
+  // network's other towers, so which network uses which tower reads at a glance.
+  const net: Record<string, [number, number, number]> = {}
+  for (const p of d.meta.providers) if (p.type === 'cellular') net[p.id] = networkColor(p.id)
+  const serving = new Set(lines.map(l => l.key))
+  const servingKey = lines.map(l => l.key).join('|')
   return [
     new ColumnLayer({ id: 'cells', data: d.cells.filter(c => visible.has(c.provider)), diskResolution: 6, radius: 28, extruded: true, getPosition: (c: any) => [c.lon, c.lat, z0 - 5],
-      getElevation: 60, getFillColor: [...pal.muted, 190] as any, pickable: true, elevationScale: 1 }),
-    new LineLayer({ id: 'serving-lines', data: lines, getSourcePosition: (l: any) => l.from, getTargetPosition: (l: any) => l.to, getColor: [...pal.text, 170] as any, getWidth: 1.5, widthUnits: 'pixels' }),
+      getElevation: (c: any) => (serving.has(c.key) ? 90 : 60),
+      getFillColor: (c: any) => [...(net[c.provider] ?? pal.muted), serving.has(c.key) ? 255 : 120] as any,
+      pickable: true, elevationScale: 1, updateTriggers: { getFillColor: [servingKey, s.theme], getElevation: servingKey } }),
+    new LineLayer({ id: 'serving-lines', data: lines, getSourcePosition: (l: any) => l.from, getTargetPosition: (l: any) => l.to,
+      getColor: (l: any) => [...(net[l.provider] ?? pal.text), 235] as any, getWidth: 2.5, widthUnits: 'pixels', updateTriggers: { getColor: s.theme } }),
   ]
 }
 

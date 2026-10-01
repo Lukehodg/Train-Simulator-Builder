@@ -24,6 +24,8 @@
   --danger: #c42b2b; --danger-soft: #fbe9e9;
   /* ---- data: service class (strong · usable · poor · outage · unknown) — all-pairs CVD ΔE 9.4, normal ΔE 17.8 */
   --c-strong: #518e5b; --c-usable: #7c4b02; --c-poor: #e44919; --c-outage: #960157; --c-unknown: #8b95a0;
+  /* ---- data: mobile networks (towers and serving lines on the map, swatches in the links panel) — all-pairs CVD ΔE 8.3 */
+  --net-ee: #11917a; --net-o2: #1f6fd1; --net-three: #a23aa8; --net-vodafone: #e25822;
   /* ---- data: confidence, one-hue ordinal ramp (low → high), light end ≥ 2:1 on surface */
   --conf-1: #86b6ef; --conf-2: #5598e7; --conf-3: #2a78d6; --conf-4: #1c5cab; --conf-5: #104281;
   /* ---- elevation: hairlines carry structure; shadow only for things that float */
@@ -57,6 +59,7 @@
   --danger: #ff6b6b; --danger-soft: #2a1416;
   /* all-pairs CVD ΔE 9.8, normal ΔE 19.0, every step ≥ 3:1 on the panel surface */
   --c-strong: #6ea268; --c-usable: #f6be82; --c-poor: #fc6518; --c-outage: #924c69; --c-unknown: #6b7682;
+  --net-ee: #1f9d7f; --net-o2: #3b82e6; --net-three: #b44fb9; --net-vodafone: #e5622f;   /* all-pairs CVD ΔE 8.4 */
   --conf-1: #184f95; --conf-2: #2a78d6; --conf-3: #5598e7; --conf-4: #86b6ef; --conf-5: #b7d3f6;
   --shadow-1: 0 1px 0 rgba(0, 0, 0, .3);
   --shadow-2: 0 0 0 1px rgba(255, 255, 255, .03), 0 12px 32px rgba(0, 0, 0, .6);
@@ -199,6 +202,7 @@ h4 { margin: var(--s4) 0 var(--s2); }
 .link-row .name { font-weight: 500; font-size: var(--t-sm); }
 .link-row .name small { display: block; font-size: var(--t-micro); color: var(--faint); font-weight: 400; }
 .link-row .lane { font: 500 var(--t-micro)/1 var(--mono); color: var(--faint); }
+.net-swatch { display: inline-block; width: 12px; height: 4px; border-radius: 2px; margin-right: 6px; vertical-align: middle; background: var(--muted); }
 
 .check { display: flex; align-items: center; gap: var(--s2); padding: 6px; min-height: 32px; border-radius: var(--r-ctl); cursor: pointer; font-size: var(--t-sm); }
 .check:has(input:disabled) { cursor: not-allowed; color: var(--faint); }
