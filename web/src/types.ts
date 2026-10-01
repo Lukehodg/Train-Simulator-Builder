@@ -49,6 +49,8 @@ export interface Meta {
   geometry_source: string
   geometry_straight_legs?: string[]         // OSM legs with no rail path, drawn straight ('BWK-DUN')
   terrain_source: string
+  lidar_share?: number                      // share of samples with open 2 m LiDAR near the track (GB bundles from Oct 2026 on)
+  lidar_sources?: Record<string, number>    // survey -> share of the LiDAR samples ('lidar_ea', 'lidar_wales', 'lidar_scotland')
   length_m: number
   duration_s: number
   departure: string
@@ -84,6 +86,10 @@ export interface RouteData {
   canopy: Float32Array
   urban: Float32Array
   sky: Float32Array
+  /** 1 where open LiDAR covered the sample: cutting depth and the near skyline come from it (0 in older bundles) */
+  lidar: Uint8Array
+  /** share of the antenna's sky roofed by bridges over the line, from LiDAR (0 where none) */
+  overhead: Float32Array
   speed: Float32Array
   t: Float64Array
   nextStation: (string | null)[]

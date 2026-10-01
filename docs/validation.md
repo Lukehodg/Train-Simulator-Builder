@@ -54,6 +54,30 @@ never the measurements. Every route without its own `calibration.json` then uses
 into `config/simulation.yaml` by hand; a test checks the two files agree. Reports (section 8) and the viewer's Sources
 tab show the source, periods and the route's accuracy before and after calibration.
 
+### With LiDAR cutting depths (model 0.3.0)
+
+In GB, cutting depth now comes from open 2 m LiDAR within 60 m of the track (docs/data-sources.md, 2a) rather than
+the 30 m terrain model. LiDAR covers 99–100 % of every route except the Highland Main Line (63 %: no Scottish survey
+over parts of the Highlands). LiDAR finds three times as many measured route points in a cutting (56k against 18k),
+and deeper ones, so the fit moved from 0.2 of score at 4 m to **0.28 at 8 m** (about 13 dB), and the tunnel terms to
+150 m and a floor of 0.08. Against the 2019 test period (Yellow Train, 303k points):
+
+| | before LiDAR | with LiDAR |
+|---|---|---|
+| mean absolute error | 11.24 dB | 11.14 dB |
+| within ±6 dB | 33.5 % | 34.1 % |
+| correlation | 0.40 | 0.42 |
+| routes held out of the fit, median error | 11.04 dB | 10.89 dB |
+| 2026 Global View 4G check (182k points, after the level offset) | 10.29 dB | 10.18 dB |
+
+A small gain: cuttings are one of many things that set mobile signal. The larger effect of LiDAR is on satellite sky
+visibility (trees, buildings and bridges beside the line), which no measurement set here can test.
+
+Looked at and left out: lineside clutter. Where trees or buildings stand above the roof antenna within 30 m of the
+track (LiDAR surface model), measured signal is 3–4 dB lower relative to the model than on open track, in both the fit
+and the test period. A term for it would cut the mean error by only about 0.05 dB, so the model does not carry one.
+Embankments are about 1.5 dB better than modelled above 3 m; also too small to add.
+
 ## Checks against later measurements (`tcs check-national`)
 
 ```

@@ -8,6 +8,7 @@ the app bar and the **Sources** tab show exactly which inputs produced the bundl
 |---|---|---|---|---|
 | Route centreline, stations, tunnels/cuttings/bridges, line speed | OpenStreetMap via Overpass (yes) | `tcs/sources/osm_route.py` | synthetic spline | — |
 | Terrain + sky visibility | Copernicus DEM GLO-30 COGs on AWS (yes); OS Terrain 50 (OS Data Hub, free) | `tcs/sources/terrain.py` | procedural terrain | — |
+| Cuttings, trees, bridges near the track (GB) | Open 1–2 m LiDAR: Environment Agency (England), Welsh Government (Wales), Scottish Remote Sensing Portal (Scotland) (all yes, OGL) | `tcs/sources/lidar.py` | the 30 m terrain model | — |
 | Corridor postcodes / urban density | OS Code-Point Open (yes) | `ofcom_coverage.corridor_postcodes` | station proximity | — |
 | Cellular coverage prior | Ofcom Mobile Checker UPRN Coverage API (key, postcode → UPRN rows); Connected Nations open data (yes) | `tcs/sources/ofcom_coverage.py` | synthetic prior | 0.55 / 0.65 with cells |
 | Cell sites / handovers | OpenCellID bulk MCC download (token) | `tcs/sources/opencellid.py` | synthetic sites | + cells → 0.65 |
@@ -38,9 +39,40 @@ terrain horizon per azimuth, and converts it to the **solid-angle fraction of th
 terminal's minimum elevation (20° for the Starlink Performance terminal). Tunnels force 0; station canopies and
 cutting depth (DEM minus the smoothed railhead profile, boosted where OSM tags a cutting) subtract from it.
 
-Upgrade path: OS Terrain 50 for GB (`terrain.source: os_terrain50`, drop the tiles in
-`data/raw/<route>/os_terrain50/`), and the Environment Agency 1 m LiDAR DSM for England if you want buildings and
-tree canopy in the horizon rather than bare earth.
+Alternative for GB: OS Terrain 50 (`terrain.source: os_terrain50`, drop the tiles in
+`data/raw/<route>/os_terrain50/`). In GB the near field comes from LiDAR instead (next section); the terrain model
+then supplies only the horizon beyond 60 m.
+
+### 2a. Cuttings, trees and bridges — open LiDAR (GB)
+
+A 30 m terrain model cannot resolve a cutting wall 10 m from the track, and it has no trees or buildings in it.
+The open LiDAR surveys can: `tcs/sources/lidar.py` reads a bare-earth model (DTM) and a first-return surface model
+(DSM, which includes trees, buildings and bridges) at 2 m in a 60 m corridor either side of every sample, and
+`pipeline/obstruction.py` uses them wherever they cover the track:
+
+| Survey | Access | Coverage on our routes |
+|---|---|---|
+| Environment Agency National LiDAR Programme composite, DTM and first-return DSM, 1 m (England) | WCS 2.0.1, read at 2 m (`SCALEFACTOR=0.5`); the service answers zeros outside England, which are treated as no data | essentially all of England |
+| Welsh Government LiDAR 2020–23, DTM and DSM, 1 m (Wales) | WFS tile catalogue (`geonode:welsh_government_lidar_tile_catalogue_2020_2023`) → 1 km GeoTIFF tiles | all of Wales |
+| Scottish Public Sector LiDAR phases 1–6 and the national programme, 0.5–1 m (Scotland) | public S3 bucket `srsp-open-data` (`lidar/<phase>/<dtm\|dsm>/27700/gridded/`), Cloud-Optimised GeoTIFFs read by window | the central belt and the cities; gaps in the Highlands (e.g. Drumochter) |
+
+All three are Open Government Licence v3 and in British National Grid, so they line up with GB route samples
+without reprojection. Sources are tried newest first and only fill cells still missing, so a sample at a border is a
+mosaic of both sides. Per sample the features are:
+
+- **rail level**: the median bare-earth height on the centreline (the deck height from the surface model where OSM
+  tags a bridge, or where the whole ±24 m centreline stands more than 5.5 m above the ground, an untagged viaduct);
+- **cutting walls and embankment falls**, left and right: how far the ground 4–40 m to each side rises above or
+  falls below the rail; the cutting depth is the mean of the two walls (one side when the other has no data);
+- **bridges over the line**: the share of the ±24 m centreline where the surface is more than 5.5 m above the rail,
+  which roofs that share of the sky;
+- **near skyline**: 16 rays from the antenna (4 m above the rail) out to 60 m over the median-filtered surface
+  model, so trees, buildings and cutting walls set the horizon; the terrain model takes over beyond 60 m.
+
+A sample whose rail level jumps more than 3 m from its neighbours (a misplaced centreline, a gap in the survey) and
+is not on a bridge falls back to the terrain model. Features are cached per route geometry under
+`data/raw/<route>/lidar/`, and tile listings under `data/raw/shared/lidar_index/`; a route takes one to five minutes
+the first time. `terrain.lidar.enabled: false` in `config/route.yaml` turns it off; routes outside GB never use it.
 
 ## 3. Cellular coverage prior — Ofcom
 
@@ -125,6 +157,6 @@ CORPUS TIPLOC reference, free registration) or `from_gtfs()`.
 
 ## Licences and attribution
 
-OSM (ODbL), Copernicus DEM (free, attribution), OS OpenData (OGL), Ofcom data (OGL/terms of the API portal),
+OSM (ODbL), Copernicus DEM (free, attribution), OS OpenData (OGL), Environment Agency, Welsh Government and Scottish public sector LiDAR (OGL), Ofcom data (OGL/terms of the API portal),
 OpenCellID (CC BY-SA 4.0 — ShareAlike applies to redistributed derivatives), CARTO basemaps and AWS Terrain
 Tiles (attribution). All are recorded in `data/raw/<route>/*/provenance.json` and surfaced in the app.

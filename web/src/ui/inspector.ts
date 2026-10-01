@@ -4,7 +4,7 @@ import { dasAt } from '../sim/model'
 import { arrowNav } from './a11y'
 import { LIVE_COVERAGE_MIN, liveCoverageShare } from '../data'
 import { esc } from '../html'
-import type { CalibrationMeta } from '../types'
+import type { CalibrationMeta, Meta } from '../types'
 
 const $ = (id: string) => document.getElementById(id)!
 
@@ -13,7 +13,8 @@ export function envText(store: Store, i: number): string {
   if (d.inTunnel[i]) return `${d.tunnelName[i] && d.tunnelName[i] !== 'tunnel' ? d.tunnelName[i] : 'Tunnel'}`
   if (d.canopy[i] >= 0.9) return 'Station canopy'
   if (d.cutting[i] > 8) return `Cutting · ${d.cutting[i].toFixed(0)} m`
-  if (d.sky[i] < 0.6) return `Terrain shadow · sky ${(d.sky[i] * 100).toFixed(0)} %`
+  if (d.overhead[i] > 0.1) return 'Under a bridge'
+  if (d.sky[i] < 0.6) return `${d.lidar[i] ? 'Trees and lineside' : 'Terrain shadow'} · sky ${(d.sky[i] * 100).toFixed(0)} %`
   if (d.urban[i] > 0.5) return 'Urban'
   return 'Open country'
 }
@@ -130,9 +131,15 @@ function renderSample(store: Store, i: number) {
         : cfg.tunnels.portal_decay_m ? `signal from the portals, fading inside → ${L.q[i].toFixed(2)}` : `no coverage → ${cfg.tunnels.default_score}`])
       if (b.hp[i] > 0) rows.push(['handover', `+${cfg.handover.latency_spike_ms} ms · ×${cfg.handover.capacity_factor}`])
     } else {
-      rows.push(['sky visibility (DEM horizon)', b.qb[i].toFixed(2)])
-      if (d.canopy[i] > 0) rows.push(['station canopy', `−${(0.85 * d.canopy[i]).toFixed(2)}`])
-      if (d.cutting[i] > 0.5) rows.push([`cutting horizon ${d.cutting[i].toFixed(0)} m`, `−${Math.min(0.55, d.cutting[i] / 22).toFixed(2)}`])
+      if (d.lidar[i]) {   // LiDAR skyline: cutting walls and trees are already in it; a station roof or bridge covers a share of the sky
+        rows.push(['sky visibility (LiDAR skyline + terrain)', b.qb[i].toFixed(2)])
+        const roof = Math.max(0.85 * d.canopy[i], d.overhead[i])
+        if (roof > 0.005) rows.push([d.overhead[i] >= 0.85 * d.canopy[i] ? 'bridge over the line' : 'station canopy', `×${(1 - roof).toFixed(2)}`])
+      } else {
+        rows.push(['sky visibility (DEM horizon)', b.qb[i].toFixed(2)])
+        if (d.canopy[i] > 0) rows.push(['station canopy', `−${(0.85 * d.canopy[i]).toFixed(2)}`])
+        if (d.cutting[i] > 0.5) rows.push([`cutting horizon ${d.cutting[i].toFixed(0)} m`, `−${Math.min(0.55, d.cutting[i] / 22).toFixed(2)}`])
+      }
       if (d.urban[i] > 0.01) rows.push(['urban obstruction', `−${(0.18 * d.urban[i] * (1 - d.canopy[i])).toFixed(2)}`])
       if (st.scenario.weather !== 'nominal') rows.push([`weather · ${st.scenario.weather}`, `sky −${p.availability!.weather[st.scenario.weather].sky_penalty}`])
       rows.push(['reason code', L.reason[i]])
@@ -189,6 +196,15 @@ function currentText(cal: CalibrationMeta): string {
   return h
 }
 
+const SURVEYS: Record<string, string> = { lidar_ea: 'Environment Agency', lidar_wales: 'Welsh Government', lidar_scotland: 'Scottish Remote Sensing Portal' }
+
+function lidarText(m: Meta): string {
+  if (!m.lidar_share) return ''
+  const by = Object.entries(m.lidar_sources ?? {}).map(([k, v]) => `${esc(SURVEYS[k] ?? k)}${Object.keys(m.lidar_sources!).length > 1 ? ` ${Math.round(v * 100)} %` : ''}`).join(', ')
+  return ` Within 60 m of the track, open 2 m LiDAR (${by}; OGL) on ${Math.round(m.lidar_share * 100)} % of the route: cutting walls and embankments from the ground model, `
+    + 'and trees, buildings and bridges over the line on the skyline from the surface model.'
+}
+
 function renderSources(store: Store) {
   const m = store.state.data.meta
   const live = (flag: boolean, liveLabel = 'live', synthLabel = 'synthetic') => `<em class="${flag ? 'live' : 'synth'}">${flag ? liveLabel : synthLabel}</em>`
@@ -200,7 +216,7 @@ function renderSources(store: Store) {
   const items = [
     ['Route geometry', geomLive && !straight.length, m.geometry_source === 'osm' ? 'OpenStreetMap rail network, routed station-to-station (ODbL). Tunnel / cutting / embankment / bridge / maxspeed tags carried per 50 m sample.'
       + (straight.length ? ` No rail path was found for ${esc(straight.map(s => s.replace('-', '–')).join(', '))}: drawn as a straight line there, without tunnels, cuttings or line speeds.` : '') : m.geometry_source === 'file' ? 'Infrastructure-manager / curated centreline file.' : 'Spline through approximate station coordinates. Run <code>tcs run</code> without <code>--offline</code> to fetch the OSM centreline.', straight.length ? 'partly live' : undefined],
-    ['Terrain & sky visibility', terrLive, terrLive ? `${esc(m.terrain_source)}: 30 m DEM, 16-ray horizon per sample, solid-angle sky fraction above the terminal's minimum elevation.` : 'Procedural terrain. 3D terrain rendering is disabled until real elevation is available.'],
+    ['Terrain & sky visibility', terrLive, terrLive ? `${esc(m.terrain_source)}: 30 m DEM, 16-ray horizon per sample, solid-angle sky fraction above the terminal's minimum elevation.${lidarText(m)}` : 'Procedural terrain. 3D terrain rendering is disabled until real elevation is available.'],
     ['Cellular coverage prior', covLive, covLive ? `${esc(m.coverage_sources.join(', '))} — operator predictions on Ofcom's 50 m grid mapped to a model score; never presented as measured RSRP.`
       : covShare > 0 ? `Only ${Math.round(covShare * 100)} % of the route has Ofcom predictions (usually the Ofcom call quota ran out part-way); the rest is a neutral stand-in. Rebuild the route once the quota resets.`
       : 'Synthetic prior (noise field). Set <code>OFCOM_API_KEY</code>, or enable Connected Nations open data, to replace it.', covShare > 0 && !covLive ? 'partly live' : undefined],

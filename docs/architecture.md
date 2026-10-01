@@ -6,7 +6,8 @@
         ┌─────────────────────────────────────┼──────────────────────────────────────┐
         ▼                                     ▼                                      ▼
   sources/osm_route      sources/terrain (Copernicus / OS T50)        sources/ofcom_coverage · opencellid
-  (Overpass, file)       + sky_visibility (horizon → solid angle)     measurements · starlink · timetable
+  (Overpass, file)       + sources/lidar (GB, 2 m near the track)     measurements · starlink · timetable
+                         + sky_visibility (horizon → solid angle)
         │                                     │                                      │
         └────────────► pipeline/sample_route ─┴─► pipeline/obstruction ─► pipeline/join_coverage ─► pipeline/join_cells
                                                                                      │

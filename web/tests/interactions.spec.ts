@@ -281,3 +281,13 @@ test('each mobile network has its own colour, shown beside it in the links list'
   const muted = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--muted').trim())
   expect(colours).not.toContain(muted)
 })
+
+test('the Sources tab says how much of the route the LiDAR covers, and from which surveys', async ({ page }) => {
+  const meta = JSON.parse(readFileSync(path.resolve('tests/.generated', 'meta.json'), 'utf-8'))
+  await page.route(url => /\/data\/[^/]+\/meta\.json$/.test(url.pathname), route => route.fulfill({
+    json: { ...meta, terrain_source: 'copernicus_glo30', lidar_share: 0.93, lidar_sources: { lidar_ea: 0.8, lidar_scotland: 0.2 } } }))
+  await page.reload()
+  await expect(page.locator('#kpis .kpi')).toHaveCount(6)
+  await page.locator('.tab[data-tab="sources"]').click()
+  await expect(page.locator('#sourcesBody')).toContainText('open 2 m LiDAR (Environment Agency 80 %, Scottish Remote Sensing Portal 20 %; OGL) on 93 % of the route')
+})

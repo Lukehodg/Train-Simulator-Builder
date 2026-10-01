@@ -6,7 +6,7 @@ All constants: `config/simulation.yaml` (versioned by `model_version`).
 
 ```
 q_base = prior_score                       # Ofcom level → score, or Connected Nations %, or synthetic
-       − cutting_penalty_max · min(1, cutting_depth / 10 m)
+       − cutting_penalty_max · min(1, cutting_depth / cutting_full_depth_m)   # 0.28 at 8 m (fitted; depth from LiDAR in GB)
        − penalty_per_km · max(0, serving_cell_distance_km − 3)
        + calibration_bias[operator]        # tcs calibrate (one route) or tcs calibrate-national (config/calibration.yaml)
 q      = clip(q_base + vehicle_offset)     # rooftop 0 · handset −0.18 (≈ −18 dB penetration)
@@ -28,12 +28,14 @@ Handover: serving cell = nearest candidate with hysteresis (switch when < 78 % o
 | profile | score offset | dB | throughput factor | meaning |
 |---|---|---|---|---|
 | EXTERNAL_ROOFTOP_ANTENNA | 0 | 0 | 1.00 | passive roof antenna, coax to a rack router |
-| EDGE_RAIL_ACTIVE_ANTENNA | +0.08 | +6 | 1.35 | modem inside the radome (Sierra EM9291, 4x4 MIMO, LTE Cat 20): no coax/splitter losses, MIMO diversity |
+| EDGE_RAIL_ACTIVE_ANTENNA | +0.08 | +6 | 1.35 | HUBER+SUHNER SENCITY Rail Active Rooftop: modem inside the radome (Sierra EM9291, 4x4 MIMO, LTE Cat 20), no coax/splitter losses, MIMO diversity |
 | PASSENGER_HANDSET_INSIDE_CARRIAGE | -0.18 | -18 | 1.00 | handset behind coated glass |
 
-The `edge_rail_fleet_connect` preset = EDGE_RAIL_ACTIVE_ANTENNA + PACKET_BONDING (Fleet Connect aggregating every
-cellular network and the satcom link simultaneously) with bonding efficiency 0.85. Motion Applied's marketing
-figures (5x downloads, 10x uploads, 80 % fewer blackspots) are displayed as claims and never enter the model.
+The `edge_rail_fleet_connect` preset = EDGE_RAIL_ACTIVE_ANTENNA + PACKET_BONDING (Fleet Connect, Motion Applied's
+link-management software, aggregating every cellular network and the satcom link simultaneously) with bonding
+efficiency 0.85. The marketing figures (5x downloads, 10x uploads, 80 % fewer blackspots) are displayed as claims and
+never enter the model. The +6 dB and 1.35x are assumptions: the HUBER+SUHNER data sheet gives no antenna gain or
+noise figure.
 
 ## Train Studio designs
 
@@ -47,8 +49,12 @@ units beyond that are not modelled), satcom enabled + terminal class
 ## Satcom (Starlink)
 
 ```
-sky      = solid-angle fraction of the dome above 20° left open by the DEM horizon; 0 in tunnels;
-           − 0.85·canopy − min(0.55, cutting/22) − 0.18·urban·(1 − canopy) − weather.sky_penalty
+dome     = solid-angle fraction of the dome above 20° left open by the horizon
+  LiDAR (GB):  horizon = max(LiDAR skyline within 60 m: cutting walls, trees, buildings; terrain beyond)
+               sky = dome · (1 − max(0.85·canopy, share of the track under a bridge))
+  otherwise:   horizon = terrain model
+               sky = (dome − min(0.55, cutting/22)) · (1 − 0.85·canopy)
+sky      = sky − 0.18·urban·(1 − canopy) − weather.sky_penalty; 0 in tunnels
 available = in service ∧ ¬tunnel ∧ sky ≥ 0.35
 capacity  = 220 · sky^1.4 · weather.capacity_factor · (0.3 if temporary beam handover)
 latency   = 28 + 35·(1 − sky) (+40 during handover)

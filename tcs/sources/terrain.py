@@ -260,18 +260,15 @@ class SyntheticDEM:
 
 
 # --------------------------------------------------------------------------------------------------
-def sky_visibility(dem: Elevation, proj, x: np.ndarray, y: np.ndarray, elev: np.ndarray, *, azimuths: int = 16,
-                   reach_m: float = 3000, step_m: float = 50, antenna_h_m: float = 4.0, min_elevation_deg: float = 20.0,
-                   chunk: int = 2000) -> tuple[np.ndarray, np.ndarray]:
-    """Fraction (by solid angle) of the usable sky dome above the terminal's minimum elevation that terrain leaves open.
-
-    Returns (sky_visibility 0..1, mean horizon angle in degrees). Casts `azimuths` rays per sample up to `reach_m`.
-    """
+def horizon_profile(dem: Elevation, proj, x: np.ndarray, y: np.ndarray, elev: np.ndarray, *, azimuths: int = 16, reach_m: float = 3000,
+                    step_m: float = 50, antenna_h_m: float = 4.0, split_m: float = 0.0, chunk: int = 2000) -> tuple[np.ndarray, np.ndarray]:
+    """Terrain horizon angle (degrees) per sample and azimuth, as two arrays: from rays closer than split_m and from
+    rays at split_m and beyond (-90 where a part has no rays). A finer source can replace the near part."""
     n = len(x)
     az = np.radians(np.linspace(0, 360, azimuths, endpoint=False))
     r = np.arange(step_m, reach_m + step_m, step_m)
-    sky = np.zeros(n, dtype=np.float32)
-    horizon = np.zeros(n, dtype=np.float32)
+    near = np.full((n, azimuths), -90.0, dtype=np.float32)
+    far = np.full((n, azimuths), -90.0, dtype=np.float32)
     for s in range(0, n, chunk):
         e = min(n, s + chunk)
         xs, ys = x[s:e], y[s:e]
@@ -282,11 +279,27 @@ def sky_visibility(dem: Elevation, proj, x: np.ndarray, y: np.ndarray, elev: np.
         z = dem.sample(np.asarray(lon), np.asarray(lat)).reshape(px.shape)
         obs = (elev[s:e] + antenna_h_m)[:, None, None]
         ang = np.degrees(np.arctan2(z - obs, r[None, None, :]))
-        hz = ang.max(axis=2)                                    # horizon per azimuth
-        # Solid-angle weighting: the usable dome above the terminal's minimum elevation e0 has area ~ (1 - sin e0);
-        # a horizon at h leaves (1 - sin h) of it. Average the visible fraction over azimuths.
-        e0 = np.radians(min_elevation_deg)
-        h = np.radians(np.clip(hz, min_elevation_deg, 90.0))
-        sky[s:e] = ((1.0 - np.sin(h)) / (1.0 - np.sin(e0))).mean(axis=1)
-        horizon[s:e] = hz.mean(axis=1)
-    return sky, horizon
+        if (r < split_m).any():
+            near[s:e] = ang[:, :, r < split_m].max(axis=2)
+        if (r >= split_m).any():
+            far[s:e] = ang[:, :, r >= split_m].max(axis=2)
+    return near, far
+
+
+def sky_fraction(horizon_deg: np.ndarray, min_elevation_deg: float = 20.0) -> np.ndarray:
+    """Share (by solid angle) of the usable dome above the terminal's minimum elevation e0 left open by a horizon
+    (degrees, per sample and azimuth): the dome's area goes as (1 - sin e0) and a horizon at h leaves (1 - sin h) of it."""
+    e0 = np.radians(min_elevation_deg)
+    h = np.radians(np.clip(horizon_deg, min_elevation_deg, 90.0))
+    return ((1.0 - np.sin(h)) / (1.0 - np.sin(e0))).mean(axis=1).astype(np.float32)
+
+
+def sky_visibility(dem: Elevation, proj, x: np.ndarray, y: np.ndarray, elev: np.ndarray, *, azimuths: int = 16,
+                   reach_m: float = 3000, step_m: float = 50, antenna_h_m: float = 4.0, min_elevation_deg: float = 20.0,
+                   chunk: int = 2000) -> tuple[np.ndarray, np.ndarray]:
+    """Fraction (by solid angle) of the usable sky dome above the terminal's minimum elevation that terrain leaves open.
+
+    Returns (sky_visibility 0..1, mean horizon angle in degrees). Casts `azimuths` rays per sample up to `reach_m`.
+    """
+    _, hz = horizon_profile(dem, proj, x, y, elev, azimuths=azimuths, reach_m=reach_m, step_m=step_m, antenna_h_m=antenna_h_m, chunk=chunk)
+    return sky_fraction(hz, min_elevation_deg), hz.mean(axis=1).astype(np.float32)

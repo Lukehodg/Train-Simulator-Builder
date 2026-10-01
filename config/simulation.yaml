@@ -1,15 +1,18 @@
 # Every numerical assumption lives here and is versioned with model_version.
-model_version: "0.2.0"
+model_version: "0.3.0"
 
 vehicle:
   profile: EXTERNAL_ROOFTOP_ANTENNA     # EXTERNAL_ROOFTOP_ANTENNA | PASSENGER_HANDSET_INSIDE_CARRIAGE
   profiles:
     EXTERNAL_ROOFTOP_ANTENNA:          {score_offset: 0.00,  db_offset: 0,   capacity_factor: 1.00}   # passive roof antenna, coax to a rack router
     PASSENGER_HANDSET_INSIDE_CARRIAGE: {score_offset: -0.18, db_offset: -18, capacity_factor: 1.00}   # coated glass, ~15-25 dB penetration loss
-    # Motion Applied EDGE Rail: 5G active antenna with the modem (Sierra EM9291, 4x4 MIMO, LTE Cat 20) inside the
-    # radome - no RF cables or splitters. Assumptions (editable): +6 dB link budget from removing coax/splitter
-    # losses and 4x4 diversity, and a 1.35x throughput factor for 4x4 MIMO vs a 2x2 passive installation.
-    # Manufacturer claims (5x downloads, 10x uploads, 80% fewer blackspots) are shown in the UI as claims, not modelled.
+    # EDGE Rail 5G active antenna: HUBER+SUHNER SENCITY Rail Active Rooftop (data sheet 1499.00.0005) with the modem
+    # (Sierra Wireless EM9291, 4x4 MIMO 5G sub-6 with 4G fallback, LTE Cat 20) inside the radome - no RF cables or
+    # splitters. Every UK 4G/5G band (incl. 1400 MHz and n78); one modem per unit, two SIM slots for failover. The link
+    # management (Fleet Connect) is Motion Applied's software. Assumptions (editable; the data sheet gives no antenna
+    # gain or noise figure): +6 dB link budget from removing coax/splitter losses and 4x4 diversity, and a 1.35x
+    # throughput factor for 4x4 MIMO vs a 2x2 passive installation.
+    # Marketing claims (5x downloads, 10x uploads, 80% fewer blackspots) are shown in the UI as claims, not modelled.
     EDGE_RAIL_ACTIVE_ANTENNA:          {score_offset: 0.08,  db_offset: 6,   capacity_factor: 1.35}
 
 cellular:
@@ -17,16 +20,16 @@ cellular:
   # Cutting and tunnel terms fitted with the national calibration (config/calibration.yaml, `environment`):
   # Network Rail Yellow Train LTE measurements, 2018-19, all routes. Re-fit with `tcs calibrate-national`.
   terrain:
-    cutting_penalty_max: 0.2            # about 9 dB, reached at full_depth
-    cutting_full_depth_m: 4
+    cutting_penalty_max: 0.28           # about 13 dB, reached at full_depth (cutting depth from LiDAR in GB)
+    cutting_full_depth_m: 8
   cell_distance:
     free_km: 3.0
     penalty_per_km: 0.06
   tunnels:
-    default_score: 0.1                  # deep inside a tunnel with no in-tunnel coverage (about -115 dBm): below usable
+    default_score: 0.08                 # deep inside a tunnel with no in-tunnel coverage (about -116 dBm): below usable
     # Signal from outside carries some way in: the open-air score at each portal falls off exponentially with
     # distance into the tunnel (e-folding length, m) towards default_score. null = default_score throughout.
-    portal_decay_m: 100
+    portal_decay_m: 150
     das_score: 0.52                     # tunnels with in-tunnel coverage: each route lists its own (das_tunnels in its route config)
   # Networks with a modem on the train: each EDGE Rail antenna carries one network's SIM, and only these take part in
   # the onboard link management. null = every network in networks.yaml (a multi-SIM rack router); set by the presets
@@ -108,4 +111,4 @@ presets:
     bonding_efficiency: 0.85         # assumption for Fleet Connect's aggregation vs the generic 0.82
     fitted_networks: [ee, vodafone, three]   # three EDGE Rail antennas, each on its own network
     satcom_enabled: true
-    claims: ["5x faster downloads", "10x faster uploads", "80% reduced blackspots"]   # Motion Applied marketing figures, not used by the model
+    claims: ["5x faster downloads", "10x faster uploads", "80% reduced blackspots"]   # marketing figures, not used by the model
