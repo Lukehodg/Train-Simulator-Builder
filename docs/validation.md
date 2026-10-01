@@ -68,6 +68,7 @@ and deeper ones, so the fit moved from 0.2 of score at 4 m to **0.28 at 8 m** (a
 | within ±6 dB | 33.5 % | 34.1 % |
 | correlation | 0.40 | 0.42 |
 | routes held out of the fit, median error | 11.04 dB | 10.89 dB |
+| 2026 Global View 4G check (182k points, after the level offset) | 10.29 dB | 10.18 dB |
 
 A small gain: cuttings are one of many things that set mobile signal. The larger effect of LiDAR is on satellite sky
 visibility (trees, buildings and bridges beside the line), which no measurement set here can test.
