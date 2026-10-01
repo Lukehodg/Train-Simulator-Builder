@@ -170,6 +170,23 @@ function calibrationText(cal: CalibrationMeta | null | undefined): string {
       : cal.route?.measurements?.fit ? 'This route was measured only in the fit period, so there is no independent test on it. '
       : 'No measurements along this route: the national fit applies as it is. ')
     + 'LTE only, and networks have grown since, so it checks the model rather than today\'s coverage.'
+    + currentText(cal)
+}
+
+function currentText(cal: CalibrationMeta): string {
+  let h = ''
+  const cc = cal.current_check, here = cc?.route
+  if (cc?.overall?.points) {
+    h += ` <br><br>Checked against ${esc(cc.source ?? 'later measurements')} 4G, ${period({ from: cc.fit_period!.from, to: cc.test_period!.to })}: `
+      + (here?.points ? `on this route, ${here.points.toLocaleString()} points, mean error ${here.mae_db?.toFixed(1)} dB` : `not measured on this route; all routes, mean error ${cc.overall.mae_db?.toFixed(1)} dB`)
+      + ` once their level (${(cc.level_offset_db ?? 0) >= 0 ? '+' : '−'}${Math.abs(cc.level_offset_db ?? 0).toFixed(0)} dB, the scanner's uncorrected antenna and cable) is matched.`
+  }
+  const fg = cal.five_g, nets = fg?.route?.networks
+  if (fg?.networks && nets) {
+    const shown = Object.entries(nets).filter(([n]) => fg.networks![n] > 0)        // a network never seen: its 5G bands were not scanned
+    h += ` <br><br>5G usable along ${shown.map(([n, v]) => `${esc(n)} ${Math.round(v * 100)} %`).join(', ')} of measured points (${period(fg.period)}; ${esc((fg.bands ?? []).join(', '))} scanned, not 3.4–3.8 GHz, where Three and Vodafone carry most 5G).`
+  }
+  return h
 }
 
 function renderSources(store: Store) {

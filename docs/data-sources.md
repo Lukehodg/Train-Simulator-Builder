@@ -11,7 +11,7 @@ the app bar and the **Sources** tab show exactly which inputs produced the bundl
 | Corridor postcodes / urban density | OS Code-Point Open (yes) | `ofcom_coverage.corridor_postcodes` | station proximity | — |
 | Cellular coverage prior | Ofcom Mobile Checker UPRN Coverage API (key, postcode → UPRN rows); Connected Nations open data (yes) | `tcs/sources/ofcom_coverage.py` | synthetic prior | 0.55 / 0.65 with cells |
 | Cell sites / handovers | OpenCellID bulk MCC download (token) | `tcs/sources/opencellid.py` | synthetic sites | + cells → 0.65 |
-| Measured RF (calibration + validation) | Network Rail Yellow Train LTE logs (Rail Data Marketplace), Ofcom drive-test CSVs, Ofcom Connectivity on Trains study annexes, Network Survey, modem logs | `tcs/sources/measurements.py`, `tcs/model/calibration.py`, `tcs/validate/metrics.py` | none | 0.70–0.92 |
+| Measured RF (calibration + validation) | Network Rail Yellow Train LTE logs and Global View 4G/5G logs (Rail Data Marketplace), Ofcom drive-test CSVs, Ofcom Connectivity on Trains study annexes, Network Survey, modem logs | `tcs/sources/measurements.py`, `tcs/model/calibration.py`, `tcs/validate/metrics.py` | none | 0.70–0.92 |
 | Satcom | Stage 1: geometry only. Stage 2: Starlink terminal telemetry (`starlink-grpc-tools` export) + train GPS | `tcs/sources/starlink.py` | predictive only | 0.35 → 0.85 |
 | Timetable | YAML calling pattern; CIF (Network Rail Open Data / RDG) with CORPUS; GTFS | `tcs/sources/timetable.py` | YAML | — |
 

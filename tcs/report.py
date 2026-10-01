@@ -624,6 +624,16 @@ def _calibration_row(cal: dict | None) -> tuple[str, str, str]:
                   f"over {cal.get('routes')} routes", "calibrated")
 
 
+def _check_rows(cal: dict | None) -> list[tuple[str, str, str]]:
+    cc, fg = (cal or {}).get("current_check"), (cal or {}).get("five_g")
+    rows = []
+    if cc:
+        rows.append(("Check against current networks (4G)", f"{cc.get('source')}, {period_text({'from': cc['fit_period']['from'], 'to': cc['test_period']['to']})}", "checked"))
+    if fg:
+        rows.append(("5G measured along the route", f"{fg.get('source')}, {period_text(fg.get('period'))} ({', '.join(fg.get('bands') or [])})", "checked"))
+    return rows
+
+
 def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")[:40] or "x"
 
@@ -678,6 +688,7 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
         ("Satellite", "Predictive sky-visibility model" + (" with terminal telemetry" if any("telemetry" in str(x) for x in obs["source_flags"].unique()) else ""), "predictive"),
         ("Timetable", "Route configuration" if settings.route.get("timetable", {}).get("source", "yaml") == "yaml" else str(settings.route["timetable"]["source"]), "configured"),
         _calibration_row(meta.get("calibration")),
+        *_check_rows(meta.get("calibration")),
     ]
     charts = {"capacity": _chart_capacity(samples, rc, stations), "sections": _chart_sections(sec), "links": _chart_links(links),
               "heatmap": _chart_heatmap(samples, stations, bands), "networks": _chart_networks(samples, stations, obs, names, bands["signal"])}
