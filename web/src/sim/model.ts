@@ -14,7 +14,16 @@ function lossTable(q: number, table: [number, number][]): number {
   return out
 }
 
-function dasAt(entries: string[], name: string | null, km: number): boolean {
+/** For each sample: the open-air sample just before and after its tunnel (-1 at a route end) and the distance to each;
+ * open-air samples point at themselves. Mirrors portals() in cellular.py. */
+function portals(inTunnel: Uint8Array, distance: Float64Array) {
+  const n = inTunnel.length, before = new Int32Array(n), after = new Int32Array(n)
+  for (let i = 0; i < n; i++) before[i] = !inTunnel[i] ? i : i > 0 ? (inTunnel[i - 1] ? before[i - 1] : i - 1) : -1
+  for (let i = n - 1; i >= 0; i--) after[i] = !inTunnel[i] ? i : i < n - 1 ? (inTunnel[i + 1] ? after[i + 1] : i + 1) : -1
+  return { before, after }
+}
+
+export function dasAt(entries: string[], name: string | null, km: number): boolean {
   for (const e of entries) {
     if (e.startsWith('km:')) { const [a, b] = e.slice(3).split('-').map(Number); if (km >= a && km <= b) return true }
     else if (name === e) return true
@@ -33,6 +42,9 @@ export function simulate(data: RouteData, sc: Scenario): SimResult {
   const fittedIds: string[] | null = cfg.fitted_networks ?? null
   const fitted = (p: { id: string; type: string }) => p.type !== 'cellular' || fittedIds === null || fittedIds.includes(p.id)
 
+  const decay: number | null = cfg.tunnels.portal_decay_m ?? null
+  const port = decay ? portals(data.inTunnel, data.distance) : null
+
   for (const p of meta.providers) {
     const b = data.base[p.id]
     const r: LinkResult = { q: new Float32Array(n), cap: new Float32Array(n), lat: new Float32Array(n), loss: new Float32Array(n), avail: new Uint8Array(n), rsrp: new Float32Array(n), reason: new Array(n), score: new Float32Array(n) }
@@ -41,11 +53,26 @@ export function simulate(data: RouteData, sc: Scenario): SimResult {
       const capPrior = p.capacity_prior_mbps as Record<string, number>
       const unitsFactor = Number(vprof.capacity_factor ?? 1) || 1
       const onTrain = fitted(p)
+      const floorQ = cfg.tunnels.default_score
+      const open = (k: number) => clamp(b.qb[k] + vprof.score_offset, 0, 1)
+      // Signal in a tunnel: each portal's open-air quality fading with distance inside towards the deep-tunnel floor
+      // (tunnel_quality() in cellular.py); the better portal wins.
+      const inside = (i: number) => {
+        if (!port || !decay) return floorQ
+        let best = NaN
+        for (const [k, d] of [[port.before[i], port.before[i] >= 0 ? data.distance[i] - data.distance[port.before[i]] : 0],
+                              [port.after[i], port.after[i] >= 0 ? data.distance[port.after[i]] - data.distance[i] : 0]]) {
+          if (k < 0) continue
+          const qo = open(k), low = Math.min(qo, floorQ), v = low + (qo - low) * Math.exp(-d / decay)
+          if (!(v <= best)) best = v
+        }
+        return Number.isNaN(best) ? floorQ : best
+      }
       for (let i = 0; i < n; i++) {
         const tun = data.inTunnel[i] === 1
         const isDas = tun && dasAt(das, data.tunnelName[i], data.distance[i] / 1000)
-        let q = b.qb[i] + vprof.score_offset
-        if (isDas) q = cfg.tunnels.das_score; else if (tun) q = cfg.tunnels.default_score
+        let q = open(i)
+        if (isDas) q = cfg.tunnels.das_score; else if (tun) q = inside(i)
         q = clamp(q, 0, 1)
         const hp = b.hp[i] || 0
         const tech = b.tech[i] ?? '4G'

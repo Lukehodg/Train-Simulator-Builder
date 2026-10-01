@@ -26,6 +26,20 @@ export interface StationMeta {
 
 export interface TunnelMeta { name: string; from_m: number; to_m: number; das: boolean }
 
+export interface Accuracy { points: number; bias_db?: number; mae_db?: number; rmse_db?: number; within_6db?: number; correlation?: number | null; usable_agreement?: number }
+/** What the cellular predictions were calibrated against (tcs calibrate-national / tcs calibrate) and how well they held up. */
+export interface CalibrationMeta {
+  scope: 'national' | 'route'
+  source?: string
+  fit_period?: { from: string; to: string }
+  test_period?: { from: string; to: string }
+  routes?: number
+  bias?: Record<string, number>
+  overall?: Accuracy
+  overall_before?: Accuracy
+  route?: { calibrated: Accuracy; uncalibrated: Accuracy; held_out: Accuracy | null; measurements?: Record<string, number> } | null
+}
+
 export interface Meta {
   route: { id: string; name: string; country: string; operator?: string; service_id?: string; direction?: string; origin_crs: string; destination_crs: string; sample_spacing_m: number }
   geometry_source: string
@@ -45,6 +59,7 @@ export interface Meta {
   coverage_sources: string[]
   coverage_share?: Record<string, number>   // share of sample-operator pairs per coverage source (bundles from late 2026 on)
   cell_source: string
+  calibration?: CalibrationMeta | null   // bundles from Oct 2026 on
   model_version: string
   warnings: string[]
 }

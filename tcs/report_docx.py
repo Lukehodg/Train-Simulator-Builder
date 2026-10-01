@@ -23,6 +23,8 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
+from .report import period_text
+
 # Palette: navy text and table heads, one teal accent (the viewer's light-theme accent), cool neutrals.
 NAVY, ACCENT, INK, MUTED, HAIR, BAND, CALLOUT = "1B2A41", "00707C", "1F2933", "5D6C7B", "D5DBE1", "F4F6F8", "EAF4F5"
 FONT = "Calibri"
@@ -350,6 +352,20 @@ class _Report:
         show = _share if measure.endswith("_pct") else (lambda v: format(v, fmt))   # 99.6 % is not rounded up to 100 %
         return show(lo), show(hi)
 
+    @property
+    def cal(self) -> dict:
+        """The calibration behind the cellular predictions (calibration.describe()); {} when uncalibrated."""
+        return self.ev.meta.get("calibration") or {}
+
+    @property
+    def cal_source(self) -> str:
+        return str(self.cal.get("source") or "field measurements").split(" (")[0]
+
+    def cal_tested(self) -> dict:
+        """Accuracy of the calibrated model on this route's held-back measurements; {} if there are none."""
+        r = (self.cal.get("route") or {}).get("calibrated") or {}
+        return r if r.get("points") else {}
+
     def span(self, measure: str, fmt: str, unit: str) -> str:
         """'a–b unit' across the sensitivity cases, or '' when there is no sensitivity analysis."""
         if not self.ev.sensitivity:
@@ -577,7 +593,10 @@ class _Report:
         rows = [("Prepared for", info.get("prepared_for", "")), ("Prepared by", info.get("prepared_by", "")),
                 ("Tender reference", info.get("tender_reference", "")), ("Document reference", self.reference),
                 ("Version", info.get("version") or "1.0"), ("Date of issue", ev.generated.strftime("%d %B %Y").lstrip("0")),
-                ("Status", "Model prediction" + ("; validated against field measurements" if ev.validation is not None and len(ev.validation) else "; not yet validated against field measurements")),
+                ("Status", "Model prediction" + ("; validated against field measurements" if ev.validation is not None and len(ev.validation)
+                                                 else "; calibrated against field measurements and tested on this route" if self.cal_tested()
+                                                 else "; calibrated against field measurements" if self.cal
+                                                 else "; not yet validated against field measurements")),
                 ("Classification", info.get("classification", ""))]
         rows = [(a, b) for a, b in rows if b]
         self.para(after=max(40, (310 if ev.sensitivity else 330) - 17 * len(rows)))   # the details sit towards the foot of the cover
@@ -666,9 +685,17 @@ class _Report:
                               f"{self.between('bonded_median_mbps', '.0f', ' Mbps')}", True),
                              (f"; the result depends most on {top['phrase']}.", False)])
         validated = ev.validation is not None and len(ev.validation)
-        findings.append([("The estimates carry ", False), (f"a mean confidence of {k['mean_confidence']:.2f}", True),
-                         (" on a 0–1 scale" + ("; they have been compared with field measurements (section 8)." if validated else
-                                               "; they have not yet been validated against field measurements (section 8)."), False)])
+        tested, before = self.cal_tested(), ((self.cal.get("route") or {}).get("uncalibrated") or {})
+        if validated:
+            tail = "; they have been compared with field measurements (section 8)."
+        elif tested and before.get("points"):
+            tail = (f"; the mobile signal predictions are calibrated against {self.cal_source}, which on this route brings the average "
+                    f"signal error from {before['mae_db']:.0f} dB down to {tested['mae_db']:.0f} dB (section 8).")
+        elif self.cal:
+            tail = f"; the mobile signal predictions are calibrated against {self.cal_source} (section 8)."
+        else:
+            tail = "; they have not yet been validated against field measurements (section 8)."
+        findings.append([("The estimates carry ", False), (f"a mean confidence of {k['mean_confidence']:.2f}", True), (" on a 0–1 scale" + tail, False)])
         self.bullets(findings)
         if ev.baseline:
             b, bs = ev.baseline["k"], ev.baseline["shares"]
@@ -828,8 +855,15 @@ class _Report:
                                   "timetable gives the time the train passes each point."),
             ("Mobile networks", f"For each operator at each point, the model starts from {coverage}, then applies losses for deep cuttings and "
                                 f"for distance from the serving cell site ({cells}), handover effects as the train passes "
-                                "from one site to the next, and the gain or loss of the train's antenna. Tunnels have no coverage unless an "
-                                "in-tunnel system is listed. Signal (RSRP), throughput, latency and packet loss follow from the resulting quality."),
+                                "from one site to the next, and the gain or loss of the train's antenna. "
+                                + ("Inside a tunnel, the signal from outside fades with distance from the nearest portal, leaving no coverage deep "
+                                   "inside unless an in-tunnel system is listed. " if m.get("sim", {}).get("cellular", {}).get("tunnels", {}).get("portal_decay_m")
+                                   else "Tunnels have no coverage unless an in-tunnel system is listed. ")
+                                + "Signal (RSRP), throughput, latency and packet loss follow from the resulting quality."
+                                + (f" Each network's quality and signal level are calibrated against {self.cal_source}"
+                                   + (f" ({period_text(self.cal.get('fit_period'))}), with the cutting and tunnel losses fitted to the same "
+                                      "measurements" if self.cal.get("scope") == "national" else "")
+                                   + " (section 8)." if self.cal else "")),
             ("Satellite", f"Sky visibility is calculated from {horizon}, reduced for cuttings, station canopies and urban obstruction; tunnels "
                           "block the link. Availability, throughput and latency follow from sky visibility and the terminal's characteristics."),
             ("Onboard link management", "The onboard router scores every link on capacity, latency, loss, stability and confidence, and "
@@ -848,7 +882,7 @@ class _Report:
         ev = self.ev
         self.h1("Data sources and confidence")
         status = {"live": "Live", "synthetic stand-in": "Stand-in (synthetic)", "partly stand-in": "Partly stand-in", "predictive": "Predictive model",
-                  "configured": "Configured"}
+                  "configured": "Configured", "calibrated": "Calibrated", "not calibrated": "Not calibrated"}
         self.table([("Input", 5.4, "l"), ("Source", 7.6, "l"), ("Status", 3.6, "l")],
                    [[a, b, status.get(c, c)] for a, b, c in ev.sources], "Data sources behind this assessment", size=8.5)
         stand_ins = [a for a, _, c in ev.sources if c in ("synthetic stand-in", "partly stand-in")]
@@ -862,9 +896,13 @@ class _Report:
 
     def validation(self) -> None:
         ev = self.ev
-        self.h1("Validation status")
+        self.h1("Calibration and validation" if self.cal else "Validation status")
+        if self.cal.get("scope") == "national":
+            self.calibration_section()
         v = ev.validation
         if v is not None and len(v):
+            if self.cal:
+                self.h2("Measurements on this route")
             self.para("Predicted values were compared with field measurements attached to the route (matched within 250 m). The table gives "
                       "the agreement by network and route section; the Excel appendix holds every row.", keep=True)
             head = v.head(40)
@@ -875,11 +913,56 @@ class _Report:
                          _fmt(100 * r["class_acc"], ".0f") + " %" if pd.notna(r.get("class_acc")) else "–", _fmt(r.get("outage_precision"), ".2f"),
                          _fmt(r.get("outage_recall"), ".2f"), _fmt(r.get("avail_err_pp"), ".1f")] for _, r in head.iterrows()],
                        "Agreement between predictions and field measurements" + (f" (first 40 of {len(v)} rows)" if len(v) > 40 else ""), size=8)
-        else:
+        elif self.cal.get("scope") == "route":
+            self.para("The mobile signal predictions are calibrated against field measurements attached to this route.")
+        elif not self.cal:
             self.para("No field measurements have yet been attached to this route, so the figures in this document are unvalidated "
                       "predictions. The calibration and validation tools accept Ofcom drive-test data, the Ofcom Connectivity on Trains study, "
                       "network survey logs and onboard modem logs. Once supplied, this section reports signal error, outage detection, "
                       "service-class accuracy and handover position error by section, and the confidence values rise accordingly.")
+
+    def calibration_section(self) -> None:
+        cal = self.cal
+        fit, test = period_text(cal.get("fit_period")), period_text(cal.get("test_period"))
+        pts = cal.get("points") or {}
+        self.para(f"The mobile network model is calibrated against {cal.get('source')}. Network Rail's measurement trains log the 4G (LTE) "
+                  "signal of every network once a second as they survey the railway. For each network the strongest signal heard each second "
+                  f"is kept, as a modem would use it, matched to the nearest route point within {cal.get('max_distance_m') or 50:g} m and "
+                  f"reduced to one median value per point. The calibration was fitted on {cal.get('routes')} routes to the measurements from "
+                  f"{fit} ({pts.get('fit', 0):,} medians, one per route point and network) and then tested against those from {test} "
+                  f"({pts.get('test', 0):,}), "
+                  "which it never saw. It sets each network's quality bias, how much signal a cutting costs and how far signal carries into a "
+                  "tunnel; the model's signal scale is kept, so the signal bands and the usable-signal threshold keep their meaning.", keep=True)
+        r = cal.get("route") or {}
+        acc = lambda a: [f"{a['points']:,}", f"{a['bias_db']:+.1f} dB".replace("-", "−"), f"{a['mae_db']:.1f} dB", f"{a['within_6db'] * 100:.0f} %",
+                         f"{a['usable_agreement'] * 100:.0f} %"] if a and a.get("points") else ["–"] * 5
+        cols = [("Model", 5.6, "l"), ("Points", 1.8, "r"), ("Bias", 1.8, "r"), ("Average error", 2.4, "r"), ("Within ±6 dB", 2.3, "r"), ("Agree on usable", 2.7, "r")]
+        if self.cal_tested():
+            rows = [["Before calibration", *acc(r.get("uncalibrated"))], ["Calibrated", *acc(r.get("calibrated"))]]
+            if (r.get("held_out") or {}).get("points"):
+                rows.append(["Calibrated without this route's data", *acc(r.get("held_out"))])
+            self.table(cols, rows, f"Predicted against measured signal (RSRP) on this route, {test}", size=8.5, bold_first=True)
+            few = self.cal_tested()["points"] < 500
+            self.para("Bias is the average of predicted minus measured signal; average error ignores the sign. “Agree on usable” is the share of "
+                      "points where prediction and measurement agree on whether the signal reaches −110 dBm, enough to hold a data session. The "
+                      "last row is the calibration fitted on every other route, a test of how it fares on a route it has never seen."
+                      + (" Few points on this route were measured in the test period, so its figures are indicative only." if few else ""),
+                      size=9, color=MUTED)
+        elif (r.get("measurements") or {}).get("fit"):
+            self.para("The measurements along this route all fall in the fit period, so there is no independent test on it; the figures "
+                      "below are for all the routes together.")
+        else:
+            self.para("There are no measurements along this route in the data, so the calibration fitted on the other routes applies as it is.")
+        settings = cal.get("settings") or {}
+        if settings:
+            names = {"open": "Open line", "cutting": "Cuttings deeper than 4 m", "tunnel": "Tunnels"}
+            self.table(cols, [[names.get(e, e), *acc(a)] for e, a in settings.items()],
+                       f"Calibrated model against measurements on all {cal.get('routes')} routes, {test}, by setting", size=8.5, bold_first=True)
+        self.para(f"The measurements are of 4G signal in {fit[-4:] if fit else ''}–{test[-4:] if test else ''}. Networks have grown since, with new "
+                  "sites, 5G and the 3G switch-off, so the calibration checks how well the model places strong and weak signal along the "
+                  "railway rather than confirming today's levels, which are likely to be somewhat better. Much of the remaining error is "
+                  "local: the operators' coverage predictions are coarser than the 50 m route points. Throughput, latency and the satellite "
+                  "link are not in this data and remain modelled.", keep=True)
 
     def sensitivity_section(self) -> None:
         ev, sens = self.ev, self.ev.sensitivity
@@ -927,6 +1010,8 @@ class _Report:
             "The figures are predictions from published coverage predictions and a simulation; they are not measurements of a deployed system.",
             "Real signal and throughput vary with network load, spectrum, weather and time of day; the model represents these with average assumptions.",
             "Operators' coverage predictions are outdoor predictions; the model adjusts them for the train's antenna and the railway's cuttings and tunnels.",
+            *([f"The calibration uses {self.cal_source} from {period_text(self.cal.get('fit_period'))[:8]} to {period_text(self.cal.get('test_period'))[-8:]}; "
+               "networks have changed since, and only 4G signal was measured."] if self.cal.get("scope") == "national" else []),
             "Cell-site data is community-contributed and incomplete, which affects serving-cell distance and handover positions.",
             "Satellite performance is predicted from sky visibility; beam capacity and network load are represented by a fixed prior.",
             "Passenger demand uses a fixed load profile and share of passengers online; peak loads may differ.",

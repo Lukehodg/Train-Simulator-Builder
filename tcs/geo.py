@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+import shapely
 from pyproj import CRS, Transformer
 from shapely.geometry import LineString, Point
 from shapely.strtree import STRtree
@@ -59,8 +60,8 @@ def bearings(x: np.ndarray, y: np.ndarray) -> np.ndarray:
 
 def nearest_sample_index(sx: np.ndarray, sy: np.ndarray, px: np.ndarray, py: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """For each query point return (index of nearest sample, distance)."""
-    tree = STRtree([Point(a, b) for a, b in zip(sx, sy)])
-    idx = tree.nearest([Point(a, b) for a, b in zip(np.atleast_1d(px), np.atleast_1d(py))])
+    tree = STRtree(shapely.points(np.asarray(sx, dtype=float), np.asarray(sy, dtype=float)))
+    idx = tree.nearest(shapely.points(np.atleast_1d(np.asarray(px, dtype=float)), np.atleast_1d(np.asarray(py, dtype=float))))
     idx = np.asarray(idx, dtype=np.int64)
     d = np.hypot(sx[idx] - np.atleast_1d(px), sy[idx] - np.atleast_1d(py))
     return idx, d

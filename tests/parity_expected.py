@@ -43,7 +43,7 @@ def main() -> int:
     b = load_bundle(interim, s.route["country"])
     prior = pd.read_parquet(interim / "coverage_prior.parquet")
     serving = pd.read_parquet(interim / "serving.parquet")
-    cal = calibration.load(interim / "calibration.json")
+    cal = calibration.for_route(s, interim)
     order = [p["id"] for p in meta["providers"]]
     bit = {pid: 1 << k for k, pid in enumerate(order)}
     weathers = sorted({w for p in s.starlink["satcom"]["providers"] for w in p["availability"]["weather"]} | {"nominal"})

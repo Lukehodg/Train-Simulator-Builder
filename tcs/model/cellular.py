@@ -32,6 +32,49 @@ def das_mask(entries: set[str], names: np.ndarray, km: np.ndarray) -> np.ndarray
     return m
 
 
+def portals(in_tunnel: np.ndarray, distance_m: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """For each sample (in route order): the open-air sample just before and just after its tunnel (-1 at a route end)
+    and the distance to each. Open-air samples point at themselves at distance 0."""
+    n = len(in_tunnel)
+    before, after = np.arange(n), np.arange(n)
+    for i in range(1, n):
+        if in_tunnel[i]:
+            before[i] = before[i - 1] if in_tunnel[i - 1] else i - 1
+    if n and in_tunnel[0]:
+        before[: np.argmin(in_tunnel) if not in_tunnel.all() else n] = -1
+    for i in range(n - 2, -1, -1):
+        if in_tunnel[i]:
+            after[i] = after[i + 1] if in_tunnel[i + 1] else i + 1
+    if n and in_tunnel[-1]:
+        last_open = np.flatnonzero(~in_tunnel)
+        after[(last_open[-1] + 1 if len(last_open) else 0):] = -1
+    d_before = np.where(before >= 0, distance_m - distance_m[np.maximum(before, 0)], np.inf)
+    d_after = np.where(after >= 0, distance_m[np.maximum(after, 0)] - distance_m, np.inf)
+    return before, after, d_before, d_after
+
+
+def tunnel_quality(q: np.ndarray, sample_pos: np.ndarray, provider: np.ndarray, samples: pd.DataFrame, floor: float, decay_m: float | None) -> np.ndarray:
+    """Signal in a tunnel without in-tunnel coverage: the open-air quality at each portal, falling off exponentially
+    with distance into the tunnel (e-folding length decay_m) towards the deep-tunnel floor; the better portal wins.
+    decay_m None: the floor throughout. q, sample_pos, provider: one row per (sample, network), sample_pos in route order."""
+    if not decay_m:
+        return np.full(len(q), floor, dtype=float)
+    tun = samples["in_tunnel"].fillna(False).to_numpy(dtype=bool)
+    before, after, d_before, d_after = portals(tun, samples["distance_m"].to_numpy(dtype=float))
+    out = np.full(len(q), np.nan)
+    for pid in pd.unique(provider):
+        rows = np.flatnonzero(provider == pid)
+        by_pos = np.full(len(tun), np.nan)
+        by_pos[sample_pos[rows]] = q[rows]
+        pos = sample_pos[rows]
+        for side, dist in ((before, d_before), (after, d_after)):
+            src = side[pos]
+            q_out = np.where(src >= 0, by_pos[np.maximum(src, 0)], np.nan)
+            low = np.fmin(q_out, floor)                    # a tunnel is never better than the open air outside it
+            out[rows] = np.fmax(out[rows], low + (q_out - low) * np.exp(-dist[pos] / float(decay_m)))
+    return np.where(np.isnan(out), floor, out)
+
+
 def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.DataFrame, serving: pd.DataFrame,
                           calibration: dict | None = None) -> pd.DataFrame:
     cfg = settings.sim["cellular"]
@@ -71,10 +114,14 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
             raise ValueError("calibration biases must be finite")
         q_base = q_base + correction
     q_base = np.clip(q_base, 0, 1).astype(np.float32)
-    q = q_base + vehicle
+    q = np.clip(q_base + vehicle, 0, 1)
     tun = df["in_tunnel"].fillna(False).values.astype(bool)
     tun_das = tun & das_mask(das, df["tunnel_name"].values, df["distance_m"].values / 1000.0)
-    q = np.where(tun_das, cfg["tunnels"]["das_score"], np.where(tun, cfg["tunnels"]["default_score"], q))
+    tcfg = cfg["tunnels"]
+    ordered = samples.sort_values("distance_m", kind="stable").reset_index(drop=True)
+    pos = df["sample_id"].map(pd.Series(np.arange(len(ordered)), index=ordered["sample_id"].to_numpy())).to_numpy()
+    q_tun = tunnel_quality(q, pos, df["provider_id"].to_numpy(), ordered, float(tcfg["default_score"]), tcfg.get("portal_decay_m"))
+    q = np.where(tun_das, tcfg["das_score"], np.where(tun, q_tun, q))
     q = np.clip(q, 0, 1).astype(np.float32)
 
     # Handover degradation
@@ -89,11 +136,12 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
         slope, intercept = float(mapping["slope"]), float(mapping["intercept"])
         if not np.isfinite([slope, intercept]).all() or slope <= 0:
             raise ValueError("calibration RSRP mapping must be finite with a positive slope")
-        mask = (df["provider_id"].to_numpy() == pid) & ~tun
+        mask = df["provider_id"].to_numpy() == pid              # tunnels too: their signal is the portals' carried inside
         rsrp_slope[mask] = slope
         rsrp_intercept[mask] = intercept
         if calibration.get("rsrp_input") != "corrected_quality":
-            rsrp_intercept[mask] += slope * (raw_quality[mask] - q[mask])
+            legacy = mask & ~tun
+            rsrp_intercept[legacy] += slope * (raw_quality[legacy] - q[legacy])
         mapped[mask] = True
     calibrated = (calibrated | mapped) & ~tun
     rsrp = rsrp_slope * q + rsrp_intercept

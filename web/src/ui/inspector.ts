@@ -1,8 +1,10 @@
 import { fmtHM, type Store } from '../state'
 import { CLASS_NAMES, CLASS_VARS, WIFI_CLASSES, classOf, cssVar, qClass } from '../sim/classify'
+import { dasAt } from '../sim/model'
 import { arrowNav } from './a11y'
 import { LIVE_COVERAGE_MIN, liveCoverageShare } from '../data'
 import { esc } from '../html'
+import type { CalibrationMeta } from '../types'
 
 const $ = (id: string) => document.getElementById(id)!
 
@@ -124,7 +126,8 @@ function renderSample(store: Store, i: number) {
       if (vprof.score_offset) rows.push([vprof.score_offset < 0 ? 'carriage penetration loss' : `active antenna (+${vprof.db_offset} dB)`, `${vprof.score_offset > 0 ? '+' : ''}${vprof.score_offset.toFixed(2)}`])
       if (vprof.capacity_factor && vprof.capacity_factor !== 1) rows.push(['antenna / MIMO factor', `×${vprof.capacity_factor}`])
       if (L.reason[i] === 'NOT_FITTED') rows.push(['on this train', 'not fitted: no modem for this network, so the router cannot use it'])
-      if (d.inTunnel[i]) rows.push(['tunnel', L.q[i] > 0.1 ? `in-tunnel coverage assumed → ${cfg.tunnels.das_score}` : `no coverage → ${cfg.tunnels.default_score}`])
+      if (d.inTunnel[i]) rows.push(['tunnel', dasAt(cfg.tunnels.das_tunnels ?? [], d.tunnelName[i], d.distance[i] / 1000) ? `in-tunnel coverage assumed → ${cfg.tunnels.das_score}`
+        : cfg.tunnels.portal_decay_m ? `signal from the portals, fading inside → ${L.q[i].toFixed(2)}` : `no coverage → ${cfg.tunnels.default_score}`])
       if (b.hp[i] > 0) rows.push(['handover', `+${cfg.handover.latency_spike_ms} ms · ×${cfg.handover.capacity_factor}`])
     } else {
       rows.push(['sky visibility (DEM horizon)', b.qb[i].toFixed(2)])
@@ -152,6 +155,23 @@ function renderSample(store: Store, i: number) {
   $('sampleBody').innerHTML = h
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const month = (iso: string) => `${MONTHS[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}`
+const period = (p?: { from: string; to: string }) => p ? `${month(p.from)} – ${month(p.to)}` : ''
+
+function calibrationText(cal: CalibrationMeta | null | undefined): string {
+  if (!cal) return 'No measurements loaded. <code>tcs calibrate-national</code> fits every route to a national measurement set (e.g. Network Rail\'s Yellow Train logs); <code>tcs calibrate &lt;csv&gt;</code> fits one route to its own drive tests or modem logs.'
+  if (cal.scope === 'route') return 'Fitted to field measurements attached to this route (<code>tcs calibrate</code>): per-operator bias by section and score→RSRP.'
+  const r = cal.route?.calibrated, b = cal.route?.uncalibrated
+  return `${esc(cal.source ?? 'Field measurements')}: per-operator score bias, cutting loss and how far signal carries into tunnels, fitted over ${cal.routes} routes `
+    + `on ${period(cal.fit_period)} and tested on ${period(cal.test_period)}, which the fit never saw. `
+    + (r?.points && b?.points
+      ? `On this route, ${r.points.toLocaleString()} measured points: RSRP within ±6 dB at ${Math.round((r.within_6db ?? 0) * 100)} %, mean error ${r.mae_db?.toFixed(1)} dB (${b.mae_db?.toFixed(1)} dB uncalibrated), bias ${(r.bias_db ?? 0) >= 0 ? '+' : '−'}${Math.abs(r.bias_db ?? 0).toFixed(1)} dB. `
+      : cal.route?.measurements?.fit ? 'This route was measured only in the fit period, so there is no independent test on it. '
+      : 'No measurements along this route: the national fit applies as it is. ')
+    + 'LTE only, and networks have grown since, so it checks the model rather than today\'s coverage.'
+}
+
 function renderSources(store: Store) {
   const m = store.state.data.meta
   const live = (flag: boolean, liveLabel = 'live', synthLabel = 'synthetic') => `<em class="${flag ? 'live' : 'synth'}">${flag ? liveLabel : synthLabel}</em>`
@@ -169,10 +189,10 @@ function renderSources(store: Store) {
       : 'Synthetic prior (noise field). Set <code>OFCOM_API_KEY</code>, or enable Connected Nations open data, to replace it.', covShare > 0 && !covLive ? 'partly live' : undefined],
     ['Cell sites', cellLive, cellLive ? 'OpenCellID corridor extract (CC BY-SA 4.0). Logical cells; top-5 candidates per sample; serving cell with hysteresis.' : 'Synthetic site layout. Set <code>OPENCELLID_TOKEN</code> to use the community database.'],
     ['Satcom', false, `Predictive obstruction model (${esc(m.providers.find(p => p.type === 'satcom')?.terminal ?? 'performance')} terminal). No public route-level Starlink RF telemetry exists; confidence capped at 0.35 until terminal telemetry is ingested.`, 'predictive'],
-    ['Calibration', false, 'No measurements loaded. <code>tcs calibrate &lt;csv&gt;</code> fits score→RSRP and per-operator bias from Ofcom drive tests, the Ofcom train study or Network Survey logs.', 'none'],
+    ['Calibration', !!m.calibration, calibrationText(m.calibration), m.calibration ? undefined : 'none'],
   ] as [string, boolean, string, string?][]
   let h = `<div class="src-list">`
-  for (const [title, ok, text, alt] of items) h += `<div class="src"><h5>${title}${live(ok, 'live', alt ?? 'synthetic')}</h5><p>${text}</p></div>`
+  for (const [title, ok, text, alt] of items) h += `<div class="src"><h5>${title}${live(ok, title === 'Calibration' ? 'calibrated' : 'live', alt ?? 'synthetic')}</h5><p>${text}</p></div>`
   h += `<div class="src"><h5>Model ${esc(m.model_version)}</h5><p>${m.n_samples.toLocaleString()} samples at ${m.route.sample_spacing_m} m · ${(m.length_m / 1000).toFixed(1)} km · scenario switching runs the same link-manager and Wi-Fi model in the browser.</p></div>`
   if (m.warnings?.length) h += `<div class="src"><h5>Warnings</h5><p>${m.warnings.map(esc).join('<br>')}</p></div>`
   h += `</div>`

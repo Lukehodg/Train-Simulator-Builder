@@ -51,6 +51,9 @@ route:
     name: Swansea
     stop: true
     trainshed: true
+  # In-tunnel mobile coverage, measured: Network Rail Yellow Train LTE logs (2018-19) show strong signal deep inside
+  # (tcs calibrate-national lists such tunnels).
+  das_tunnels: ["Severn Tunnel"]
   timetable:
     source: yaml
     departure: 09:00

@@ -10,6 +10,7 @@ import pyarrow as pa
 import pyarrow.feather as feather
 
 from ..config import Settings
+from ..model.calibration import describe as describe_calibration
 from ..model.cellular import das_mask
 from ..schema import PROVIDER_OBSERVATION, ROUTE_CONNECTIVITY
 from .sample_route import RouteBundle
@@ -135,6 +136,7 @@ def export_all(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame, s
         "coverage_share": {str(k): round(float(v), 4) for k, v in prior["source"].fillna("no_coverage_record").value_counts(normalize=True).items()},
         "cell_source": str(cells["source"].iloc[0]) if len(cells) else "none",
         "model_version": settings.sim["model_version"],
+        "calibration": describe_calibration(settings, paths["interim"]),   # what the predictions were calibrated against, and how well
         "warnings": bundle.warnings,
     }
     (web / "meta.json").write_text(json.dumps(meta, indent=1, default=_json_default), encoding="utf-8")

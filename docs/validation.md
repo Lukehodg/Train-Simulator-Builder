@@ -24,3 +24,32 @@ Inputs accepted through `sources/measurements.py` presets: Ofcom drive tests, Of
 by preset and can be overridden with an explicit mapping.
 
 Report validation by section, never as one global score.
+
+## National calibration (`tcs calibrate-national`)
+
+```
+tcs calibrate-national lte-jun18tojun19-yt.csv --preset yellow_train --split 2019-01-01
+```
+
+Fits the cellular model to a measurement set that covers many routes, such as Network Rail's Yellow Train LTE logs
+(Rail Data Marketplace), and tests it on later measurements the fit never saw. For every built route
+(`data/interim/<route>/`; the publish workflow keeps them as its `route-data` artifact):
+
+1. Read the file in chunks, keeping rows near the track (≤ 50 m; legs drawn straight because OSM had no rail path
+   are left out). Scanner logs keep the strongest carrier per second, train and network, as a modem would.
+2. Reduce to one median RSRP per route point, network and period (before / from `--split`).
+3. Choose the rail-environment terms on the fit period, by least absolute error: cutting penalty and full depth, then
+   how far signal carries into a tunnel from its portals (`portal_decay_m`) and the deep-tunnel floor, on tunnels
+   without in-tunnel coverage. Tunnels measured at −90 dBm or better more than 250 m from either portal can only be
+   lit from inside: they are listed under `in_tunnel_coverage` for the route's `das_tunnels`.
+4. Fit each network's score bias on open-air points pooled over all routes (no per-section terms). The model's dB
+   scale is kept: a least-squares slope shrinks when the predicted score is noisy, squeezing predicted signal into a
+   narrow band with the right average but the wrong share of the route in each signal band.
+5. Test on the later period, per route, network and setting (open / cutting / tunnel), against the uncalibrated model,
+   and again with each route held out of the fit.
+
+It writes `config/calibration.yaml`: the parameters, the provenance (source, periods, routes) and the accuracy figures,
+never the measurements. Every route without its own `calibration.json` then uses it
+(`cellular.national_calibration` in `config/simulation.yaml`; `null` turns it off). The environment terms it chose go
+into `config/simulation.yaml` by hand; a test checks the two files agree. Reports (section 8) and the viewer's Sources
+tab show the source, periods and the route's accuracy before and after calibration.

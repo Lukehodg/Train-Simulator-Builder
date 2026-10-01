@@ -31,6 +31,9 @@ route:
     name: Dover Priory
     stop: true
     trainshed: false
+  # In-tunnel mobile coverage, measured: Network Rail Yellow Train LTE logs (2018-19) show strong signal deep inside
+  # (tcs calibrate-national lists such tunnels).
+  das_tunnels: ["London Tunnel 1", "London Tunnel 2"]
   timetable:
     source: yaml
     departure: 09:00
