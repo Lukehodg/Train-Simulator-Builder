@@ -197,8 +197,8 @@ async function main() {
       const vp = cur.vehicle.profiles.EDGE_RAIL_ACTIVE_ANTENNA
       const fitted: string[] | null = cur.cellular.fitted_networks ?? null
       const nets = esc(store.state.data.meta.providers.filter(p => p.type === 'cellular' && (!fitted || fitted.includes(p.id))).map(p => p.name).join(' + '))
-      const agg = store.state.scenario.policy === 'PACKET_BONDING' ? `Fleet Connect aggregates ${fitted ? `the fitted networks (${nets}, one EDGE Rail antenna each)` : 'every mobile network'} and the satcom link at once (efficiency ${cur.wan.bonding_efficiency})` : 'aggregation off: choose Packet bonding to model Fleet Connect'
-      cl.innerHTML = `<b>EDGE Rail 5G active antenna · model assumptions</b>Link budget +${vp.db_offset} dB (no coax/splitter losses, 4x4 MIMO diversity) = quality +${vp.score_offset}; throughput x${vp.capacity_factor}; ${agg}.<br>Manufacturer claims, not modelled: ${esc(pr.claims.join(' · '))}.`
+      const agg = store.state.scenario.policy === 'PACKET_BONDING' ? `Fleet Connect (Motion Applied) aggregates ${fitted ? `the fitted networks (${nets}, one EDGE Rail antenna each)` : 'every mobile network'} and the satcom link at once (efficiency ${cur.wan.bonding_efficiency})` : 'aggregation off: choose Packet bonding to model Fleet Connect'
+      cl.innerHTML = `<b>EDGE Rail 5G active antenna · model assumptions</b>HUBER+SUHNER active rooftop antenna with the modem in the radome. Link budget +${vp.db_offset} dB (no coax/splitter losses, 4x4 MIMO diversity) = quality +${vp.score_offset}; throughput x${vp.capacity_factor}; ${agg}.<br>Manufacturer claims, not modelled: ${esc(pr.claims.join(' · '))}.`
     }
   }
   ;($('designFile') as HTMLInputElement).addEventListener('change', async e => {

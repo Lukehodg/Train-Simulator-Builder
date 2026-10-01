@@ -28,12 +28,14 @@ Handover: serving cell = nearest candidate with hysteresis (switch when < 78 % o
 | profile | score offset | dB | throughput factor | meaning |
 |---|---|---|---|---|
 | EXTERNAL_ROOFTOP_ANTENNA | 0 | 0 | 1.00 | passive roof antenna, coax to a rack router |
-| EDGE_RAIL_ACTIVE_ANTENNA | +0.08 | +6 | 1.35 | modem inside the radome (Sierra EM9291, 4x4 MIMO, LTE Cat 20): no coax/splitter losses, MIMO diversity |
+| EDGE_RAIL_ACTIVE_ANTENNA | +0.08 | +6 | 1.35 | HUBER+SUHNER SENCITY Rail Active Rooftop: modem inside the radome (Sierra EM9291, 4x4 MIMO, LTE Cat 20), no coax/splitter losses, MIMO diversity |
 | PASSENGER_HANDSET_INSIDE_CARRIAGE | -0.18 | -18 | 1.00 | handset behind coated glass |
 
-The `edge_rail_fleet_connect` preset = EDGE_RAIL_ACTIVE_ANTENNA + PACKET_BONDING (Fleet Connect aggregating every
-cellular network and the satcom link simultaneously) with bonding efficiency 0.85. Motion Applied's marketing
-figures (5x downloads, 10x uploads, 80 % fewer blackspots) are displayed as claims and never enter the model.
+The `edge_rail_fleet_connect` preset = EDGE_RAIL_ACTIVE_ANTENNA + PACKET_BONDING (Fleet Connect, Motion Applied's
+link-management software, aggregating every cellular network and the satcom link simultaneously) with bonding
+efficiency 0.85. The marketing figures (5x downloads, 10x uploads, 80 % fewer blackspots) are displayed as claims and
+never enter the model. The +6 dB and 1.35x are assumptions: the HUBER+SUHNER data sheet gives no antenna gain or
+noise figure.
 
 ## Train Studio designs
 
