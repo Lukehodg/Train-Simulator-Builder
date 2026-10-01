@@ -638,6 +638,26 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")[:40] or "x"
 
 
+LIDAR_SURVEYS = {"lidar_ea": "Environment Agency", "lidar_wales": "Welsh Government", "lidar_scotland": "Scottish public sector"}
+
+
+def lidar_text(meta: dict) -> str:
+    """'open 2 m LiDAR (Environment Agency 80 %, Welsh Government 20 %; OGL) on 92 % of the route', or '' without LiDAR."""
+    share, by = meta.get("lidar_share") or 0, meta.get("lidar_sources") or {}
+    if share <= 0:
+        return ""
+    who = ", ".join(LIDAR_SURVEYS.get(k, k) + (f" {v * 100:.0f} %" if len(by) > 1 else "") for k, v in by.items())
+    return f"open 2 m LiDAR ({who}; OGL) on {share * 100:.0f} % of the route"
+
+
+def _terrain_row(meta: dict) -> tuple[str, str, str]:
+    src = meta["terrain_source"]
+    what = {"copernicus_glo30": "Copernicus DEM GLO-30 (30 m)", "os_terrain50": "OS Terrain 50 (50 m)", "synthetic_terrain": "Flat stand-in terrain"}.get(src, src)
+    lidar = lidar_text(meta)
+    return ("Terrain and sky visibility", what + (f"; near the track, {lidar}" if lidar and src != "synthetic_terrain" else ""),
+            "live" if src != "synthetic_terrain" else "synthetic stand-in")
+
+
 def _geometry_row(meta: dict) -> tuple[str, str, str]:
     what = "Route centreline, stations, tunnels, cuttings, line speed"
     src = meta["geometry_source"]
@@ -681,8 +701,7 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
     live = lambda ok: "live" if ok else "synthetic stand-in"
     sources = [
         _geometry_row(meta),
-        ("Terrain and sky visibility", {"copernicus_glo30": "Copernicus DEM GLO-30 (30 m)", "synthetic_terrain": "Flat stand-in terrain"}.get(meta["terrain_source"], meta["terrain_source"]),
-         live(meta["terrain_source"] != "synthetic_terrain")),
+        _terrain_row(meta),
         _coverage_row(meta),
         ("Cell sites and handovers", {"opencellid": "OpenCellID"}.get(meta.get("cell_source", ""), meta.get("cell_source", "") or "Stand-in cell sites"), live(meta.get("cell_source") == "opencellid")),
         ("Satellite", "Predictive sky-visibility model" + (" with terminal telemetry" if any("telemetry" in str(x) for x in obs["source_flags"].unique()) else ""), "predictive"),

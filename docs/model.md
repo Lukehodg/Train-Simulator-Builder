@@ -47,8 +47,12 @@ units beyond that are not modelled), satcom enabled + terminal class
 ## Satcom (Starlink)
 
 ```
-sky      = solid-angle fraction of the dome above 20° left open by the DEM horizon; 0 in tunnels;
-           − 0.85·canopy − min(0.55, cutting/22) − 0.18·urban·(1 − canopy) − weather.sky_penalty
+dome     = solid-angle fraction of the dome above 20° left open by the horizon
+  LiDAR (GB):  horizon = max(LiDAR skyline within 60 m: cutting walls, trees, buildings; terrain beyond)
+               sky = dome · (1 − max(0.85·canopy, share of the track under a bridge))
+  otherwise:   horizon = terrain model
+               sky = (dome − min(0.55, cutting/22)) · (1 − 0.85·canopy)
+sky      = sky − 0.18·urban·(1 − canopy) − weather.sky_penalty; 0 in tunnels
 available = in service ∧ ¬tunnel ∧ sky ≥ 0.35
 capacity  = 220 · sky^1.4 · weather.capacity_factor · (0.3 if temporary beam handover)
 latency   = 28 + 35·(1 − sky) (+40 during handover)

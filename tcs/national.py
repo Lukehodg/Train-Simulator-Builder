@@ -30,7 +30,7 @@ USABLE_DBM = -110.0                 # LTE signal a modem can hold a data session
 CUTTING_M = 4.0                     # deeper than this counts as a cutting in the accuracy breakdown
 
 # Environment terms tried (every combination); the defaults in simulation.yaml sit inside each range.
-CUTTING_PENALTY_MAX = [0.14, 0.2, 0.28, 0.36, 0.44, 0.52, 0.6]
+CUTTING_PENALTY_MAX = [0.0, 0.05, 0.1, 0.14, 0.2, 0.28, 0.36, 0.44, 0.52, 0.6]
 CUTTING_FULL_DEPTH_M = [3, 4, 6, 8, 10, 15, 20, 30]
 PORTAL_DECAY_M = [None, 50, 100, 150, 200, 300, 450, 700]
 # Below the score at which a data session holds (cellular.throughput.score_floor): deep inside a tunnel without in-tunnel

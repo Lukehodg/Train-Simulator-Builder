@@ -88,3 +88,10 @@ terrain:
   horizon_azimuths: 16        # rays cast per sample for the sky-visibility model
   horizon_reach_m: 3000
   horizon_step_m: 50
+  # GB: open 2 m LiDAR (Environment Agency, Welsh Government, Scottish public sector; OGL) replaces the terrain model
+  # close to the track where the surveys cover it: cutting walls, embankments, and the near-field skyline of trees,
+  # buildings and bridges over the line. Read once per route and cached in data/raw/<route>/lidar/.
+  lidar:
+    enabled: true
+    corridor_m: 60            # how far either side of the line it is read (and the near-field skyline reaches)
+    workers: 8                # windows read in parallel

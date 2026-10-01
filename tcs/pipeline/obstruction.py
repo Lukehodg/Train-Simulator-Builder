@@ -1,4 +1,8 @@
-"""Terrain enrichment: DEM sampling, railhead profile, cutting/embankment depth, sky visibility for satcom."""
+"""Terrain enrichment: DEM sampling, railhead profile, cutting/embankment depth, sky visibility for satcom.
+
+In Great Britain, open 2 m LiDAR replaces the 30 m terrain model close to the track wherever the national surveys
+cover it: cutting walls and embankments from the bare-earth model, and the near-field skyline (trees, buildings,
+cutting walls, bridges over the line) from the surface model. Elsewhere the 30 m model is used as before."""
 from __future__ import annotations
 
 import numpy as np
@@ -6,7 +10,7 @@ import pandas as pd
 
 from ..config import Settings
 from ..sources.base import console
-from ..sources.terrain import CopernicusDEM, OSTerrain50, SyntheticDEM, sky_visibility
+from ..sources.terrain import CopernicusDEM, OSTerrain50, SyntheticDEM, horizon_profile, sky_fraction
 from .sample_route import RouteBundle
 
 
@@ -81,19 +85,94 @@ def enrich_terrain(settings: Settings, bundle: RouteBundle) -> pd.DataFrame:
     tcfg = settings.terrain
     sat = settings.starlink["satcom"]["providers"]
     min_el = sat[0]["min_elevation_deg"].get(sat[0]["terminal"], 20) if sat else 20
-    console.log(f"sky visibility: {tcfg.get('horizon_azimuths', 16)} rays x {tcfg.get('horizon_reach_m', 3000)} m for {len(s)} samples ({dem.source})")
-    sky, horizon = sky_visibility(dem, bundle.proj, s["x"].values, s["y"].values, elev, azimuths=int(tcfg.get("horizon_azimuths", 16)),
-                                  reach_m=float(tcfg.get("horizon_reach_m", 3000)), step_m=float(tcfg.get("horizon_step_m", 50)), min_elevation_deg=float(min_el))
-    # Cuttings shadow the low sky beyond what a 30 m DEM resolves; add a local penalty, then tunnels/canopies.
-    sky = sky - np.clip(cutting / 22.0, 0, 0.55)
-    sky = sky * (1 - 0.85 * s["canopy_probability"].values)
+    lid = lidar_features(settings, bundle) if not getattr(dem, "synthetic", False) else None
+    ok = lid["lidar_ok"] if lid is not None else np.zeros(len(s), dtype=bool)
+    corridor = float((tcfg.get("lidar") or {}).get("corridor_m", 60))
+    observer = np.where(ok, lid["rail_level_m"], elev) if lid is not None else elev
+    console.log(f"sky visibility: {tcfg.get('horizon_azimuths', 16)} rays x {tcfg.get('horizon_reach_m', 3000)} m for {len(s)} samples ({dem.source}"
+                + (f"; LiDAR within {corridor:.0f} m on {ok.mean():.0%} of them)" if lid is not None else ")"))
+    near, far = horizon_profile(dem, bundle.proj, s["x"].values, s["y"].values, observer, azimuths=int(tcfg.get("horizon_azimuths", 16)),
+                                reach_m=float(tcfg.get("horizon_reach_m", 3000)), step_m=float(tcfg.get("horizon_step_m", 50)),
+                                split_m=corridor if lid is not None else 0.0)
+    hz = np.fmax(near, far)
+    if lid is not None:                                   # LiDAR sees the near field: trees, buildings, cutting walls
+        hz = np.where(ok[:, None], np.fmax(far, np.nan_to_num(lid["horizon_near_deg"], nan=-90.0)), hz)
+        import warnings
+
+        with warnings.catch_warnings():                   # one side may have no data: the other side stands for both
+            warnings.simplefilter("ignore", RuntimeWarning)
+            walls = np.nanmean(np.c_[lid["wall_left_m"], lid["wall_right_m"]], axis=1)
+            falls = np.nanmean(np.c_[lid["fall_left_m"], lid["fall_right_m"]], axis=1)
+        cutting = np.where(ok & ~s["in_tunnel"].values, walls, cutting)
+        embank = np.where(ok & ~s["in_tunnel"].values, falls, embank)
+    sky = sky_fraction(hz, float(min_el))
+    # Without LiDAR, cuttings shadow the low sky beyond what a 30 m DEM resolves: a local penalty stands in for it.
+    sky = np.where(ok, sky, sky - np.clip(cutting / 22.0, 0, 0.55))
+    canopy = 0.85 * s["canopy_probability"].values
+    roof = np.where(ok, np.fmax(canopy, np.nan_to_num(lid["overhead_fraction"]) if lid is not None else 0.0), canopy)
+    sky = sky * (1 - roof)
     sky = np.where(s["in_tunnel"].values, 0.0, sky)
     out = s.copy()
     out["terrain_m"] = terrain
     out["elevation_m"] = elev
-    out["cutting_depth_m"] = cutting.astype(np.float32)
-    out["embankment_height_m"] = embank.astype(np.float32)
+    out["cutting_depth_m"] = np.nan_to_num(cutting).astype(np.float32)
+    out["embankment_height_m"] = np.nan_to_num(embank).astype(np.float32)
     out["sky_visibility"] = np.clip(sky, 0, 1).astype(np.float32)
-    out["horizon_deg"] = horizon.astype(np.float32)
+    out["horizon_deg"] = hz.mean(axis=1).astype(np.float32)
     out["terrain_source"] = dem.source
+    out["lidar"] = ok
+    if lid is not None:
+        out["lidar_source"] = np.where(ok, lid["lidar_source"], "").astype(str)
+        for k in ("rail_level_m", "wall_left_m", "wall_right_m", "overhead_fraction", "obstruction_share"):
+            out[k] = np.where(ok, lid[k], np.nan).astype(np.float32)
+    return out
+
+
+LIDAR_VERSION = "lidar-v2"                                # bump when the feature definitions change: the cache key includes it
+
+
+def lidar_features(settings: Settings, bundle: RouteBundle) -> dict[str, np.ndarray] | None:
+    """Per-sample LiDAR features for a GB route (sources.lidar), cached by route geometry; None where it does not apply."""
+    import hashlib
+
+    lcfg = settings.terrain.get("lidar") or {}
+    if settings.offline or not lcfg.get("enabled", True) or str(settings.route.get("country", "")).upper() not in {"GB", "UK"}:
+        return None
+    if bundle.proj.crs.to_epsg() != 27700:
+        return None
+    s = bundle.samples
+    corridor, azimuths = float(lcfg.get("corridor_m", 60)), int(settings.terrain.get("horizon_azimuths", 16))
+    on_bridge = s["on_bridge"].fillna(False).to_numpy(dtype=bool) if "on_bridge" in s else np.zeros(len(s), dtype=bool)
+    roofed = s["canopy_probability"].fillna(0).to_numpy() > 0.3 if "canopy_probability" in s else np.zeros(len(s), dtype=bool)
+    key = hashlib.sha1(np.round(np.c_[s["x"].values, s["y"].values, s["bearing_deg"].values], 1).tobytes() + on_bridge.tobytes() + roofed.tobytes()
+                       + f"{LIDAR_VERSION}|{corridor}|{azimuths}".encode()).hexdigest()[:16]
+    cache = settings.paths()["raw"] / "lidar" / f"features_{key}.parquet"
+    if cache.exists():
+        df = pd.read_parquet(cache)
+    else:
+        from ..sources.lidar import Lidar, corridor_features
+
+        try:
+            lidar = Lidar(settings.paths()["raw"].parent / "shared" / "lidar_index")
+        except Exception as exc:  # noqa: BLE001
+            console.log(f"[yellow]LiDAR unavailable ({exc}); using the 30 m terrain model")
+            return None
+        console.log(f"LiDAR: reading a {corridor:.0f} m corridor either side of {len(s):,} samples (England, Wales, Scotland open surveys)")
+        f = corridor_features(s["x"].values, s["y"].values, s["bearing_deg"].values, on_bridge, roofed, lidar, corridor_m=corridor,
+                              azimuths=azimuths, workers=int(lcfg.get("workers", 8)))
+        df = pd.DataFrame({k: v for k, v in f.items() if k not in ("horizon_near_deg", "lidar_failed")})
+        for k in range(azimuths):
+            df[f"hz_{k:02d}"] = f["horizon_near_deg"][:, k]
+        df["lidar_source"] = df["lidar_source"].astype(str)
+        if f["lidar_failed"].any():                       # not cached: the next build asks the services again
+            console.log(f"[yellow]LiDAR: {int(f['lidar_failed'].sum()):,} samples could not be read (service errors); they use the 30 m "
+                        "terrain model in this build")
+        else:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            df.to_parquet(cache, index=False)
+    out = {c: df[c].to_numpy() for c in df.columns if not c.startswith("hz_")}
+    out["lidar_ok"] = out["lidar_ok"].astype(bool)
+    out["horizon_near_deg"] = df[[f"hz_{k:02d}" for k in range(azimuths)]].to_numpy(dtype=np.float32)
+    console.log(f"LiDAR: {out['lidar_ok'].mean():.0%} of samples covered ("
+                + ", ".join(f"{k} {v:.0%}" for k, v in pd.Series(out["lidar_source"][out["lidar_ok"]]).value_counts(normalize=True).items()) + ")")
     return out

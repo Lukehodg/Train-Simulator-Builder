@@ -17,7 +17,7 @@ from .sample_route import RouteBundle
 
 SAMPLE_COLS = ["sample_id", "distance_m", "latitude", "longitude", "elevation_m", "terrain_m", "bearing_deg", "in_tunnel", "tunnel_name",
                "cutting_depth_m", "embankment_height_m", "on_bridge", "canopy_probability", "urban_density", "sky_visibility", "horizon_deg",
-               "speed_kph", "sim_seconds", "next_station", "time_to_next_station_s", "station_nearby"]
+               "lidar", "overhead_fraction", "speed_kph", "sim_seconds", "next_station", "time_to_next_station_s", "station_nearby"]
 PROVIDER_COLS = ["quality_score", "quality_base", "signal_primary", "signal_secondary", "capacity_mbps", "latency_ms", "packet_loss_pct",
                  "available", "confidence", "reason_code", "serving_cell", "serving_distance_m", "handover", "handover_penalty",
                  "radio_technology", "source_flags", "rsrp_slope", "rsrp_intercept"]
@@ -119,6 +119,7 @@ def export_all(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame, s
         "geometry_source": bundle.geometry_source,
         "geometry_straight_legs": list(bundle.provenance.get("straight_legs") or []),   # OSM legs drawn straight: no rail path found
         "terrain_source": str(samples["terrain_source"].iloc[0]) if "terrain_source" in samples else "unknown",
+        **_lidar_meta(samples),                     # open 2 m LiDAR near the track (GB): how much of the route it covers, and from which surveys
         "length_m": float(samples["distance_m"].max()),
         "duration_s": float(samples["sim_seconds"].max()),
         "departure": settings.route.get("timetable", {}).get("departure", "09:00"),
@@ -142,6 +143,14 @@ def export_all(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame, s
     (web / "meta.json").write_text(json.dumps(meta, indent=1, default=_json_default), encoding="utf-8")
     written["web_meta"] = web / "meta.json"
     return written
+
+
+def _lidar_meta(samples: pd.DataFrame) -> dict:
+    if "lidar" not in samples:
+        return {}
+    ok = samples["lidar"].fillna(False).astype(bool)
+    src = samples.loc[ok, "lidar_source"].astype(str) if "lidar_source" in samples else pd.Series(dtype=str)
+    return {"lidar_share": round(float(ok.mean()), 4), "lidar_sources": {k: round(float(v), 4) for k, v in src.value_counts(normalize=True).items()}}
 
 
 def _json_default(o):

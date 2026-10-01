@@ -23,7 +23,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
-from .report import period_text
+from .report import lidar_text, period_text
 
 # Palette: navy text and table heads, one teal accent (the viewer's light-theme accent), cool neutrals.
 NAVY, ACCENT, INK, MUTED, HAIR, BAND, CALLOUT = "1B2A41", "00707C", "1F2933", "5D6C7B", "D5DBE1", "F4F6F8", "EAF4F5"
@@ -849,11 +849,14 @@ class _Report:
         cells = "sites from OpenCellID" if status.get("Cell sites and handovers") == "live" else "a stand-in site layout"
         horizon = ("a 30 m terrain model's horizon around each point" if status.get("Terrain and sky visibility") == "live"
                    else "the horizon around each point on flat stand-in terrain (hills are not modelled for this build)")
+        lidar = lidar_text(m) if status.get("Terrain and sky visibility") == "live" else ""
+        if lidar:
+            horizon += (f", with the skyline within 60 m of the track (cutting walls, trees, buildings and bridges over the line) taken from {lidar}")
         spacing = m.get("route", {}).get("sample_spacing_m") or 50
         for title, text in [
             ("Route and journey", f"{route} The route is sampled every {spacing:g} m; a speed model driven by line speed, station stops and the "
                                   "timetable gives the time the train passes each point."),
-            ("Mobile networks", f"For each operator at each point, the model starts from {coverage}, then applies losses for deep cuttings and "
+            ("Mobile networks", f"For each operator at each point, the model starts from {coverage}, then applies losses for deep cuttings{' (depth measured from the LiDAR where it covers the track)' if lidar else ''} and "
                                 f"for distance from the serving cell site ({cells}), handover effects as the train passes "
                                 "from one site to the next, and the gain or loss of the train's antenna. "
                                 + ("Inside a tunnel, the signal from outside fades with distance from the nearest portal, leaving no coverage deep "
@@ -864,7 +867,7 @@ class _Report:
                                    + (f" ({period_text(self.cal.get('fit_period'))}), with the cutting and tunnel losses fitted to the same "
                                       "measurements" if self.cal.get("scope") == "national" else "")
                                    + " (section 8)." if self.cal else "")),
-            ("Satellite", f"Sky visibility is calculated from {horizon}, reduced for cuttings, station canopies and urban obstruction; tunnels "
+            ("Satellite", f"Sky visibility is calculated from {horizon}, reduced for {'' if lidar else 'cuttings, '}station canopies and urban obstruction; tunnels "
                           "block the link. Availability, throughput and latency follow from sky visibility and the terminal's characteristics."),
             ("Onboard link management", "The onboard router scores every link on capacity, latency, loss, stability and confidence, and "
                                         "combines the usable ones according to the policy: packet bonding aggregates them, failover uses the best "

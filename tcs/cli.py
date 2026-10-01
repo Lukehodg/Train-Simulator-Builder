@@ -254,6 +254,7 @@ def _build_report(route: str | None, preset: str | None, train: Path | None, pol
                   info: dict[str, str] | None = None, satcom: bool = True) -> dict[str, Path]:
     from .model import calibration
     from .model.simulate import simulate
+    from .pipeline.export import _lidar_meta
     from .pipeline.sample_route import load_bundle
     from .report import build_report
 
@@ -296,6 +297,7 @@ def _build_report(route: str | None, preset: str | None, train: Path | None, pol
     meta = json.loads((processed / "web" / "meta.json").read_text(encoding="utf-8"))
     meta["model_version"] = s.sim["model_version"]
     meta["calibration"] = calibration.describe(s, interim)     # as simulated now, not as when the bundle was built
+    meta.update(_lidar_meta(b.samples))                        # likewise the LiDAR the samples carry
     vpath = processed / "validation_by_section.csv"
     validation = None
     if vpath.exists():                                         # only a validation of this build's predictions counts
@@ -482,6 +484,8 @@ def sources():
     t.add_column("source"), t.add_column("status"), t.add_column("fallback")
     t.add_row("OSM Overpass (route, stations, tunnels/cuttings)", "keyless", "synthetic spline (offline)")
     t.add_row("Copernicus DEM GLO-30 (terrain, horizon)", "keyless", "procedural terrain")
+    t.add_row("EA / Welsh Government / Scottish LiDAR (cuttings, trees, bridges; GB)", "keyless" if (s.terrain.get("lidar") or {}).get("enabled", True)
+              else "[yellow]off (terrain.lidar.enabled)", "the 30 m terrain model")
     t.add_row("OS Code-Point Open (corridor postcodes)", "keyless", "-")
     t.add_row("Ofcom API mobile coverage", "key set" if s.key("OFCOM_API_KEY") else "[yellow]OFCOM_API_KEY missing", "Connected Nations open data → synthetic prior")
     t.add_row("OpenCellID bulk", "token set" if s.key("OPENCELLID_TOKEN") else "[yellow]OPENCELLID_TOKEN missing", "synthetic cell sites")
