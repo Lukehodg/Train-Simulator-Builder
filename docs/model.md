@@ -6,7 +6,7 @@ All constants: `config/simulation.yaml` (versioned by `model_version`).
 
 ```
 q_base = prior_score                       # Ofcom level → score, or Connected Nations %, or synthetic
-       − cutting_penalty_max · min(1, cutting_depth / 10 m)
+       − cutting_penalty_max · min(1, cutting_depth / cutting_full_depth_m)   # 0.28 at 8 m (fitted; depth from LiDAR in GB)
        − penalty_per_km · max(0, serving_cell_distance_km − 3)
        + calibration_bias[operator]        # tcs calibrate (one route) or tcs calibrate-national (config/calibration.yaml)
 q      = clip(q_base + vehicle_offset)     # rooftop 0 · handset −0.18 (≈ −18 dB penetration)
