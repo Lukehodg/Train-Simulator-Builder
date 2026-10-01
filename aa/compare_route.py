@@ -423,9 +423,10 @@ def chart_routes(summary: pd.DataFrame, path: Path) -> None:
     for k, size, marker in (("A", 90, "o"), ("P4", 22, "o"), ("P2", 40, "D")):
         ax[0].scatter(hi[f"p50_mbps_{k}"], y, s=size, color=COLOURS[k], marker=marker, zorder=3,
                       facecolors="none" if k == "A" else COLOURS[k], linewidths=1.6 if k == "A" else 0, label=f"{k}  {PROFILES[k]['label']}")
-    ax[0].set_xlabel("Typical train throughput, Mbit/s (median over the journey)", color=ink, fontsize=9)
+    ax[0].set_title("Typical train throughput (median over the journey)", loc="left", fontsize=9.5, color=ink)
+    ax[0].set_xlabel("Mbit/s", color=muted, fontsize=8)
     ax[0].set_xlim(left=0)
-    ax[0].legend(fontsize=8, frameon=False, loc="lower right")
+    ax[0].legend(fontsize=8, frameon=False, loc="lower left", bbox_to_anchor=(0, 1.04), ncol=3, handletextpad=0.3, columnspacing=1.2)
     labels = [f"{n}  ·  {m:.0%} measured" for n, m in zip(hi.name, hi.share_time_measured)]
     ax[0].set_yticks(y, labels, fontsize=8, color=ink)
     for k, off in (("P2", 0.13), ("P4", -0.13)):
@@ -434,12 +435,12 @@ def chart_routes(summary: pd.DataFrame, path: Path) -> None:
         ax[1].scatter(b, y + off, s=14, color=COLOURS[k], zorder=3)
         ax[1].annotate(f"vs {k}", (b[-1], y[-1] + off), xytext=(6, 0), textcoords="offset points", fontsize=8, color=ink, va="center")
     ax[1].axvline(1, color=muted, linewidth=0.8)
-    ax[1].set_xlabel("Active antenna's advantage, median (x): bar from correlated interference to interference like noise",
-                     color=ink, fontsize=9)
+    ax[1].set_title("Active antenna's advantage (median)", loc="left", fontsize=9.5, color=ink)
+    ax[1].set_xlabel("x  (bar: interference correlated across antennas → treated like noise)", color=muted, fontsize=8)
     fig.suptitle("EDGE Rail active antenna vs passive rack-router installs, every route (4G, first cut)", x=0.01, ha="left", fontsize=12, color=ink)
     fig.text(0.01, 0.005, "Throughput: interference treated like noise. Assumptions as aa/compare_route.py ASSUME (the same for every install). "
              "Unmeasured stretches modelled from the simulator.", fontsize=7, color=muted)
-    fig.tight_layout(rect=(0, 0.02, 1, 1))
+    fig.tight_layout(rect=(0, 0.02, 0.97, 0.97))
     fig.savefig(path, dpi=140)
     plt.close(fig)
 
