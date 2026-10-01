@@ -1,19 +1,36 @@
 # Active antenna vs passive install: how to work out the difference, route by route
 
-What is compared:
+## 0. The three profiles compared
 
-| | **A: EDGE Rail active antenna** | **P: passive install** (e.g. an Icomera X6i rack router) |
-|---|---|---|
-| Antenna | HUBER+SUHNER SENCITY Rail Active Rooftop, 4 cellular elements | passive roof antenna(s) |
-| Modem | in the radome (Sierra EM9291), one network per unit | in the rack, one network per modem |
-| Between them | nothing | coax run, connectors, surge protection, maybe splitters |
-| Receive branches per modem | 4 (4x4 MIMO) | as installed: often 2 |
-| Bands | every UK 4G/5G band incl. n78 | what the antenna and the modem both cover |
-| Combining networks | Fleet Connect (Motion Applied) | the router's own bonding |
+A passive install is one of two kinds. The comparison only means something against the kind a fleet actually has.
 
-Everything below is per route sample *s* (50 m), network *n*, carrier *c* and configuration *k* ∈ {A, P}. The values a
-formula needs are listed in section 3. **Install-specific values for P** (number of modems, ports per modem, cable
-type and length) come from the actual installation. The figures given here are placeholders until then.
+| | **A: EDGE Rail active antenna** | **P2: rack router, 2×2 per modem** (legacy) | **P4: rack router, 4×4 per modem** (current) |
+|---|---|---|---|
+| Examples | HUBER+SUHNER SENCITY Rail Active Rooftop + Fleet Connect | Icomera X6 / X6i, X5 v1 (LTE Cat-12); earlier Nomad installs | Icomera X5 v2 (5G, LTE Cat-20 fallback) and X7; Nomad 5G (Cat-20, 4×4 roof antennas) |
+| Where the modem is | in the radome, one network per unit | in the rack, one network per modem | in the rack, one network per modem |
+| Between antenna and modem | nothing | one coax run per port: connectors, surge protection, maybe splitters | as P2, but **4 runs per modem** |
+| Receive branches `M` | 4 | 2 | 4, if the roof antenna has 4 ports per modem and all 4 are cabled (otherwise it is P2) |
+| Layers `L_modem` | 4 | 2 | 4 |
+| Technology and bands | 5G sub-6 + LTE, every UK band incl. n78 | LTE only, as the modules support (X5 v1: every UK LTE band incl. 1400 MHz; older X6 modules may lack some); no 5G | 5G sub-6 incl. n78 + LTE |
+| Feeder loss `L(c)` | 0 | `ℓ·(k1·√f + k2·f)` + fittings | same as P2, per run |
+| Noise figure | the modem's | the modem's + `L(c)` | the modem's + `L(c)` |
+| Networks at once | one per unit (typically 3 units: EE, Vodafone, Three) | one per modem: X6 4 (+1), X5 4, Nomad up to 6 | X5 v2 4, X7 up to 5, Nomad entry 2 / high end up to 6 |
+| Combining networks | Fleet Connect (Motion Applied) | SureWAN (Icomera) / Nomad Connect | SureWAN / Nomad Connect, with LEO satellite on X7 / XS1 / Nomad 5G |
+
+Placeholder defaults for P2 and P4, to be replaced by the real install:
+- **Feeder loss:** 10 m of LMR-400-class cable gives 1.2 / 1.9 / 2.3 / 2.7 dB at 800 / 1800 / 2600 / 3500 MHz, plus 1 dB of connectors and surge protection. Thinner rail cable or longer runs mean more.
+- **Splitters:** none (a 2-way split adds 3 dB).
+- **Antenna gain:** the same elements as A, until the roof antenna's own pattern files are read with `antenna_patterns.py`.
+
+What each comparison measures:
+- **A vs P2:** feeder loss (small where interference dominates), plus **4 branches instead of 2** (about +5 dB at the worst 1 in 10, plus interference rejection), **4 layers instead of 2**, and **5G incl. n78**. This is where a large uplift is possible.
+- **A vs P4:** mostly **feeder loss and noise figure**, which are worth under 1 dB of SINR where interference dominates (section 1.1) and more at coverage edges and in cuttings. Add whatever differs in how many networks run at once. Expect a modest uplift here, concentrated on noise-limited stretches.
+
+Everything below is per route sample *s* (50 m), network *n*, carrier *c* and configuration *k* ∈ {A, P2, P4}; in
+formulas, *P* stands for whichever passive profile is compared. The values a formula needs are listed in section 3.
+The vendors publish modem counts and MIMO but not cable runs, connector losses or roof-antenna gain, so
+**install-specific values for P2 and P4** come from the actual installation: number of modems, ports per modem,
+cable type and length, splitters, and the roof antenna's data sheet.
 
 ## 1. Per sample: from signal to throughput
 
@@ -100,7 +117,7 @@ layers_eff = min( L_modem(k), L_network(c), rank(γ, ρ) )
 P(rank ≥ r | γ) = 1 / (1 + e^(−(γ − γ_r)/w))
 ```
 
-- `L_modem`: 4 for A; 2 for a typical P.
+- `L_modem`: 4 for A and P4; 2 for P2.
 - `L_network`: what the cell offers. UK macro LTE is mostly 2 layers; n78 offers up to 4.
 - Rank thresholds `γ_r` (roughly 10 dB for 2 layers, 18–20 dB for 4) are fitted from the rank indicator in modem logs.
 
@@ -156,7 +173,7 @@ branches beat 2, and almost none from cable loss on busy urban stretches.
 | `G_A(c)`, isolation | vendor pattern files → `antenna_patterns.py` (kept out of git) | done for 1399.99.0153; confirm it is the active unit's antenna |
 | `G_P(c)` | the passive antenna's data sheet / pattern files | needed |
 | `L_P(c)` | `ℓ·(k1·√f + k2·f)` + connectors + surge protection + splitters (3 dB per 2-way split). E.g. 10 m of LMR-400-class cable: 1.2 / 1.9 / 2.3 / 2.7 dB at 800 / 1800 / 2600 / 3500 MHz, plus ~0.5–1.5 dB fittings | needs the real install |
-| `L_modem(P)`, modems, bands | the passive install's configuration | needed |
+| `M`, `L_modem`, modems, bands for P2 / P4 | defaults in section 0; replaced by the passive install's configuration | defaults set; real install needed |
 | `α, γ_min, η_max`, rank thresholds, `g_IRC` | Trainlab active-antenna logs (SINR, rank, throughput) | waiting on data |
 | `u_c` load | time-of-day prior; operator data or test runs later | prior |
 
@@ -185,5 +202,6 @@ Following this method, it becomes:
 - 4 layers when SINR allows (1.3);
 - every UK carrier incl. n78 (1.4).
 
-The passive install becomes its own profile, with its cable losses and ports. Both are evaluated per sample and
-summarised per route as in section 2, in the reports and the viewer.
+The passive installs become two profiles, `RACK_ROUTER_2X2` (P2) and `RACK_ROUTER_4X4` (P4), each with its cable
+losses, ports and bands from section 0. All three are evaluated per sample and summarised per route as in section 2,
+so the reports and the viewer can show EDGE Rail against whichever install a fleet has today.
