@@ -53,3 +53,24 @@ never the measurements. Every route without its own `calibration.json` then uses
 (`cellular.national_calibration` in `config/simulation.yaml`; `null` turns it off). The environment terms it chose go
 into `config/simulation.yaml` by hand; a test checks the two files agree. Reports (section 8) and the viewer's Sources
 tab show the source, periods and the route's accuracy before and after calibration.
+
+## Checks against later measurements (`tcs check-national`)
+
+```
+tcs check-national --four-g Global_View_4G.csv --five-g Global_View_5G.csv --split 2026-04-07
+```
+
+Network Rail's Global View trains log 4G and 5G signal on today's networks (Rail Data Marketplace, from 2026; presets
+`global_view_4g` / `global_view_5g`). Their scanner logs signal before correcting for its antenna and cable: at the
+same route points it reads about 10 dB below the antenna-corrected Yellow Train data, much the same on every network
+and train, which coverage changes would not do. So the 2026 data check the calibration rather than replace it:
+
+- **current_check**: one level offset between the set and the calibrated model is fitted on the measurements before
+  `--split`; accuracy on those from it is then reported per route, network and setting (open / cutting / tunnel).
+- **five_g**: per route and network, the share of the route points passed by a train carrying the 5G scanner (known
+  from its 4G log) where that network's 5G reached −110 dBm SS-RSRP, and which NR bands were measured. The scanner
+  does not measure 3.4–3.8 GHz, where Three and Vodafone carry most of their 5G, so their shares understate it; the
+  model's coverage input (Ofcom) blends 4G and 5G, so these are evidence alongside the predictions, not an input.
+
+Both go into `config/calibration.yaml` (a re-run of `tcs calibrate-national` keeps them) and appear in the reports
+(sections 8.2 and 8.3, and the sources table) and in the viewer's Sources tab.

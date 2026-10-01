@@ -8,6 +8,8 @@ Supported inputs (all CSV; column names mapped through `mapping` so new formats 
 - Throughput/latency test logs
 - Network Rail Yellow Train LTE scanner logs (Rail Data Marketplace): every carrier of every network each second,
   reduced to the strongest per network (the one a modem would use); the condensed parquet form is read too
+- Network Rail Global View 4G and 5G scanner logs (Rail Data Marketplace, 2026 on): the same reduction; date and
+  time in separate columns (day first), and each data row carries one field more than the header
 
 Large files are read in chunks, keeping only the rows inside `bbox` (the route's surroundings).
 
@@ -44,6 +46,16 @@ PRESETS: dict[str, dict[str, list[str]]] = {
         "timestamp": ["datetime"], "latitude": ["latitude"], "longitude": ["longitude"], "provider": ["operator"],
         "rsrp_dbm": ["cal_rsrp"],                      # RSRP corrected for the measurement antenna, not the raw scanner value
         "rsrq_db": ["rsrq"], "sinr_db": ["sinr"], "mnc": ["mnc"], "cell_id": ["pci"], "device": ["train"],
+    },
+    "global_view_4g": {
+        "timestamp": ["date"], "time_of_day": ["time"], "latitude": ["latitude"], "longitude": ["longitude"], "provider": ["operator"],
+        "rsrp_dbm": ["rsrp"], "rsrq_db": ["rsrq"], "sinr_db": ["sinr"], "mnc": ["mnc"], "mcc": ["mcc"], "cell_id": ["cellid", "pci"],
+        "device": ["train"], "channel": ["earfcn"],
+    },
+    "global_view_5g": {                                # NR: SS-RSRP per beam; the strongest per second and network is kept
+        "timestamp": ["date"], "time_of_day": ["time"], "latitude": ["latitude"], "longitude": ["longitude"], "provider": ["operator"],
+        "rsrp_dbm": ["rsrp"], "rsrq_db": ["rsrq"], "sinr_db": ["sinr"], "mnc": ["mnc"], "mcc": ["mcc"], "cell_id": ["pci"],
+        "device": ["train"], "channel": ["nrarfcn"],
     },
     "modem_log": {
         "timestamp": ["time"], "latitude": ["latitude", "lat"], "longitude": ["longitude", "lon", "lng"], "provider": ["carrier", "operator", "sim"],
@@ -88,8 +100,10 @@ def _provider_from(value: str, operators: list[dict]) -> str | None:
 
 
 # Scanners log every carrier they hear; a modem uses the strongest, so keep that one per second, device and network.
-BEST_SERVER = {"yellow_train"}
-FIXED = {"yellow_train": {"radio": "4G"}}                  # the Yellow Train file is LTE only
+BEST_SERVER = {"yellow_train", "global_view_4g", "global_view_5g"}
+FIXED = {"yellow_train": {"radio": "4G"}, "global_view_4g": {"radio": "4G"}, "global_view_5g": {"radio": "5G"}}
+DATE_FORMAT = {"global_view_4g": "%d/%m/%Y %H:%M:%S", "global_view_5g": "%d/%m/%Y %H:%M:%S"}   # with time_of_day appended
+RSRP_VALID = (-160.0, -20.0)                               # scanners log 0 or -200 for "no reading"
 
 
 def load_measurements(path: Path, preset: str, operators: list[dict], mapping: dict[str, str] | None = None,
@@ -105,8 +119,12 @@ def load_measurements(path: Path, preset: str, operators: list[dict], mapping: d
         guess = _guess(f.schema_arrow.names, preset, mapping)
         chunks = (b.to_pandas() for b in f.iter_batches(batch_size=chunksize))
     else:
-        chunks = pd.read_csv(path, low_memory=False, chunksize=chunksize, encoding="utf-8-sig")
+        # index_col=False: a row with one field more than the header (Global View files) must not shift every column
+        chunks = pd.read_csv(path, low_memory=False, chunksize=chunksize, encoding="utf-8-sig", index_col=False)
     parts = []
+    import warnings
+
+    warnings.filterwarnings("ignore", "Length of header", pd.errors.ParserWarning)   # the extra field is expected (above)
     for df in chunks:
         if guess is None:
             guess = _guess(list(df.columns), preset, mapping)
@@ -173,9 +191,14 @@ def _canonical(df: pd.DataFrame, guess: dict[str, str | None], preset: str, oper
     elif out["mcc"].notna().any():
         mm = {(int(op["mcc"]), int(m)): op["id"] for op in operators for m in op.get("mnc", [])}
         out["provider_id"] = [mm.get((int(a), int(b))) if pd.notna(a) and pd.notna(b) else None for a, b in zip(out["mcc"], out["mnc"])]
-    out["timestamp"] = pd.to_datetime(out["timestamp"], errors="coerce", utc=True)
+    if guess.get("time_of_day") in df.columns:              # date and time in separate columns
+        out["timestamp"] = out["timestamp"].astype(str) + " " + df[guess["time_of_day"]].astype(str)
+    out["timestamp"] = pd.to_datetime(out["timestamp"], errors="coerce", utc=True, format=DATE_FORMAT.get(preset))
     for c in ["latitude", "longitude", "rsrp_dbm", "rsrq_db", "sinr_db", "throughput_mbps", "latency_ms"]:
         out[c] = pd.to_numeric(out[c], errors="coerce")
+    out["rsrp_dbm"] = out["rsrp_dbm"].where(out["rsrp_dbm"].between(*RSRP_VALID))
+    if guess.get("channel") in df.columns:                   # EARFCN / NR-ARFCN: which band a reading is on
+        out["channel"] = pd.to_numeric(df[guess["channel"]], errors="coerce")
     out["source"] = f"{preset}:{path.name}"
     out["kind"] = "segment" if preset == "ofcom_train_segments" else "point"
     out["device"] = df[guess["device"]].astype(str) if guess.get("device") in df.columns else ""

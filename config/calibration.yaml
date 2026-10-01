@@ -1,5 +1,6 @@
-# National calibration of the cellular model, written by `tcs calibrate-national`: re-run it rather than editing.
-# Parameters and accuracy figures derived from the measurements; the measurements themselves are not kept here.
+# National calibration of the cellular model, written by `tcs calibrate-national` (and its checks against later
+# measurements by `tcs check-national`): re-run them rather than editing. Parameters and accuracy figures derived
+# from the measurements; the measurements themselves are not kept here.
 # `environment` holds the rail-environment terms fitted with it: config/simulation.yaml must carry the same values.
 source: Network Rail Yellow Train LTE measurements (Rail Data Marketplace)
 file: lte-jun18tojun19-yt.parquet
@@ -1339,3 +1340,398 @@ validation:
       measurements:
         fit: 681479
         test: 354370
+current_check:
+  source: Network Rail Global View measurements (Rail Data Marketplace)
+  file: Global_View_4G.parquet
+  preset: global_view_4g
+  fit_period:
+    from: '2026-03-16'
+    to: '2026-04-04'
+  test_period:
+    from: '2026-04-07'
+    to: '2026-05-02'
+  split: '2026-04-07'
+  level_offset_db: -7.1
+  max_distance_m: 50.0
+  skipped: {}
+  overall:
+    points: 182311
+    bias_db: 0.21
+    mae_db: 10.29
+    rmse_db: 13.26
+    within_6db: 0.38
+    correlation: 0.313
+    usable_agreement: 0.912
+    measured_median_dbm: -90.3
+    predicted_median_dbm: -88.7
+  networks:
+    EE:
+      points: 49621
+      bias_db: -1.19
+      mae_db: 9.67
+      rmse_db: 12.56
+      within_6db: 0.406
+      correlation: 0.3
+      usable_agreement: 0.937
+      measured_median_dbm: -89.0
+      predicted_median_dbm: -88.2
+    O2:
+      points: 47799
+      bias_db: 0.74
+      mae_db: 9.87
+      rmse_db: 12.69
+      within_6db: 0.394
+      correlation: 0.345
+      usable_agreement: 0.933
+      measured_median_dbm: -89.6
+      predicted_median_dbm: -87.4
+    Three:
+      points: 47815
+      bias_db: 0.88
+      mae_db: 10.46
+      rmse_db: 13.4
+      within_6db: 0.37
+      correlation: 0.305
+      usable_agreement: 0.881
+      measured_median_dbm: -93.0
+      predicted_median_dbm: -90.9
+    Vodafone:
+      points: 37076
+      bias_db: 0.56
+      mae_db: 11.46
+      rmse_db: 14.65
+      within_6db: 0.338
+      correlation: 0.266
+      usable_agreement: 0.892
+      measured_median_dbm: -89.8
+      predicted_median_dbm: -87.5
+  settings:
+    open:
+      points: 172036
+      bias_db: 0.34
+      mae_db: 10.28
+      rmse_db: 13.24
+      within_6db: 0.38
+      correlation: 0.297
+      usable_agreement: 0.918
+      measured_median_dbm: -89.9
+      predicted_median_dbm: -87.7
+    cutting:
+      points: 9078
+      bias_db: -0.98
+      mae_db: 10.28
+      rmse_db: 13.25
+      within_6db: 0.381
+      correlation: 0.281
+      usable_agreement: 0.81
+      measured_median_dbm: -97.5
+      predicted_median_dbm: -96.9
+    tunnel:
+      points: 1197
+      bias_db: -8.19
+      mae_db: 12.43
+      rmse_db: 16.03
+      within_6db: 0.318
+      correlation: 0.225
+      usable_agreement: 0.783
+      measured_median_dbm: -97.0
+      predicted_median_dbm: -103.2
+  routes:
+    bml_vic_btn:
+      points: 5879
+      bias_db: 5.54
+      mae_db: 11.2
+      rmse_db: 14.16
+      within_6db: 0.338
+      correlation: 0.27
+      usable_agreement: 0.894
+      measured_median_dbm: -93.9
+      predicted_median_dbm: -87.2
+    chiltern_myb_bmo:
+      points: 1569
+      bias_db: -2.05
+      mae_db: 11.66
+      rmse_db: 14.56
+      within_6db: 0.32
+      correlation: 0.201
+      usable_agreement: 0.894
+      measured_median_dbm: -89.9
+      predicted_median_dbm: -90.7
+    cornish_pad_pnz:
+      points: 20410
+      bias_db: -0.19
+      mae_db: 10.68
+      rmse_db: 13.64
+      within_6db: 0.362
+      correlation: 0.301
+      usable_agreement: 0.906
+      measured_median_dbm: -90.2
+      predicted_median_dbm: -89.3
+    ecml_kgx_edb:
+      points: 25694
+      bias_db: -0.11
+      mae_db: 9.97
+      rmse_db: 12.77
+      within_6db: 0.387
+      correlation: 0.282
+      usable_agreement: 0.95
+      measured_median_dbm: -88.7
+      predicted_median_dbm: -87.7
+    gwml_pad_swa:
+      points: 6325
+      bias_db: -0.81
+      mae_db: 9.21
+      rmse_db: 11.83
+      within_6db: 0.414
+      correlation: 0.355
+      usable_agreement: 0.969
+      measured_median_dbm: -85.7
+      predicted_median_dbm: -85.6
+    hs1_stp_dvp:
+      points: 2168
+      bias_db: -0.43
+      mae_db: 9.85
+      rmse_db: 12.77
+      within_6db: 0.408
+      correlation: 0.325
+      usable_agreement: 0.932
+      measured_median_dbm: -91.1
+      predicted_median_dbm: -90.2
+    mml_stp_shf:
+      points: 18849
+      bias_db: -0.99
+      mae_db: 9.95
+      rmse_db: 12.99
+      within_6db: 0.399
+      correlation: 0.275
+      usable_agreement: 0.925
+      measured_median_dbm: -88.9
+      predicted_median_dbm: -87.7
+    nwc_cre_hhd:
+      points: 36
+      bias_db: -3.2
+      mae_db: 6.62
+      rmse_db: 7.76
+      within_6db: 0.444
+      correlation: 0.303
+      usable_agreement: 1.0
+      measured_median_dbm: -78.1
+      predicted_median_dbm: -81.7
+    sc_lds_car:
+      points: 11463
+      bias_db: -1.26
+      mae_db: 10.51
+      rmse_db: 13.37
+      within_6db: 0.366
+      correlation: 0.438
+      usable_agreement: 0.777
+      measured_median_dbm: -96.0
+      predicted_median_dbm: -94.8
+    swml_wat_wey:
+      points: 5279
+      bias_db: 2.8
+      mae_db: 10.94
+      rmse_db: 14.04
+      within_6db: 0.355
+      correlation: 0.354
+      usable_agreement: 0.876
+      measured_median_dbm: -91.7
+      predicted_median_dbm: -87.7
+    tfw_cdf_man:
+      points: 15311
+      bias_db: -0.07
+      mae_db: 9.52
+      rmse_db: 12.08
+      within_6db: 0.395
+      correlation: 0.344
+      usable_agreement: 0.903
+      measured_median_dbm: -93.3
+      predicted_median_dbm: -92.1
+    tpe_man_ncl:
+      points: 10197
+      bias_db: -0.61
+      mae_db: 10.0
+      rmse_db: 12.92
+      within_6db: 0.394
+      correlation: 0.272
+      usable_agreement: 0.945
+      measured_median_dbm: -89.0
+      predicted_median_dbm: -88.2
+    wcml_eus_glc:
+      points: 41054
+      bias_db: 1.31
+      mae_db: 10.74
+      rmse_db: 13.95
+      within_6db: 0.373
+      correlation: 0.224
+      usable_agreement: 0.907
+      measured_median_dbm: -90.6
+      predicted_median_dbm: -88.0
+    wcml_eus_man:
+      points: 9083
+      bias_db: 0.51
+      mae_db: 9.62
+      rmse_db: 12.41
+      within_6db: 0.403
+      correlation: 0.307
+      usable_agreement: 0.939
+      measured_median_dbm: -89.0
+      predicted_median_dbm: -86.9
+    xc_bri_yrk:
+      points: 8994
+      bias_db: -1.14
+      mae_db: 10.78
+      rmse_db: 13.89
+      within_6db: 0.362
+      correlation: 0.258
+      usable_agreement: 0.924
+      measured_median_dbm: -88.6
+      predicted_median_dbm: -87.7
+five_g:
+  source: Network Rail Global View measurements (Rail Data Marketplace)
+  file: Global_View_5G.parquet
+  preset: global_view_5g
+  usable_dbm: -110.0
+  bands:
+  - 700 MHz
+  - 900 MHz
+  - 2.1 GHz
+  - 2.6 GHz
+  unmeasured_bands:
+  - 1800 MHz
+  - 3.4-3.8 GHz
+  period:
+    from: '2026-03-16'
+    to: '2026-05-02'
+  networks:
+    EE: 0.782
+    O2: 0.695
+    Vodafone: 0.0
+    Three: 0.077
+  routes:
+    ecml_kgx_edb:
+      points: 7701
+      networks:
+        EE: 0.821
+        O2: 0.857
+        Vodafone: 0.0
+        Three: 0.074
+    bml_vic_btn:
+      points: 1544
+      networks:
+        EE: 0.807
+        O2: 0.801
+        Vodafone: 0.0
+        Three: 0.054
+    chiltern_myb_bmo:
+      points: 601
+      networks:
+        EE: 0.606
+        O2: 0.642
+        Vodafone: 0.0
+        Three: 0.0
+    cornish_pad_pnz:
+      points: 5962
+      networks:
+        EE: 0.712
+        O2: 0.59
+        Vodafone: 0.0
+        Three: 0.072
+    eg_edb_glq:
+      points: 100
+      networks:
+        EE: 0.97
+        O2: 0.9
+        Vodafone: 0.0
+        Three: 0.0
+    geml_lst_nrw:
+      points: 6
+      networks:
+        EE: 1.0
+        O2: 1.0
+        Vodafone: 0.0
+        Three: 0.0
+    gwml_pad_swa:
+      points: 5877
+      networks:
+        EE: 0.783
+        O2: 0.615
+        Vodafone: 0.0
+        Three: 0.07
+    hml_edb_inv:
+      points: 139
+      networks:
+        EE: 0.957
+        O2: 0.863
+        Vodafone: 0.0
+        Three: 0.0
+    hs1_stp_dvp:
+      points: 983
+      networks:
+        EE: 0.789
+        O2: 0.857
+        Vodafone: 0.0
+        Three: 0.18
+    mml_stp_shf:
+      points: 5133
+      networks:
+        EE: 0.944
+        O2: 0.908
+        Vodafone: 0.0
+        Three: 0.076
+    nwc_cre_hhd:
+      points: 316
+      networks:
+        EE: 0.696
+        O2: 0.193
+        Vodafone: 0.0
+        Three: 0.114
+    sc_lds_car:
+      points: 3348
+      networks:
+        EE: 0.42
+        O2: 0.412
+        Vodafone: 0.0
+        Three: 0.005
+    swml_wat_wey:
+      points: 1648
+      networks:
+        EE: 0.824
+        O2: 0.743
+        Vodafone: 0.0
+        Three: 0.14
+    tfw_cdf_man:
+      points: 4542
+      networks:
+        EE: 0.759
+        O2: 0.408
+        Vodafone: 0.0
+        Three: 0.062
+    tpe_man_ncl:
+      points: 2783
+      networks:
+        EE: 0.816
+        O2: 0.894
+        Vodafone: 0.0
+        Three: 0.071
+    wcml_eus_glc:
+      points: 11216
+      networks:
+        EE: 0.75
+        O2: 0.611
+        Vodafone: 0.0
+        Three: 0.094
+    wcml_eus_man:
+      points: 5016
+      networks:
+        EE: 0.844
+        O2: 0.789
+        Vodafone: 0.0
+        Three: 0.05
+    xc_bri_yrk:
+      points: 5985
+      networks:
+        EE: 0.873
+        O2: 0.805
+        Vodafone: 0.0
+        Three: 0.12

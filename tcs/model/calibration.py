@@ -138,4 +138,19 @@ def describe(settings: Settings, interim: Path) -> dict | None:
             "overall": (v.get("calibrated") or {}).get("overall"), "overall_before": (v.get("uncalibrated") or {}).get("overall"),
             "networks": (v.get("calibrated") or {}).get("networks"), "settings": (v.get("calibrated") or {}).get("settings"),
             "held_out_routes": v.get("held_out_routes"),
-            "route": (v.get("routes") or {}).get(settings.route_id)}      # None: no measurements along this route
+            "route": (v.get("routes") or {}).get(settings.route_id),      # None: no measurements along this route
+            "current_check": _check_for(doc.get("current_check"), settings.route_id),
+            "five_g": _five_g_for(doc.get("five_g"), settings.route_id)}
+
+
+def _check_for(c: dict | None, rid: str) -> dict | None:
+    """The model against later measurements (tcs check-national), nationally and on this route."""
+    if not c:
+        return None
+    return {k: c.get(k) for k in ("source", "fit_period", "test_period", "level_offset_db", "overall", "networks")} | {"route": (c.get("routes") or {}).get(rid)}
+
+
+def _five_g_for(f: dict | None, rid: str) -> dict | None:
+    if not f:
+        return None
+    return {k: f.get(k) for k in ("source", "period", "usable_dbm", "bands", "unmeasured_bands", "networks")} | {"route": (f.get("routes") or {}).get(rid)}

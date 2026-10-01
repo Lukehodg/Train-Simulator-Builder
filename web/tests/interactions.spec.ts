@@ -272,3 +272,12 @@ test('cell sites are shown by default', async ({ page }) => {
   await page.locator('#ly_cells').uncheck()                  // and can still be switched off
   await expect(page.locator('#ly_cells')).not.toBeChecked()
 })
+
+test('each mobile network has its own colour, shown beside it in the links list', async ({ page }) => {
+  const swatches = page.locator('.link-row .net-swatch')
+  await expect(swatches).toHaveCount(4)                      // EE, O2, Vodafone, Three; none on the Wi-Fi or satellite rows
+  const colours = await swatches.evaluateAll(els => els.map(e => getComputedStyle(e).backgroundColor))
+  expect(new Set(colours).size).toBe(4)                      // the same colours draw each network's towers and serving lines
+  const muted = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--muted').trim())
+  expect(colours).not.toContain(muted)
+})

@@ -56,6 +56,12 @@ export function hexToRgb(hex: string): [number, number, number] {
   const n = parseInt(v, 16)
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
 }
+/** A mobile network's colour (--net-<id>), or the muted ink for a network without one. */
+export function networkColor(id: string): [number, number, number] {
+  const v = cssVar(`--net-${id}`)
+  return v ? hexToRgb(v) : hexToRgb(cssVar('--muted'))
+}
+
 export function palette(): { cls: [number, number, number][]; conf: [number, number, number][]; accent: [number, number, number]; text: [number, number, number]; muted: [number, number, number] } {
   return {
     cls: CLASS_VARS.map(v => hexToRgb(cssVar(v))),

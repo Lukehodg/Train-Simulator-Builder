@@ -448,6 +448,32 @@ def calibrate_national(measurements: Path = typer.Argument(..., help="Measuremen
     console.log(f"wrote {out}")
 
 
+@app.command("check-national")
+def check_national(four_g: Path = typer.Option(..., "--four-g", help="Later 4G measurements covering many routes (CSV or parquet)"),
+                   five_g: Path | None = typer.Option(None, "--five-g", help="5G measurements from the same trains (CSV or parquet)"),
+                   preset_4g: str = typer.Option("global_view_4g"), preset_5g: str = typer.Option("global_view_5g"),
+                   split: str = typer.Option(..., help="Fit the level offset before this date, test from it"),
+                   source: str = typer.Option("Network Rail Global View measurements (Rail Data Marketplace)", help="Named in reports"),
+                   only: str | None = typer.Option(None, help="Comma-separated route ids (default: every built route)"),
+                   out: Path = typer.Option(ROOT / "config" / "calibration.yaml")):
+    """Check the calibrated model against later measurements (e.g. the 2026 Global View 4G logs) and summarise where 5G
+    was measured; adds `current_check` and `five_g` to config/calibration.yaml for the reports and the viewer. The
+    calibration itself is unchanged: a later set whose level differs (a scanner logging before its antenna and cable
+    corrections) checks the pattern of strong and weak signal, after one level offset."""
+    from . import national
+
+    if not out.exists():
+        raise typer.BadParameter(f"{out} does not exist: run `tcs calibrate-national` first")
+    ids = [r["id"] for r in list_routes()]
+    if only:
+        ids = [i for i in ids if i in {x.strip() for x in only.split(",")}]
+    sections = {"current_check": {"source": source, "file": four_g.name, **national.check(ids, four_g, preset_4g, split, log=console.log)}}
+    if five_g:
+        sections["five_g"] = {"source": source, "file": five_g.name, **national.five_g(ids, four_g, five_g, preset_4g, preset_5g, log=console.log)}
+    national.save_checks(out, **sections)
+    console.log(f"wrote {', '.join(sections)} to {out}")
+
+
 @app.command()
 def sources():
     """Show which live sources are configured (keys present) and which will fall back."""

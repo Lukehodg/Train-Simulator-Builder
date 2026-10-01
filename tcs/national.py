@@ -284,14 +284,107 @@ def _period(routes: list[RouteData], period: str) -> dict:
     return {"from": min(d["first"] for d in days), "to": max(d["last"] for d in days)} if days else {}
 
 
+CHECKS = ("current_check", "five_g")      # sections `tcs check-national` adds; re-fitting the calibration keeps them
+HEADER = ("# National calibration of the cellular model, written by `tcs calibrate-national` (and its checks against later\n"
+          "# measurements by `tcs check-national`): re-run them rather than editing. Parameters and accuracy figures derived\n"
+          "# from the measurements; the measurements themselves are not kept here.\n"
+          "# `environment` holds the rail-environment terms fitted with it: config/simulation.yaml must carry the same values.\n")
+
+
 def write(doc: dict, out: Path, source: str, file: str, preset: str) -> dict:
     """config/calibration.yaml: provenance first, then the parameters and accuracy national.run() produced."""
     doc = {"source": source, "file": file, "preset": preset, "fitted_on": datetime.date.today().isoformat(), **doc}
-    header = ("# National calibration of the cellular model, written by `tcs calibrate-national`: re-run it rather than editing.\n"
-              "# Parameters and accuracy figures derived from the measurements; the measurements themselves are not kept here.\n"
-              "# `environment` holds the rail-environment terms fitted with it: config/simulation.yaml must carry the same values.\n")
-    Path(out).write_text(header + yaml.safe_dump(_plain(doc), sort_keys=False, allow_unicode=True, width=140), encoding="utf-8")
+    prev = yaml.safe_load(Path(out).read_text(encoding="utf-8")) if Path(out).exists() else {}
+    for k in CHECKS:
+        if k in (prev or {}) and k not in doc:
+            doc[k] = prev[k]
+    _dump(doc, out)
     return doc
+
+
+def save_checks(out: Path, **sections) -> dict:
+    """Add or replace check sections in an existing calibration file; the calibration itself is left as it is."""
+    doc = yaml.safe_load(Path(out).read_text(encoding="utf-8"))
+    doc.update(sections)
+    _dump(doc, out)
+    return doc
+
+
+def _dump(doc: dict, out: Path) -> None:
+    Path(out).write_text(HEADER + yaml.safe_dump(_plain(doc), sort_keys=False, allow_unicode=True, width=140), encoding="utf-8")
+
+
+def check(route_ids: list[str], path, preset: str, split: str, max_distance_m: float = 50.0, log=print) -> dict:
+    """The model as calibrated, against a later measurement set whose overall level may differ from the calibration
+    data's (a scanner that logs signal before correcting for its antenna and cable). One level offset is fitted on the
+    measurements before `split`; accuracy is then measured on those from `split`, per route, network and setting."""
+    cut = pd.Timestamp(split, tz="UTC")
+    routes, skipped = collect(route_ids, path, preset, cut, max_distance_m=max_distance_m, log=log)
+    if not routes:
+        raise ValueError("no route has measurements to check against")
+    names = {op["id"]: op["name"] for op in routes[0].settings.operators}
+    j = pd.concat([predict(r, environment_of(r.settings), calibration.for_route(r.settings, r.settings.paths()["interim"])) for r in routes])
+    fit, test = j[j["period"] == "fit"], j[j["period"] == "test"]
+    if fit.empty or test.empty:
+        raise ValueError(f"measurements on only one side of {cut.date()}: nothing to fit the level on, or nothing to test")
+    offset = float(np.median(fit["rsrp_dbm"] - fit["signal_primary"]))
+    test = test.assign(signal_primary=test["signal_primary"] + offset)
+    b = breakdown(test, names)
+    log(f"level offset {offset:+.1f} dB; then {b['overall']['points']:,} test points, bias {b['overall']['bias_db']:+.1f} dB, MAE {b['overall']['mae_db']:.1f} dB")
+    return {"preset": preset, "fit_period": _period(routes, "fit"), "test_period": _period(routes, "test"), "split": str(cut.date()),
+            "level_offset_db": round(offset, 1), "max_distance_m": max_distance_m, "skipped": skipped, **b,
+            "routes": {rid: accuracy(g) for rid, g in test.groupby("route_id")}}
+
+
+# NR-ARFCN -> MHz (3GPP 38.104) and the band each falls in, for saying which 5G a scanner measured.
+NR_BANDS = [(758, 803, "700 MHz"), (925, 960, "900 MHz"), (1805, 1880, "1800 MHz"), (2110, 2170, "2.1 GHz"),
+            (2620, 2690, "2.6 GHz"), (3300, 3800, "3.4-3.8 GHz")]
+
+
+def nr_mhz(arfcn: float) -> float:
+    return arfcn * 0.005 if arfcn < 600000 else 3000 + (arfcn - 600000) * 0.015
+
+
+def five_g(route_ids: list[str], path_4g, path_5g, preset_4g: str = "global_view_4g", preset_5g: str = "global_view_5g",
+           usable_dbm: float = -110.0, max_distance_m: float = 50.0, log=print) -> dict:
+    """Where 5G was measured along each route: per network, the share of the route points passed by a train carrying
+    the 5G scanner (known from its 4G log, which records every point it passes) at which that network's 5G reached
+    usable_dbm (SS-RSRP, median of the passes)."""
+    out, pooled, chans, days = {}, {}, set(), []
+    for rid in route_ids:
+        s = load_settings(route_id=rid)
+        interim = s.paths()["interim"]
+        if not (interim / "coverage_prior.parquet").exists():
+            continue
+        b = load_bundle(interim, s.route["country"])
+        if b.geometry_source != "osm":
+            continue
+        near, box = near_route(b.samples, b.proj, max_distance_m), route_bbox(b.samples)
+        g5 = attach_to_route(load_measurements(path_5g, preset_5g, s.operators, bbox=box, near=near), b.samples, b.proj, max_distance_m=max_distance_m)
+        g4 = attach_to_route(load_measurements(path_4g, preset_4g, s.operators, bbox=box, near=near), b.samples, b.proj, max_distance_m=max_distance_m)
+        straight = straight_samples(s, b.samples, b.provenance.get("straight_legs") or [])
+        g4 = g4[g4["device"].isin(set(g5["device"])) & ~g4["sample_id"].isin(straight)]
+        passed = set(g4["sample_id"])
+        if not passed:
+            continue
+        g5 = g5[g5["sample_id"].isin(passed)]
+        chans |= set(g5["channel"].dropna().astype(int))
+        days += [g4["timestamp"].min(), g4["timestamp"].max()]
+        nets = {}
+        for op in s.operators:
+            best = g5[g5["provider_id"] == op["id"]].groupby("sample_id")["rsrp_dbm"].median()
+            nets[op["name"]] = round(float((best >= usable_dbm).sum()) / len(passed), 3)
+            pooled.setdefault(op["name"], [0, 0])
+            pooled[op["name"]][0] += int((best >= usable_dbm).sum())
+            pooled[op["name"]][1] += len(passed)
+        out[rid] = {"points": len(passed), "networks": nets}
+        log(f"{rid}: 5G usable at " + ", ".join(f"{k} {v:.0%}" for k, v in nets.items()) + f" of {len(passed):,} route points")
+    mhz = sorted({round(nr_mhz(c)) for c in chans})
+    bands = [name for lo, hi, name in NR_BANDS if any(lo <= f <= hi for f in mhz)]
+    return {"preset": preset_5g, "usable_dbm": usable_dbm, "bands": bands,
+            "unmeasured_bands": [name for _, _, name in NR_BANDS if name not in bands],
+            "period": {"from": str(min(days).date()), "to": str(max(days).date())} if days else {},
+            "networks": {k: round(a / n, 3) for k, (a, n) in pooled.items() if n}, "routes": out}
 
 
 def _plain(v):

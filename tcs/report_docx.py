@@ -882,7 +882,7 @@ class _Report:
         ev = self.ev
         self.h1("Data sources and confidence")
         status = {"live": "Live", "synthetic stand-in": "Stand-in (synthetic)", "partly stand-in": "Partly stand-in", "predictive": "Predictive model",
-                  "configured": "Configured", "calibrated": "Calibrated", "not calibrated": "Not calibrated"}
+                  "configured": "Configured", "calibrated": "Calibrated", "not calibrated": "Not calibrated", "checked": "Checked"}
         self.table([("Input", 5.4, "l"), ("Source", 7.6, "l"), ("Status", 3.6, "l")],
                    [[a, b, status.get(c, c)] for a, b, c in ev.sources], "Data sources behind this assessment", size=8.5)
         stand_ins = [a for a, _, c in ev.sources if c in ("synthetic stand-in", "partly stand-in")]
@@ -925,6 +925,8 @@ class _Report:
         cal = self.cal
         fit, test = period_text(cal.get("fit_period")), period_text(cal.get("test_period"))
         pts = cal.get("points") or {}
+        if cal.get("current_check") or cal.get("five_g"):
+            self.h2("Calibration against field measurements")
         self.para(f"The mobile network model is calibrated against {cal.get('source')}. Network Rail's measurement trains log the 4G (LTE) "
                   "signal of every network once a second as they survey the railway. For each network the strongest signal heard each second "
                   f"is kept, as a modem would use it, matched to the nearest route point within {cal.get('max_distance_m') or 50:g} m and "
@@ -963,6 +965,52 @@ class _Report:
                   "railway rather than confirming today's levels, which are likely to be somewhat better. Much of the remaining error is "
                   "local: the operators' coverage predictions are coarser than the 50 m route points. Throughput, latency and the satellite "
                   "link are not in this data and remain modelled.", keep=True)
+        self.current_check(acc, cols)
+        self.five_g()
+
+    def current_check(self, acc, cols) -> None:
+        cc = self.cal.get("current_check") or {}
+        if not (cc.get("overall") or {}).get("points"):
+            return
+        self.h2("Check against current networks")
+        fit, test = period_text(cc.get("fit_period")), period_text(cc.get("test_period"))
+        off = float(cc.get("level_offset_db") or 0)
+        self.para(f"{cc.get('source')} recorded 4G signal along these routes from {fit[:8]} to {test[-8:]}, on today's networks. Their "
+                  "scanner logs signal before correcting for its antenna and cable, so it reads "
+                  f"{abs(off):.0f} dB {'below' if off < 0 else 'above'} the calibrated model overall, much the same on every network: "
+                  f"a property of the measuring equipment, not of coverage. That one level difference was set on the measurements "
+                  f"of {fit} and the model then tested on those of {test}.", keep=True)
+        r = cc.get("route") or {}
+        rows = ([["This route", *acc(r)]] if r.get("points") else []) + [["All routes", *acc(cc.get("overall"))]]
+        self.table(cols, rows, f"Calibrated model against 2026 measurements once their level is matched, {test}", size=8.5, bold_first=True)
+        if not r.get("points"):
+            self.para("The 2026 measurements do not cover this route; the figures are for the routes they do cover.", size=9, color=MUTED)
+        elif r["points"] < 500:
+            self.para("Few points on this route were measured in the test weeks, so its figures are indicative only.", size=9, color=MUTED)
+
+    def five_g(self) -> None:
+        fg = self.cal.get("five_g") or {}
+        if not fg.get("networks"):
+            return
+        self.h2("5G measured along the route")
+        r = (fg.get("route") or {})
+        here = r.get("networks") or {}
+        self.para(f"The same trains carried a 5G scanner. For each network, the share of the route points measured where its 5G "
+                  f"signal was usable (SS-RSRP {format(fg.get('usable_dbm', -110), 'g').replace('-', '−')} dBm or better), {period_text(fg.get('period'))}"
+                  + (f", over {r['points']:,} points on this route." if r.get("points") else "; the measurements do not cover this route, so "
+                     "only the figures for all routes are given."), keep=True)
+        names = list(fg["networks"])
+        self.table([("Network", 4.6, "l"), ("This route", 3.0, "r"), ("All routes", 3.0, "r")],
+                   [[n, "not measured", "not measured"] if not fg["networks"][n]           # its 5G bands were not scanned
+                    else [n, f"{here[n] * 100:.0f} %" if n in here else "–", f"{fg['networks'][n] * 100:.0f} %"] for n in names],
+                   "Share of measured route points with usable 5G", size=8.5, bold_first=True)
+        missing = fg.get("unmeasured_bands") or []
+        self.para(f"The scanner measured 5G in the {_and(list(fg.get('bands') or []))} bands"
+                  + (f", not at {_and([b.replace('-', '–') for b in missing])}" if missing else "")
+                  + ". Three and Vodafone carry most of their 5G at 3.4–3.8 GHz, so their shares understate it."
+                  + (" Few points on this route were measured, so its shares are indicative only." if 0 < r.get("points", 0) < 200 else "")
+                  + " The model takes coverage "
+                  "from Ofcom's blended 4G and 5G predictions; these figures are evidence alongside it, not an input to it.", size=9, color=MUTED)
 
     def sensitivity_section(self) -> None:
         ev, sens = self.ev, self.ev.sensitivity

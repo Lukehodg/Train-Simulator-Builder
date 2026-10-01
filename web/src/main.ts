@@ -246,7 +246,11 @@ async function main() {
   // ---- map ------------------------------------------------------------------------------------
   const tooltip = (info: PickingInfo) => {
     const o: any = info.object; if (!o) return null
-    if (o.key && o.provider) return { html: `<b>${esc(String(o.provider).toUpperCase())}</b> cell ${esc(o.key)}<br>${esc(o.radio)} · ${esc(o.samples)} obs · ${esc(o.source)}`, style: tipStyle() }
+    if (o.key && o.provider) {
+      const name = meta.providers.find(p => p.id === o.provider)?.name ?? String(o.provider).toUpperCase()
+      const serving = data.base[o.provider]?.cell[indexAtTime(data.t, store.state.t)] === o.key
+      return { html: `<b>${esc(name)}</b> cell ${esc(o.key)}${serving ? ' · <b>serving the train now</b>' : ''}<br>${esc(o.radio)} · ${esc(o.samples)} obs · ${esc(o.source)}`, style: tipStyle() }
+    }
     if (o.crs) return { html: `<b>${esc(o.name)}</b> (${esc(o.crs)})<br>${(o.distance_m / 1000).toFixed(1)} km${o.scheduled ? ' · ' + esc(o.scheduled) : ''}${o.stop ? ' · stop' : ' · pass'}`, style: tipStyle() }
     if (o.lane) return { html: `<b>${o.lane === 'wan' ? 'Combined Wi-Fi' : esc(o.lane)}</b> · click to inspect sample`, style: tipStyle() }
     return null

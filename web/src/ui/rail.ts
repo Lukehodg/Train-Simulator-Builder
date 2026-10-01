@@ -60,7 +60,9 @@ export function initRail(store: Store, onLink?: (id: string, on: boolean) => voi
     el.className = 'link-row'
     const fits = r.key !== 'wan' && !!onLink
     if (fits) el.title = 'Ticked: fitted on the train and used by the onboard router. Untick to take it off the train.'
-    el.innerHTML = `<input type="checkbox" ${s.linkVisible[r.key] ? 'checked' : ''}><span class="name">${esc(r.label)}${r.sub ? `<small>${esc(r.sub)}</small>` : ''}</span><span class="lane">${esc(r.tag)}</span>`
+    // a cellular network's colour on the map (its towers and serving lines), so this list is also the map's key
+    const swatch = r.group === 'Cellular' ? `<i class="net-swatch" style="background: var(--net-${esc(r.key)}, var(--muted))" aria-hidden="true"></i>` : ''
+    el.innerHTML = `<input type="checkbox" ${s.linkVisible[r.key] ? 'checked' : ''}><span class="name">${swatch}${esc(r.label)}${r.sub ? `<small>${esc(r.sub)}</small>` : ''}</span><span class="lane">${esc(r.tag)}</span>`
     const box = el.querySelector('input')!
     boxes[r.key] = box
     box.addEventListener('change', () => {
