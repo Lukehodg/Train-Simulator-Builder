@@ -162,8 +162,10 @@ config/            route.yaml networks.yaml starlink.yaml simulation.yaml
 tcs/               config geo schema cli · sources/ pipeline/ model/ validate/
 web/               Vite + TypeScript · src/{data,state,config}.ts src/map src/sim src/ui
 docs/              architecture.md data-sources.md model.md validation.md
+aa/                active antenna (EDGE Rail) modelling: method, vendor-report reader (its data stays out of git)
+scripts/           standalone analysis scripts (e.g. SINR against RSRP from Global View)
 tests/             hermetic pipeline + unit tests (pytest)
-data/              raw/ interim/ processed/ (git-ignored)
+data/              raw/ interim/ processed/ aa/ (git-ignored)
 ```
 
 ## Caveats (also shown in the app)

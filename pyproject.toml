@@ -28,7 +28,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.5"]
+dev = ["pytest>=8", "ruff>=0.5", "pdfplumber>=0.11"]
+# aa/ (active antenna modelling) and scripts/: reading vendor antenna reports, curve fits
+aa = ["pdfplumber>=0.11", "scipy>=1.11"]
 
 [project.scripts]
 tcs = "tcs.cli:app"
@@ -48,3 +50,4 @@ select = ["E9", "F", "I"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]                     # aa/ is a folder of tools beside the tcs package
