@@ -139,9 +139,20 @@ T_n = Σ over the carriers the modem can aggregate  T_c
 ### 1.5 The whole train
 
 ```
-T_train,k = η_bond · Σ_n T_n,k      bonding (Fleet Connect for A, the router's bonding for P)
-          = max_n T_n,k             failover
+T_train,k = η_bond(k) · Σ_{n ∈ networks(k)} T_n,k      bonding: Fleet Connect for A, SureWAN / Nomad Connect for P2, P4
+          = max_n T_n,k                                 failover
 ```
+
+Neither the bonding efficiency `η_bond` nor its behaviour when a link drops is published for any of the products.
+The comparison therefore gives both products the same placeholder (0.85), so the central result isolates the antennas.
+It then sweeps the assumptions (`SCENARIOS` in `compare_route.py`):
+- Fleet Connect 0.95 against the router's 0.75;
+- the reverse;
+- the rack router carrying a fourth network (O2) while EDGE Rail stays on its three units.
+
+A difference in efficiency passes straight through to the advantage. A fourth network outweighs most of the antenna
+effect. The real values come from Motion Applied, or from a paired test that logs each link and the bonded output
+per second.
 
 ## 2. Per route: what to report
 

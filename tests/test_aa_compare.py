@@ -32,3 +32,17 @@ def test_more_receive_branches_help_most_when_interference_behaves_like_noise():
     assert 0.9 < four["correlated"] / two["correlated"] < 1.15              # only diversity left: little either way
     assert carrier_mbps(np.array([1e6]), np.array([1.0]), np.array([1.0]), 10, 4, 2, ASSUME)[0] == pytest.approx(
         10 * ASSUME["cell_share"] * 2 * ASSUME["eta_max"], rel=0.01)       # two layers at the modulation ceiling
+
+
+def test_bonding_and_networks_are_set_per_install():
+    import pandas as pd
+
+    from aa.compare_route import ALL_NETWORKS, PROFILES, SCENARIOS, with_scenario
+
+    df = pd.DataFrame({f"{k}_{n}": [10.0] for k in PROFILES for n in ALL_NETWORKS})
+    central = with_scenario(df, SCENARIOS["central (both 0.85)"])
+    assert central.T_A.item() == central.T_P2.item() == pytest.approx(0.85 * 30)          # three networks each
+    better = with_scenario(df, SCENARIOS["Fleet Connect 0.95, router 0.75"])
+    assert better.T_A.item() / better.T_P4.item() == pytest.approx(0.95 / 0.75)
+    o2 = with_scenario(df, SCENARIOS["router adds O2 (4 networks vs 3)"])
+    assert o2.T_P4.item() == pytest.approx(0.85 * 40) and o2.T_A.item() == pytest.approx(0.85 * 30)   # EDGE Rail stays on 3 units

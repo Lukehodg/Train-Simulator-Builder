@@ -24,10 +24,15 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-PROFILES = {      # aa/METHOD.md section 0
-    "A": {"label": "EDGE Rail active antenna", "branches": 4, "layers": 4, "cable": False, "carriers": 5},
-    "P4": {"label": "Rack router, 4x4 per modem", "branches": 4, "layers": 4, "cable": True, "carriers": 5},
-    "P2": {"label": "Rack router, 2x2 per modem", "branches": 2, "layers": 2, "cable": True, "carriers": 3},
+ALL_NETWORKS = ("ee", "o2", "three", "vodafone")
+NETWORKS = ("ee", "vodafone", "three")   # the EDGE Rail preset's three units; every profile's networks by default
+PROFILES = {      # aa/METHOD.md section 0; `bonding` names the combining product, whose efficiency is in ASSUME
+    "A": {"label": "EDGE Rail active antenna", "branches": 4, "layers": 4, "cable": False, "carriers": 5,
+          "bonding": "Fleet Connect", "networks": NETWORKS},
+    "P4": {"label": "Rack router, 4x4 per modem", "branches": 4, "layers": 4, "cable": True, "carriers": 5,
+           "bonding": "router", "networks": NETWORKS},
+    "P2": {"label": "Rack router, 2x2 per modem", "branches": 2, "layers": 2, "cable": True, "carriers": 3,
+           "bonding": "router", "networks": NETWORKS},
 }
 ASSUME = {
     "noise_figure_db": 7.0,            # modem and scanner alike
@@ -35,13 +40,24 @@ ASSUME = {
     "alpha": 0.6, "sinr_min_db": -10.0, "eta_max": 5.5,   # attenuated Shannon, 256-QAM capable modems (3GPP TR 36.942)
     "network_layers": 2,               # UK LTE cells: mostly 2 transmit antennas
     "cell_share": 0.5,                 # share of each cell's capacity the train gets
-    "bonding": 0.85,                   # combining the networks
+    # share of the summed link capacity the train gets after combining the networks. PLACEHOLDERS: neither Motion
+    # Applied (Fleet Connect) nor Icomera (SureWAN) / Nomad (Nomad Connect) publish a figure. Equal, so the central
+    # result isolates the antennas; SCENARIOS sweeps them.
+    "bonding": {"Fleet Connect": 0.85, "router": 0.85},
     "cable_m": 10.0, "fittings_db": 1.0,                  # passive installs: LMR-400-class coax + connectors/protection
     "bandwidth_mhz": {"700": 10, "800": 10, "900": 10, "1400": 20, "1800": 20, "2100": 15, "2600": 20},
 }
 BAND_MHZ = {"700": 773, "800": 806, "900": 942, "1400": 1472, "1800": 1842, "2100": 2140, "2600": 2655}
-NETWORKS = ("ee", "vodafone", "three")   # the EDGE Rail preset's three units; the same three for every profile
 NO_SERVICE_MBPS = 2.0
+
+# Sensitivity of the comparison to how the networks are combined (placeholder values until there is data): each
+# scenario sets the bonding efficiency per product and the networks the rack router carries.
+SCENARIOS = {
+    "central (both 0.85)": {"bonding": {"Fleet Connect": 0.85, "router": 0.85}, "router_networks": NETWORKS},
+    "Fleet Connect 0.95, router 0.75": {"bonding": {"Fleet Connect": 0.95, "router": 0.75}, "router_networks": NETWORKS},
+    "Fleet Connect 0.75, router 0.95": {"bonding": {"Fleet Connect": 0.75, "router": 0.95}, "router_networks": NETWORKS},
+    "router adds O2 (4 networks vs 3)": {"bonding": {"Fleet Connect": 0.85, "router": 0.85}, "router_networks": ALL_NETWORKS},
+}
 
 
 # ---------------------------------------------------------------- link maths (no data involved)
@@ -202,16 +218,16 @@ def carriers_along(route: str, table: pd.DataFrame, curve: pd.DataFrame, nationa
     delta = (measured.rsrp - top).groupby([measured.network, measured.band]).median()
     share = measured.groupby(["network", "band"]).sample_id.nunique() / measured.groupby("network").sample_id.nunique()
     enough = measured.groupby("network").sample_id.nunique()
-    own = {n for n in NETWORKS if enough.get(n, 0) >= MIN_MEASURED_SAMPLES}
+    own = {n for n in ALL_NETWORKS if enough.get(n, 0) >= MIN_MEASURED_SAMPLES}
     n_delta, n_share = national
     delta = pd.concat([delta[delta.index.get_level_values(0).isin(own)], n_delta[~n_delta.index.get_level_values(0).isin(own)]])
     share = pd.concat([share[share.index.get_level_values(0).isin(own)], n_share[~n_share.index.get_level_values(0).isin(own)]])
-    model = obs[obs.provider_id.isin(NETWORKS)][["sample_id", "provider_id", "signal_primary", "available"]].rename(columns={"provider_id": "network"})
+    model = obs[obs.provider_id.isin(ALL_NETWORKS)][["sample_id", "provider_id", "signal_primary", "available"]].rename(columns={"provider_id": "network"})
     have = set(zip(measured.sample_id, measured.network))
     model = model[[(a, n) not in have for a, n in zip(model.sample_id, model.network)]]
     rows = []
     for (net, band), sh in share.items():
-        if net not in NETWORKS or sh < 0.2 or band not in curve.index:
+        if net not in ALL_NETWORKS or sh < 0.2 or band not in curve.index:
             continue
         mm = model[model.network == net]
         rsrp = mm.signal_primary.to_numpy() - offset + delta[(net, band)]
@@ -220,7 +236,7 @@ def carriers_along(route: str, table: pd.DataFrame, curve: pd.DataFrame, nationa
                                   "available": mm.available.to_numpy()}))
     modelled = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=["sample_id", "network", "band", "rsrp", "sinr", "n", "source", "available"])
     modelled = modelled[modelled.available.astype(bool)].drop(columns="available")   # the simulator's own no-service (tunnels)
-    car = pd.concat([measured[measured.network.isin(NETWORKS)], modelled], ignore_index=True)
+    car = pd.concat([measured[measured.network.isin(ALL_NETWORKS)], modelled], ignore_index=True)
 
     # how far the modelled SINR is from the measured where both exist (the fallback's own error)
     chk = measured.merge(obs[["sample_id", "provider_id", "signal_primary"]].rename(columns={"provider_id": "network"}), on=["sample_id", "network"])
@@ -248,15 +264,29 @@ def compare(car: pd.DataFrame, samples: pd.DataFrame, gv_offset_db: float, a: di
     for k, p in PROFILES.items():
         top = car.sort_values(f"T_{k}", ascending=False).groupby(["sample_id", "network"]).head(p["carriers"])
         per = top.groupby(["sample_id", "network"])[f"T_{k}"].sum().unstack(fill_value=0.0)
-        per = per.reindex(index=out.sample_id, columns=list(NETWORKS), fill_value=0.0)
-        for n in NETWORKS:
+        per = per.reindex(index=out.sample_id, columns=list(ALL_NETWORKS), fill_value=0.0)
+        for n in ALL_NETWORKS:
             out[f"{k}_{n}"] = per[n].to_numpy()
-        out[f"T_{k}"] = a["bonding"] * per.sum(axis=1).to_numpy()
+        out[f"T_{k}"] = train_mbps(out, k, a["bonding"][p["bonding"]], p["networks"])
     src = car.groupby("sample_id").source.agg(lambda s: "measured" if (s == "measured").any() else "modelled")
     out["source"] = out.sample_id.map(src).fillna("none")
     out["inr_db"] = out.sample_id.map(car[car.source == "measured"].groupby("sample_id").inr_db.median())
     t = out.sim_seconds.to_numpy()
     out["dt_s"] = np.gradient(t) if len(t) > 1 else 0.0
+    return out
+
+
+def train_mbps(df: pd.DataFrame, profile: str, bonding: float, networks) -> np.ndarray:
+    """The train's throughput: the networks the install carries, combined at the given efficiency."""
+    return bonding * df[[f"{profile}_{n}" for n in networks]].sum(axis=1).to_numpy()
+
+
+def with_scenario(df: pd.DataFrame, scenario: dict) -> pd.DataFrame:
+    """The same per-network results, combined as a SCENARIOS entry says."""
+    out = df.copy()
+    for k, p in PROFILES.items():
+        nets = p["networks"] if p["bonding"] == "Fleet Connect" else scenario["router_networks"]
+        out[f"T_{k}"] = train_mbps(out, k, scenario["bonding"][p["bonding"]], nets)
     return out
 
 
@@ -372,8 +402,9 @@ def chart(cases: dict[str, pd.DataFrame], stations: pd.DataFrame, title: str, pa
     plt.close(fig)
 
 
-def run_route(route: str, table: pd.DataFrame, curve: pd.DataFrame, national, out: Path) -> list[dict]:
-    """The comparison on one route: per-sample results, KPIs, breakdown and chart in `out`; one summary row per case."""
+def run_route(route: str, table: pd.DataFrame, curve: pd.DataFrame, national, out: Path) -> tuple[list[dict], list[dict]]:
+    """The comparison on one route: per-sample results, KPIs, breakdown, sensitivity and chart in `out`; one summary row
+    per interference case, and one sensitivity row per case and SCENARIOS entry."""
     from tcs.config import load_settings
 
     s = load_settings(route_id=route)
@@ -396,10 +427,20 @@ def run_route(route: str, table: pd.DataFrame, curve: pd.DataFrame, national, ou
                      "fallback_sinr_mae_db": meta["fallback_sinr_mae_db"],
                      **{f"{m}_{pr}": float(kk.loc[pr, m]) for pr in PROFILES for m in ("p50_mbps", "p10_mbps", "share_time_10mbps", "no_service_minutes")},
                      "A_vs_P2_median_x": float(kk.loc["P2", "uplift_median_x"]), "A_vs_P4_median_x": float(kk.loc["P4", "uplift_median_x"])})
+    sens = []
+    for c, d in cases.items():
+        for name, scen in SCENARIOS.items():
+            ks = kpis(with_scenario(d, scen))
+            sens.append({"route": route, "name": s.route["name"], "interference": c, "scenario": name,
+                         **{f"p50_mbps_{pr}": float(ks.loc[pr, "p50_mbps"]) for pr in PROFILES},
+                         **{f"no_service_minutes_{pr}": float(ks.loc[pr, "no_service_minutes"]) for pr in PROFILES},
+                         **{f"A_vs_{pr}_median_x": float(ks.loc[pr, "uplift_median_x"]) for pr in ("P2", "P4")},
+                         **{f"A_vs_{pr}_p10_x": float(ks.loc[pr, "uplift_p10_x"]) for pr in ("P2", "P4")}})
+    pd.DataFrame(sens).round(3).to_csv(out / "sensitivity.csv", index=False)
     print(f"{route}: {rows[0]['share_time_measured']:.0%} measured; A vs P2 {rows[1]['A_vs_P2_median_x']:.2f}-{rows[0]['A_vs_P2_median_x']:.2f}x, "
           f"A vs P4 {rows[1]['A_vs_P4_median_x']:.2f}-{rows[0]['A_vs_P4_median_x']:.2f}x; median A {rows[0]['p50_mbps_A']:.0f} Mbit/s"
           + ("" if len(df) else " (no samples)"))
-    return rows
+    return rows, sens
 
 
 def chart_routes(summary: pd.DataFrame, path: Path) -> None:
@@ -445,6 +486,42 @@ def chart_routes(summary: pd.DataFrame, path: Path) -> None:
     plt.close(fig)
 
 
+def chart_sensitivity(sens: pd.DataFrame, path: Path) -> None:
+    """How far the active antenna's advantage moves with the combining assumptions: per scenario, the spread over
+    routes for each comparison, with the median route in each interference case."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    names = list(SCENARIOS)
+    ink, muted, grid = "#222222", "#6b6b6b", "#e4e4e0"
+    fig, ax = plt.subplots(figsize=(11, 1.15 * len(names) + 1.8))
+    ax.grid(True, axis="x", color=grid, linewidth=0.6)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.tick_params(colors=muted, labelsize=8)
+    for i, name in enumerate(names[::-1]):
+        g = sens[sens.scenario == name]
+        for k, off in (("P2", 0.18), ("P4", -0.18)):
+            col = f"A_vs_{k}_median_x"
+            y = i + off
+            lo, hi = g[col].min(), g[col].max()
+            ax.hlines(y, lo, hi, color=COLOURS[k], linewidth=6, alpha=0.35)
+            for case, face in (("correlated", "none"), ("like noise", COLOURS[k])):
+                v = g.loc[g.interference == case, col].median()
+                ax.scatter(v, y, s=46, facecolors=face, edgecolors=COLOURS[k], linewidths=1.6, zorder=3)
+            ax.annotate(f"vs {k}  {lo:.2f}-{hi:.2f}x", (hi, y), xytext=(6, 0), textcoords="offset points", fontsize=8, color=ink, va="center")
+    ax.axvline(1, color=muted, linewidth=0.8)
+    ax.set_yticks(range(len(names)), names[::-1], fontsize=8.5, color=ink)
+    ax.set_xlabel("Active antenna's advantage, median over the journey (x)", color=ink, fontsize=9)
+    fig.suptitle("Sensitivity to how the networks are combined (placeholder bonding values)", x=0.01, ha="left", fontsize=12, color=ink)
+    fig.text(0.01, 0.01, "Bars: spread over all routes and both interference cases. Dots: median route; hollow = interference correlated across "
+             "antennas, filled = treated like noise. vs P2: 2x2 rack router; vs P4: 4x4 rack router.", fontsize=7, color=muted)
+    fig.tight_layout(rect=(0, 0.04, 0.93, 0.95))
+    fig.savefig(path, dpi=140)
+    plt.close(fig)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("route", help="route id, or 'all'")
@@ -459,13 +536,20 @@ def main() -> None:
     national = national_bands(table)
     curve = sinr_curves(a.sinr_fit)
     ids = [r["id"] for r in list_routes()] if a.route == "all" else [a.route]
-    rows = []
+    rows, sens = [], []
     for rid in ids:
-        rows += run_route(rid, table, curve, national, root / rid)
-    summary = pd.DataFrame(rows)
+        r, se = run_route(rid, table, curve, national, root / rid)
+        rows += r
+        sens += se
+    summary, sens = pd.DataFrame(rows), pd.DataFrame(sens)
     if a.route == "all":
         summary.round(3).to_csv(root / "summary_all_routes.csv", index=False)
+        sens.round(3).to_csv(root / "sensitivity_all_routes.csv", index=False)
         chart_routes(summary, root / "compare_all_routes.png")
+        chart_sensitivity(sens, root / "compare_sensitivity.png")
+    with pd.option_context("display.width", 240, "display.max_columns", 30):
+        print(sens.groupby(["scenario", "interference"], sort=False)[["A_vs_P2_median_x", "A_vs_P4_median_x", "p50_mbps_A", "p50_mbps_P2",
+                                                                       "p50_mbps_P4"]].agg(["min", "median", "max"]).round(2).to_string())
     with pd.option_context("display.width", 240, "display.max_columns", 30):
         cols = ["name", "interference", "share_time_measured", "p50_mbps_A", "p50_mbps_P4", "p50_mbps_P2", "p10_mbps_A", "p10_mbps_P2",
                 "A_vs_P2_median_x", "A_vs_P4_median_x", "no_service_minutes_A", "no_service_minutes_P2"]
