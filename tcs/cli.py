@@ -88,7 +88,7 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     prior.to_parquet(interim / "coverage_prior.parquet", index=False)
     cells.to_parquet(interim / "cells.parquet", index=False)
     serving.to_parquet(interim / "serving.parquet", index=False)
-    cal = calibration.load(interim / "calibration.json")
+    cal = calibration.for_route(s, interim)
     obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, policy=policy)
     written = export_all(s, b, b.samples, stations, cells, obs, rc, prior)
     if copy_to_web:
@@ -102,12 +102,6 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     _summary(rc, obs)
     for k, v in written.items():
         console.log(f"[dim]{k}[/dim] {v}")
-
-
-def _route_bbox(samples: pd.DataFrame, margin_deg: float = 0.03) -> tuple[float, float, float, float]:
-    """The route's surroundings (about 2-3 km around it): measurement files covering the whole network are cut to this."""
-    return (float(samples["longitude"].min()) - margin_deg, float(samples["latitude"].min()) - margin_deg,
-            float(samples["longitude"].max()) + margin_deg, float(samples["latitude"].max()) + margin_deg)
 
 
 def _apply_preset(s, preset: str) -> dict:
@@ -297,10 +291,11 @@ def _build_report(route: str | None, preset: str | None, train: Path | None, pol
     prior = pd.read_parquet(interim / "coverage_prior.parquet")
     serving = pd.read_parquet(interim / "serving.parquet")
     stations = pd.read_parquet(processed / "stations.parquet")
-    cal = calibration.load(interim / "calibration.json")
+    cal = calibration.for_route(s, interim)
     obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather)
     meta = json.loads((processed / "web" / "meta.json").read_text(encoding="utf-8"))
     meta["model_version"] = s.sim["model_version"]
+    meta["calibration"] = calibration.describe(s, interim)     # as simulated now, not as when the bundle was built
     vpath = processed / "validation_by_section.csv"
     validation = None
     if vpath.exists():                                         # only a validation of this build's predictions counts
@@ -386,13 +381,13 @@ def calibrate(measurements: Path = typer.Argument(..., help="CSV file"), route: 
     from .model import calibration
     from .model.cellular import cellular_observations
     from .pipeline.sample_route import load_bundle
-    from .sources.measurements import attach_to_route, load_measurements
+    from .sources.measurements import attach_to_route, load_measurements, route_bbox
 
     s = load_settings(route_id=route)
     _require_built(s)
     interim = _interim(s)
     b = load_bundle(interim, s.route["country"])
-    meas = load_measurements(measurements, preset, s.operators, bbox=_route_bbox(b.samples))
+    meas = load_measurements(measurements, preset, s.operators, bbox=route_bbox(b.samples))
     meas = attach_to_route(meas, b.samples, b.proj, max_distance_m=max_distance_m)
     # Fit against the uncalibrated model, not the last run's provider_observation: that already carries any earlier
     # calibration, so re-fitting it would measure only the residual and saving it would undo the first calibration.
@@ -410,17 +405,47 @@ def validate(measurements: Path = typer.Argument(...), route: str | None = typer
              preset: str = typer.Option("network_survey", help="network_survey|ofcom_drive|modem_log|yellow_train"), section_km: float = typer.Option(10.0)):
     """Predicted-vs-observed metrics by route section (MAE/RMSE, outage precision/recall, classification accuracy)."""
     from .pipeline.sample_route import load_bundle
-    from .sources.measurements import attach_to_route, load_measurements
+    from .sources.measurements import attach_to_route, load_measurements, route_bbox
     from .validate.metrics import report
 
     s = load_settings(route_id=route)
     _require_built(s)
     b = load_bundle(_interim(s), s.route["country"])
-    meas = attach_to_route(load_measurements(measurements, preset, s.operators, bbox=_route_bbox(b.samples)), b.samples, b.proj)
+    meas = attach_to_route(load_measurements(measurements, preset, s.operators, bbox=route_bbox(b.samples)), b.samples, b.proj)
     obs = pd.read_parquet(s.paths()["processed"] / "provider_observation.parquet").merge(b.samples[["sample_id", "distance_m"]], on="sample_id")
     rep = report(obs, meas, section_km=section_km)
     console.print(rep.to_string())
     rep.to_csv(s.paths()["processed"] / "validation_by_section.csv", index=False)
+
+
+@app.command("calibrate-national")
+def calibrate_national(measurements: Path = typer.Argument(..., help="Measurement file covering many routes (CSV or parquet)"),
+                       preset: str = typer.Option("yellow_train", help="network_survey|ofcom_drive|modem_log|yellow_train"),
+                       split: str = typer.Option("2019-01-01", help="Fit on measurements before this date, test on those from it"),
+                       only: str | None = typer.Option(None, help="Comma-separated route ids (default: every built route)"),
+                       max_distance_m: float = typer.Option(50.0, help="Farthest a measurement may be from the track"),
+                       source: str = typer.Option("Network Rail Yellow Train LTE measurements (Rail Data Marketplace)", help="Named in reports"),
+                       out: Path = typer.Option(ROOT / "config" / "calibration.yaml")):
+    """Fit the cellular model to measurements pooled over every built route and test it on later ones; writes
+    config/calibration.yaml (parameters, provenance, accuracy). Every route without its own calibration then uses it."""
+    from . import national
+
+    ids = [r["id"] for r in list_routes()]
+    if only:
+        ids = [i for i in ids if i in {x.strip() for x in only.split(",")}]
+    doc = national.run(ids, measurements, preset, split, max_distance_m=max_distance_m, log=console.log)
+    doc = national.write(doc, out, source=source, file=measurements.name, preset=preset)
+    v = doc["validation"]
+    for label, key in (("before calibration", "uncalibrated"), ("calibrated", "calibrated")):
+        a = v[key]["overall"]
+        console.log(f"{label}: {a['points']:,} test points, bias {a['bias_db']:+.1f} dB, MAE {a['mae_db']:.1f} dB, within 6 dB {a['within_6db']:.0%}")
+    for tc in [x for x in doc.get("in_tunnel_coverage") or [] if not x["listed"]]:
+        console.log(f"[yellow]{tc['route']}: {tc['tunnel'] or 'tunnel'} at km {tc['km'][0]}-{tc['km'][1]} measured {tc['median_dbm']} dBm deep inside "
+                    f"({tc['points']} points): in-tunnel coverage; add it to the route's das_tunnels and re-run")
+    env, cur = doc["environment"], national.environment_of(load_settings())
+    if env != cur:
+        console.log(f"[yellow]set these in config/simulation.yaml (cellular.terrain / cellular.tunnels): {env} (now {cur})")
+    console.log(f"wrote {out}")
 
 
 @app.command()

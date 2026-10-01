@@ -11,7 +11,7 @@ the app bar and the **Sources** tab show exactly which inputs produced the bundl
 | Corridor postcodes / urban density | OS Code-Point Open (yes) | `ofcom_coverage.corridor_postcodes` | station proximity | — |
 | Cellular coverage prior | Ofcom Mobile Checker UPRN Coverage API (key, postcode → UPRN rows); Connected Nations open data (yes) | `tcs/sources/ofcom_coverage.py` | synthetic prior | 0.55 / 0.65 with cells |
 | Cell sites / handovers | OpenCellID bulk MCC download (token) | `tcs/sources/opencellid.py` | synthetic sites | + cells → 0.65 |
-| Measured RF (calibration + validation) | Ofcom drive-test CSVs, Ofcom Connectivity on Trains study annexes, Network Survey, modem logs | `tcs/sources/measurements.py`, `tcs/model/calibration.py`, `tcs/validate/metrics.py` | none | 0.70–0.92 |
+| Measured RF (calibration + validation) | Network Rail Yellow Train LTE logs (Rail Data Marketplace), Ofcom drive-test CSVs, Ofcom Connectivity on Trains study annexes, Network Survey, modem logs | `tcs/sources/measurements.py`, `tcs/model/calibration.py`, `tcs/validate/metrics.py` | none | 0.70–0.92 |
 | Satcom | Stage 1: geometry only. Stage 2: Starlink terminal telemetry (`starlink-grpc-tools` export) + train GPS | `tcs/sources/starlink.py` | predictive only | 0.35 → 0.85 |
 | Timetable | YAML calling pattern; CIF (Network Rail Open Data / RDG) with CORPUS; GTFS | `tcs/sources/timetable.py` | YAML | — |
 
@@ -93,6 +93,13 @@ sample (≤ 250 m) and fits, per operator:
 `tcs validate <csv>` reports MAE/RMSE, class accuracy, outage precision/recall and availability error **by route
 section**. The Ofcom Connectivity on Trains study annexes load through the `ofcom_train_segments` preset as
 segment-level pass rates for the same comparison at the segment scale.
+
+`tcs calibrate-national <file> --preset yellow_train` fits each network's bias (keeping the model's dB scale, and
+without per-section terms) to a measurement set covering every route, plus the cutting and tunnel terms, and writes `config/calibration.yaml`, which
+routes without their own calibration use (docs/validation.md). The Yellow Train file is Network Rail's measurement
+trains' LTE scanner logs: every carrier of every network each second, 2018–19; `cal_rsrp` (corrected for the
+measurement antenna) is used and the strongest carrier per network per second kept. The measurements stay outside
+the repository; only fitted parameters and accuracy figures are committed.
 
 Highest-value source: logs from the actual rolling stock (Network Survey on a handset, or the onboard router's
 per-SIM RSRP/RSRQ/SINR + throughput + GPS). They include the antenna installation and the real RF environment, so

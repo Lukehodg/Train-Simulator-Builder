@@ -1,0 +1,1341 @@
+# National calibration of the cellular model, written by `tcs calibrate-national`: re-run it rather than editing.
+# Parameters and accuracy figures derived from the measurements; the measurements themselves are not kept here.
+# `environment` holds the rail-environment terms fitted with it: config/simulation.yaml must carry the same values.
+source: Network Rail Yellow Train LTE measurements (Rail Data Marketplace)
+file: lte-jun18tojun19-yt.parquet
+preset: yellow_train
+fitted_on: '2026-10-01'
+calibration:
+  version: 2
+  section_km: 10.0
+  rsrp_input: corrected_quality
+  bias:
+    ee: 0.1528
+    o2: 0.2129
+    three: 0.1366
+    vodafone: 0.1811
+  rsrp_map:
+    ee:
+      slope: 46.0
+      intercept: -120.0
+    o2:
+      slope: 46.0
+      intercept: -120.0
+    three:
+      slope: 46.0
+      intercept: -120.0
+    vodafone:
+      slope: 46.0
+      intercept: -120.0
+  residual_std:
+    ee: 12.8483
+    o2: 12.7455
+    three: 12.9277
+    vodafone: 12.8729
+  sections:
+    ee: {}
+    o2: {}
+    three: {}
+    vodafone: {}
+  n_points:
+    ee: 90060
+    o2: 86394
+    three: 90653
+    vodafone: 89625
+environment:
+  cutting_penalty_max: 0.2
+  cutting_full_depth_m: 4
+  portal_decay_m: 100
+  tunnel_floor: 0.1
+fit_period:
+  from: '2018-06-01'
+  to: '2018-12-22'
+test_period:
+  from: '2019-01-04'
+  to: '2019-06-29'
+split: '2019-01-01'
+max_distance_m: 50.0
+routes:
+- ecml_kgx_edb
+- bml_vic_btn
+- chiltern_myb_bmo
+- cornish_pad_pnz
+- eg_edb_glq
+- geml_lst_nrw
+- gwml_pad_swa
+- hml_edb_inv
+- hs1_stp_dvp
+- mml_stp_shf
+- nwc_cre_hhd
+- sc_lds_car
+- swml_wat_wey
+- tfw_cdf_man
+- tpe_man_ncl
+- wcml_eus_glc
+- wcml_eus_man
+- xc_bri_yrk
+skipped: {}
+in_tunnel_coverage:
+- route: chiltern_myb_bmo
+  tunnel: St John's Wood Tunnel
+  km:
+  - 0.6
+  - 1.8
+  points: 40
+  median_dbm: -82.2
+  listed: true
+- route: gwml_pad_swa
+  tunnel: Severn Tunnel
+  km:
+  - 189.7
+  - 196.7
+  points: 137
+  median_dbm: -73.1
+  listed: true
+- route: hs1_stp_dvp
+  tunnel: London Tunnel 1
+  km:
+  - 1.2
+  - 8.8
+  points: 429
+  median_dbm: -77.9
+  listed: true
+- route: hs1_stp_dvp
+  tunnel: London Tunnel 2
+  km:
+  - 9.9
+  - 19.9
+  points: 463
+  median_dbm: -78.6
+  listed: true
+- route: mml_stp_shf
+  tunnel: King's Cross Tunnel
+  km:
+  - 0.0
+  - 0.8
+  points: 72
+  median_dbm: -64.6
+  listed: true
+- route: nwc_cre_hhd
+  tunnel: Bangor Tunnel
+  km:
+  - 129.2
+  - 130.0
+  points: 56
+  median_dbm: -87.2
+  listed: true
+points:
+  fit: 364930
+  test: 303166
+validation:
+  calibrated:
+    overall:
+      points: 303166
+      bias_db: -4.4
+      mae_db: 11.24
+      rmse_db: 14.26
+      within_6db: 0.335
+      correlation: 0.403
+      usable_agreement: 0.966
+      measured_median_dbm: -79.3
+      predicted_median_dbm: -83.3
+    networks:
+      EE:
+        points: 79369
+        bias_db: -3.22
+        mae_db: 11.1
+        rmse_db: 14.12
+        within_6db: 0.339
+        correlation: 0.335
+        usable_agreement: 0.963
+        measured_median_dbm: -79.9
+        predicted_median_dbm: -82.1
+      O2:
+        points: 70563
+        bias_db: -5.87
+        mae_db: 11.51
+        rmse_db: 14.56
+        within_6db: 0.326
+        correlation: 0.44
+        usable_agreement: 0.97
+        measured_median_dbm: -76.5
+        predicted_median_dbm: -82.9
+      Three:
+        points: 77858
+        bias_db: -3.23
+        mae_db: 10.9
+        rmse_db: 13.89
+        within_6db: 0.352
+        correlation: 0.361
+        usable_agreement: 0.962
+        measured_median_dbm: -82.8
+        predicted_median_dbm: -87.0
+      Vodafone:
+        points: 75376
+        bias_db: -5.47
+        mae_db: 11.48
+        rmse_db: 14.5
+        within_6db: 0.321
+        correlation: 0.436
+        usable_agreement: 0.971
+        measured_median_dbm: -77.0
+        predicted_median_dbm: -81.8
+    settings:
+      open:
+        points: 279373
+        bias_db: -4.41
+        mae_db: 11.22
+        rmse_db: 14.22
+        within_6db: 0.334
+        correlation: 0.334
+        usable_agreement: 0.975
+        measured_median_dbm: -78.5
+        predicted_median_dbm: -81.8
+      cutting:
+        points: 18399
+        bias_db: -4.2
+        mae_db: 11.12
+        rmse_db: 14.32
+        within_6db: 0.357
+        correlation: 0.341
+        usable_agreement: 0.923
+        measured_median_dbm: -88.2
+        predicted_median_dbm: -89.8
+      tunnel:
+        points: 5394
+        bias_db: -4.27
+        mae_db: 12.66
+        rmse_db: 16.02
+        within_6db: 0.292
+        correlation: 0.471
+        usable_agreement: 0.669
+        measured_median_dbm: -103.9
+        predicted_median_dbm: -109.9
+  uncalibrated:
+    overall:
+      points: 303166
+      bias_db: -11.48
+      mae_db: 14.72
+      rmse_db: 17.95
+      within_6db: 0.234
+      correlation: 0.38
+      usable_agreement: 0.944
+      measured_median_dbm: -79.3
+      predicted_median_dbm: -89.8
+    networks:
+      EE:
+        points: 79369
+        bias_db: -9.68
+        mae_db: 13.72
+        rmse_db: 16.89
+        within_6db: 0.26
+        correlation: 0.324
+        usable_agreement: 0.944
+        measured_median_dbm: -79.9
+        predicted_median_dbm: -87.7
+      O2:
+        points: 70563
+        bias_db: -14.61
+        mae_db: 16.74
+        rmse_db: 19.85
+        within_6db: 0.177
+        correlation: 0.437
+        usable_agreement: 0.938
+        measured_median_dbm: -76.5
+        predicted_median_dbm: -91.0
+      Three:
+        points: 77858
+        bias_db: -8.98
+        mae_db: 13.02
+        rmse_db: 16.3
+        within_6db: 0.29
+        correlation: 0.349
+        usable_agreement: 0.941
+        measured_median_dbm: -82.8
+        predicted_median_dbm: -91.9
+      Vodafone:
+        points: 75376
+        bias_db: -13.0
+        mae_db: 15.66
+        rmse_db: 18.76
+        within_6db: 0.202
+        correlation: 0.43
+        usable_agreement: 0.952
+        measured_median_dbm: -77.0
+        predicted_median_dbm: -89.2
+    settings:
+      open:
+        points: 279373
+        bias_db: -11.47
+        mae_db: 14.71
+        rmse_db: 17.89
+        within_6db: 0.232
+        correlation: 0.309
+        usable_agreement: 0.959
+        measured_median_dbm: -78.5
+        predicted_median_dbm: -88.4
+      cutting:
+        points: 18399
+        bias_db: -10.81
+        mae_db: 14.08
+        rmse_db: 17.65
+        within_6db: 0.268
+        correlation: 0.322
+        usable_agreement: 0.87
+        measured_median_dbm: -88.2
+        predicted_median_dbm: -98.1
+      tunnel:
+        points: 5394
+        bias_db: -13.81
+        mae_db: 17.51
+        rmse_db: 21.79
+        within_6db: 0.217
+        correlation: 0.273
+        usable_agreement: 0.429
+        measured_median_dbm: -103.9
+        predicted_median_dbm: -118.2
+  held_out_routes:
+    routes: 16
+    mae_db_median: 11.04
+    bias_db_median: -4.29
+  routes:
+    ecml_kgx_edb:
+      calibrated:
+        points: 44264
+        bias_db: -5.57
+        mae_db: 11.67
+        rmse_db: 14.63
+        within_6db: 0.314
+        correlation: 0.308
+        usable_agreement: 0.98
+        measured_median_dbm: -76.1
+        predicted_median_dbm: -80.6
+      uncalibrated:
+        points: 44264
+        bias_db: -12.57
+        mae_db: 15.65
+        rmse_db: 18.63
+        within_6db: 0.199
+        correlation: 0.273
+        usable_agreement: 0.972
+        measured_median_dbm: -76.1
+        predicted_median_dbm: -87.4
+      held_out:
+        points: 44264
+        bias_db: -5.74
+        mae_db: 11.74
+        rmse_db: 14.69
+        within_6db: 0.312
+        correlation: 0.309
+        usable_agreement: 0.98
+        measured_median_dbm: -76.1
+        predicted_median_dbm: -81.0
+      settings:
+        open:
+          points: 42332
+          bias_db: -5.53
+          mae_db: 11.6
+          rmse_db: 14.53
+          within_6db: 0.315
+          correlation: 0.27
+          usable_agreement: 0.984
+          measured_median_dbm: -75.8
+          predicted_median_dbm: -80.6
+        cutting:
+          points: 1537
+          bias_db: -7.74
+          mae_db: 13.4
+          rmse_db: 16.8
+          within_6db: 0.29
+          correlation: 0.212
+          usable_agreement: 0.954
+          measured_median_dbm: -81.2
+          predicted_median_dbm: -87.8
+        tunnel:
+          points: 395
+          bias_db: -1.78
+          mae_db: 12.49
+          rmse_db: 15.55
+          within_6db: 0.309
+          correlation: 0.234
+          usable_agreement: 0.6
+          measured_median_dbm: -104.0
+          predicted_median_dbm: -104.2
+      measurements:
+        fit: 991624
+        test: 620882
+    bml_vic_btn:
+      calibrated:
+        points: 0
+      uncalibrated:
+        points: 0
+      held_out:
+        points: 0
+      settings: {}
+      measurements:
+        fit: 127545
+    chiltern_myb_bmo:
+      calibrated:
+        points: 10637
+        bias_db: -3.52
+        mae_db: 11.09
+        rmse_db: 13.96
+        within_6db: 0.334
+        correlation: 0.398
+        usable_agreement: 0.97
+        measured_median_dbm: -81.1
+        predicted_median_dbm: -83.9
+      uncalibrated:
+        points: 10637
+        bias_db: -10.56
+        mae_db: 13.91
+        rmse_db: 17.24
+        within_6db: 0.268
+        correlation: 0.39
+        usable_agreement: 0.95
+        measured_median_dbm: -81.1
+        predicted_median_dbm: -92.3
+      held_out:
+        points: 10637
+        bias_db: -3.5
+        mae_db: 11.09
+        rmse_db: 13.96
+        within_6db: 0.334
+        correlation: 0.398
+        usable_agreement: 0.97
+        measured_median_dbm: -81.1
+        predicted_median_dbm: -83.9
+      settings:
+        open:
+          points: 9693
+          bias_db: -3.75
+          mae_db: 11.17
+          rmse_db: 14.02
+          within_6db: 0.33
+          correlation: 0.352
+          usable_agreement: 0.974
+          measured_median_dbm: -80.0
+          predicted_median_dbm: -83.5
+        cutting:
+          points: 783
+          bias_db: 0.44
+          mae_db: 9.25
+          rmse_db: 11.98
+          within_6db: 0.414
+          correlation: 0.418
+          usable_agreement: 0.953
+          measured_median_dbm: -92.6
+          predicted_median_dbm: -89.8
+        tunnel:
+          points: 161
+          bias_db: -8.99
+          mae_db: 15.32
+          rmse_db: 18.24
+          within_6db: 0.205
+          correlation: 0.629
+          usable_agreement: 0.851
+          measured_median_dbm: -93.0
+          predicted_median_dbm: -99.9
+      measurements:
+        fit: 90361
+        test: 56409
+    cornish_pad_pnz:
+      calibrated:
+        points: 36127
+        bias_db: -5.43
+        mae_db: 11.71
+        rmse_db: 14.76
+        within_6db: 0.318
+        correlation: 0.366
+        usable_agreement: 0.966
+        measured_median_dbm: -79.7
+        predicted_median_dbm: -83.8
+      uncalibrated:
+        points: 36127
+        bias_db: -12.62
+        mae_db: 15.43
+        rmse_db: 18.82
+        within_6db: 0.226
+        correlation: 0.341
+        usable_agreement: 0.933
+        measured_median_dbm: -79.7
+        predicted_median_dbm: -93.2
+      held_out:
+        points: 36127
+        bias_db: -5.54
+        mae_db: 11.76
+        rmse_db: 14.81
+        within_6db: 0.317
+        correlation: 0.364
+        usable_agreement: 0.965
+        measured_median_dbm: -79.7
+        predicted_median_dbm: -83.8
+      settings:
+        open:
+          points: 32327
+          bias_db: -5.27
+          mae_db: 11.74
+          rmse_db: 14.78
+          within_6db: 0.314
+          correlation: 0.301
+          usable_agreement: 0.975
+          measured_median_dbm: -78.7
+          predicted_median_dbm: -83.5
+        cutting:
+          points: 3364
+          bias_db: -7.57
+          mae_db: 11.51
+          rmse_db: 14.78
+          within_6db: 0.357
+          correlation: 0.352
+          usable_agreement: 0.909
+          measured_median_dbm: -86.1
+          predicted_median_dbm: -92.7
+        tunnel:
+          points: 436
+          bias_db: -0.41
+          mae_db: 10.51
+          rmse_db: 12.81
+          within_6db: 0.319
+          correlation: 0.544
+          usable_agreement: 0.7
+          measured_median_dbm: -105.5
+          predicted_median_dbm: -108.2
+      measurements:
+        fit: 453011
+        test: 362781
+    eg_edb_glq:
+      calibrated:
+        points: 5730
+        bias_db: -6.05
+        mae_db: 12.3
+        rmse_db: 15.41
+        within_6db: 0.298
+        correlation: 0.407
+        usable_agreement: 0.958
+        measured_median_dbm: -77.8
+        predicted_median_dbm: -83.1
+      uncalibrated:
+        points: 5730
+        bias_db: -13.09
+        mae_db: 16.31
+        rmse_db: 19.63
+        within_6db: 0.198
+        correlation: 0.367
+        usable_agreement: 0.927
+        measured_median_dbm: -77.8
+        predicted_median_dbm: -89.4
+      held_out:
+        points: 5730
+        bias_db: -6.08
+        mae_db: 12.32
+        rmse_db: 15.43
+        within_6db: 0.298
+        correlation: 0.406
+        usable_agreement: 0.958
+        measured_median_dbm: -77.8
+        predicted_median_dbm: -83.1
+      settings:
+        open:
+          points: 5079
+          bias_db: -6.13
+          mae_db: 12.5
+          rmse_db: 15.56
+          within_6db: 0.286
+          correlation: 0.255
+          usable_agreement: 0.977
+          measured_median_dbm: -76.5
+          predicted_median_dbm: -81.8
+        cutting:
+          points: 395
+          bias_db: -5.72
+          mae_db: 11.99
+          rmse_db: 15.42
+          within_6db: 0.332
+          correlation: 0.249
+          usable_agreement: 0.932
+          measured_median_dbm: -84.0
+          predicted_median_dbm: -89.8
+        tunnel:
+          points: 256
+          bias_db: -4.98
+          mae_db: 8.78
+          rmse_db: 12.06
+          within_6db: 0.469
+          correlation: 0.482
+          usable_agreement: 0.625
+          measured_median_dbm: -105.1
+          predicted_median_dbm: -110.9
+      measurements:
+        fit: 69317
+        test: 34825
+    geml_lst_nrw:
+      calibrated:
+        points: 0
+      uncalibrated:
+        points: 0
+      held_out:
+        points: 0
+      settings: {}
+      measurements:
+        fit: 12763
+    gwml_pad_swa:
+      calibrated:
+        points: 21588
+        bias_db: -5.12
+        mae_db: 10.73
+        rmse_db: 13.85
+        within_6db: 0.36
+        correlation: 0.371
+        usable_agreement: 0.984
+        measured_median_dbm: -77.5
+        predicted_median_dbm: -80.7
+      uncalibrated:
+        points: 21588
+        bias_db: -12.17
+        mae_db: 14.66
+        rmse_db: 17.86
+        within_6db: 0.226
+        correlation: 0.348
+        usable_agreement: 0.971
+        measured_median_dbm: -77.5
+        predicted_median_dbm: -87.3
+      held_out:
+        points: 21588
+        bias_db: -5.16
+        mae_db: 10.75
+        rmse_db: 13.87
+        within_6db: 0.36
+        correlation: 0.371
+        usable_agreement: 0.984
+        measured_median_dbm: -77.5
+        predicted_median_dbm: -80.8
+      settings:
+        open:
+          points: 20422
+          bias_db: -5.01
+          mae_db: 10.65
+          rmse_db: 13.74
+          within_6db: 0.363
+          correlation: 0.314
+          usable_agreement: 0.987
+          measured_median_dbm: -77.0
+          predicted_median_dbm: -80.6
+        cutting:
+          points: 849
+          bias_db: -7.63
+          mae_db: 11.3
+          rmse_db: 14.6
+          within_6db: 0.355
+          correlation: 0.45
+          usable_agreement: 0.993
+          measured_median_dbm: -85.0
+          predicted_median_dbm: -89.1
+        tunnel:
+          points: 317
+          bias_db: -5.51
+          mae_db: 14.84
+          rmse_db: 18.24
+          within_6db: 0.199
+          correlation: 0.674
+          usable_agreement: 0.798
+          measured_median_dbm: -95.2
+          predicted_median_dbm: -99.4
+      measurements:
+        fit: 473433
+        test: 289284
+    hml_edb_inv:
+      calibrated:
+        points: 15901
+        bias_db: 1.8
+        mae_db: 10.9
+        rmse_db: 13.82
+        within_6db: 0.346
+        correlation: 0.354
+        usable_agreement: 0.939
+        measured_median_dbm: -87.7
+        predicted_median_dbm: -85.0
+      uncalibrated:
+        points: 15901
+        bias_db: -5.39
+        mae_db: 11.81
+        rmse_db: 14.95
+        within_6db: 0.32
+        correlation: 0.335
+        usable_agreement: 0.912
+        measured_median_dbm: -87.7
+        predicted_median_dbm: -93.3
+      held_out:
+        points: 15901
+        bias_db: 1.96
+        mae_db: 10.93
+        rmse_db: 13.85
+        within_6db: 0.345
+        correlation: 0.352
+        usable_agreement: 0.94
+        measured_median_dbm: -87.7
+        predicted_median_dbm: -84.8
+      settings:
+        open:
+          points: 14194
+          bias_db: 1.5
+          mae_db: 11.02
+          rmse_db: 13.97
+          within_6db: 0.342
+          correlation: 0.286
+          usable_agreement: 0.952
+          measured_median_dbm: -86.4
+          predicted_median_dbm: -84.3
+        cutting:
+          points: 1514
+          bias_db: 4.76
+          mae_db: 9.84
+          rmse_db: 12.32
+          within_6db: 0.373
+          correlation: 0.353
+          usable_agreement: 0.861
+          measured_median_dbm: -98.6
+          predicted_median_dbm: -92.7
+        tunnel:
+          points: 193
+          bias_db: 0.6
+          mae_db: 10.81
+          rmse_db: 14.38
+          within_6db: 0.44
+          correlation: 0.278
+          usable_agreement: 0.627
+          measured_median_dbm: -105.7
+          predicted_median_dbm: -104.4
+      measurements:
+        fit: 144195
+        test: 93698
+    hs1_stp_dvp:
+      calibrated:
+        points: 28
+        bias_db: -10.96
+        mae_db: 14.16
+        rmse_db: 18.38
+        within_6db: 0.393
+        correlation: -0.432
+        usable_agreement: 1.0
+        measured_median_dbm: -70.0
+        predicted_median_dbm: -74.6
+      uncalibrated:
+        points: 28
+        bias_db: -17.78
+        mae_db: 19.45
+        rmse_db: 23.14
+        within_6db: 0.071
+        correlation: -0.419
+        usable_agreement: 1.0
+        measured_median_dbm: -70.0
+        predicted_median_dbm: -80.9
+      held_out:
+        points: 28
+        bias_db: -10.95
+        mae_db: 14.15
+        rmse_db: 18.37
+        within_6db: 0.393
+        correlation: -0.432
+        usable_agreement: 1.0
+        measured_median_dbm: -70.0
+        predicted_median_dbm: -74.6
+      settings:
+        open:
+          points: 28
+          bias_db: -10.96
+          mae_db: 14.16
+          rmse_db: 18.38
+          within_6db: 0.393
+          correlation: -0.432
+          usable_agreement: 1.0
+          measured_median_dbm: -70.0
+          predicted_median_dbm: -74.6
+      measurements:
+        fit: 30575
+        test: 87
+    mml_stp_shf:
+      calibrated:
+        points: 14385
+        bias_db: -3.66
+        mae_db: 11.01
+        rmse_db: 13.99
+        within_6db: 0.341
+        correlation: 0.455
+        usable_agreement: 0.957
+        measured_median_dbm: -80.8
+        predicted_median_dbm: -81.8
+      uncalibrated:
+        points: 14385
+        bias_db: -10.61
+        mae_db: 13.8
+        rmse_db: 17.31
+        within_6db: 0.275
+        correlation: 0.438
+        usable_agreement: 0.928
+        measured_median_dbm: -80.8
+        predicted_median_dbm: -88.1
+      held_out:
+        points: 14385
+        bias_db: -3.62
+        mae_db: 11.0
+        rmse_db: 13.97
+        within_6db: 0.341
+        correlation: 0.455
+        usable_agreement: 0.957
+        measured_median_dbm: -80.8
+        predicted_median_dbm: -81.7
+      settings:
+        open:
+          points: 13074
+          bias_db: -3.34
+          mae_db: 10.76
+          rmse_db: 13.67
+          within_6db: 0.348
+          correlation: 0.349
+          usable_agreement: 0.98
+          measured_median_dbm: -79.7
+          predicted_median_dbm: -80.6
+        cutting:
+          points: 638
+          bias_db: -5.68
+          mae_db: 12.19
+          rmse_db: 15.75
+          within_6db: 0.328
+          correlation: 0.24
+          usable_agreement: 0.897
+          measured_median_dbm: -86.2
+          predicted_median_dbm: -89.8
+        tunnel:
+          points: 673
+          bias_db: -8.07
+          mae_db: 14.73
+          rmse_db: 17.81
+          within_6db: 0.205
+          correlation: 0.499
+          usable_agreement: 0.566
+          measured_median_dbm: -101.2
+          predicted_median_dbm: -113.6
+      measurements:
+        fit: 988959
+        test: 654196
+    nwc_cre_hhd:
+      calibrated:
+        points: 13239
+        bias_db: -8.15
+        mae_db: 12.47
+        rmse_db: 15.51
+        within_6db: 0.297
+        correlation: 0.425
+        usable_agreement: 0.949
+        measured_median_dbm: -80.1
+        predicted_median_dbm: -86.6
+      uncalibrated:
+        points: 13239
+        bias_db: -15.47
+        mae_db: 17.2
+        rmse_db: 20.53
+        within_6db: 0.185
+        correlation: 0.404
+        usable_agreement: 0.883
+        measured_median_dbm: -80.1
+        predicted_median_dbm: -93.3
+      held_out:
+        points: 13239
+        bias_db: -8.29
+        mae_db: 12.54
+        rmse_db: 15.58
+        within_6db: 0.296
+        correlation: 0.425
+        usable_agreement: 0.948
+        measured_median_dbm: -80.1
+        predicted_median_dbm: -86.7
+      settings:
+        open:
+          points: 12203
+          bias_db: -8.35
+          mae_db: 12.65
+          rmse_db: 15.65
+          within_6db: 0.288
+          correlation: 0.382
+          usable_agreement: 0.958
+          measured_median_dbm: -79.3
+          predicted_median_dbm: -86.1
+        cutting:
+          points: 682
+          bias_db: -4.17
+          mae_db: 8.6
+          rmse_db: 11.56
+          within_6db: 0.487
+          correlation: 0.449
+          usable_agreement: 0.925
+          measured_median_dbm: -93.4
+          predicted_median_dbm: -94.2
+        tunnel:
+          points: 354
+          bias_db: -9.1
+          mae_db: 13.82
+          rmse_db: 17.13
+          within_6db: 0.232
+          correlation: 0.281
+          usable_agreement: 0.689
+          measured_median_dbm: -93.7
+          predicted_median_dbm: -102.5
+      measurements:
+        fit: 136396
+        test: 68197
+    sc_lds_car:
+      calibrated:
+        points: 13776
+        bias_db: -3.9
+        mae_db: 12.31
+        rmse_db: 15.54
+        within_6db: 0.293
+        correlation: 0.521
+        usable_agreement: 0.863
+        measured_median_dbm: -85.7
+        predicted_median_dbm: -89.0
+      uncalibrated:
+        points: 13776
+        bias_db: -11.19
+        mae_db: 15.74
+        rmse_db: 18.86
+        within_6db: 0.21
+        correlation: 0.513
+        usable_agreement: 0.798
+        measured_median_dbm: -85.7
+        predicted_median_dbm: -95.4
+      held_out:
+        points: 13776
+        bias_db: -3.98
+        mae_db: 12.34
+        rmse_db: 15.56
+        within_6db: 0.291
+        correlation: 0.52
+        usable_agreement: 0.863
+        measured_median_dbm: -85.7
+        predicted_median_dbm: -89.1
+      settings:
+        open:
+          points: 12005
+          bias_db: -4.39
+          mae_db: 12.5
+          rmse_db: 15.78
+          within_6db: 0.289
+          correlation: 0.48
+          usable_agreement: 0.874
+          measured_median_dbm: -83.8
+          predicted_median_dbm: -87.0
+        cutting:
+          points: 1416
+          bias_db: -2.44
+          mae_db: 11.4
+          rmse_db: 14.27
+          within_6db: 0.321
+          correlation: 0.322
+          usable_agreement: 0.799
+          measured_median_dbm: -94.9
+          predicted_median_dbm: -96.2
+        tunnel:
+          points: 355
+          bias_db: 6.76
+          mae_db: 9.57
+          rmse_db: 11.55
+          within_6db: 0.307
+          correlation: 0.517
+          usable_agreement: 0.735
+          measured_median_dbm: -117.9
+          predicted_median_dbm: -112.5
+      measurements:
+        fit: 181552
+        test: 203406
+    swml_wat_wey:
+      calibrated:
+        points: 1453
+        bias_db: -4.23
+        mae_db: 9.94
+        rmse_db: 12.72
+        within_6db: 0.409
+        correlation: 0.625
+        usable_agreement: 0.986
+        measured_median_dbm: -77.5
+        predicted_median_dbm: -80.2
+      uncalibrated:
+        points: 1453
+        bias_db: -11.35
+        mae_db: 13.18
+        rmse_db: 16.53
+        within_6db: 0.304
+        correlation: 0.621
+        usable_agreement: 0.979
+        measured_median_dbm: -77.5
+        predicted_median_dbm: -86.9
+      held_out:
+        points: 1453
+        bias_db: -4.06
+        mae_db: 9.9
+        rmse_db: 12.66
+        within_6db: 0.407
+        correlation: 0.625
+        usable_agreement: 0.986
+        measured_median_dbm: -77.5
+        predicted_median_dbm: -80.0
+      settings:
+        open:
+          points: 1396
+          bias_db: -4.62
+          mae_db: 9.93
+          rmse_db: 12.74
+          within_6db: 0.41
+          correlation: 0.48
+          usable_agreement: 0.993
+          measured_median_dbm: -77.0
+          predicted_median_dbm: -79.9
+        cutting:
+          points: 11
+          bias_db: -4.12
+          mae_db: 15.47
+          rmse_db: 17.47
+          within_6db: 0.0
+          correlation: 0.331
+          usable_agreement: 0.909
+          measured_median_dbm: -88.1
+          predicted_median_dbm: -86.0
+        tunnel:
+          points: 46
+          bias_db: 7.53
+          mae_db: 8.71
+          rmse_db: 10.6
+          within_6db: 0.478
+          correlation: 0.826
+          usable_agreement: 0.804
+          measured_median_dbm: -118.3
+          predicted_median_dbm: -111.3
+      measurements:
+        fit: 414212
+        test: 11726
+    tfw_cdf_man:
+      calibrated:
+        points: 21189
+        bias_db: -3.78
+        mae_db: 10.37
+        rmse_db: 13.09
+        within_6db: 0.36
+        correlation: 0.374
+        usable_agreement: 0.98
+        measured_median_dbm: -81.1
+        predicted_median_dbm: -83.8
+      uncalibrated:
+        points: 21189
+        bias_db: -10.98
+        mae_db: 13.81
+        rmse_db: 16.87
+        within_6db: 0.25
+        correlation: 0.348
+        usable_agreement: 0.954
+        measured_median_dbm: -81.1
+        predicted_median_dbm: -92.8
+      held_out:
+        points: 21189
+        bias_db: -3.84
+        mae_db: 10.39
+        rmse_db: 13.12
+        within_6db: 0.359
+        correlation: 0.373
+        usable_agreement: 0.98
+        measured_median_dbm: -81.1
+        predicted_median_dbm: -83.8
+      settings:
+        open:
+          points: 19728
+          bias_db: -3.86
+          mae_db: 10.4
+          rmse_db: 13.13
+          within_6db: 0.357
+          correlation: 0.337
+          usable_agreement: 0.984
+          measured_median_dbm: -80.4
+          predicted_median_dbm: -83.5
+        cutting:
+          points: 1365
+          bias_db: -2.81
+          mae_db: 9.88
+          rmse_db: 12.54
+          within_6db: 0.398
+          correlation: 0.306
+          usable_agreement: 0.929
+          measured_median_dbm: -89.4
+          predicted_median_dbm: -90.3
+        tunnel:
+          points: 96
+          bias_db: -2.56
+          mae_db: 9.68
+          rmse_db: 12.31
+          within_6db: 0.365
+          correlation: 0.578
+          usable_agreement: 0.708
+          measured_median_dbm: -102.9
+          predicted_median_dbm: -107.8
+      measurements:
+        fit: 482166
+        test: 220597
+    tpe_man_ncl:
+      calibrated:
+        points: 18726
+        bias_db: -6.28
+        mae_db: 10.75
+        rmse_db: 13.39
+        within_6db: 0.337
+        correlation: 0.543
+        usable_agreement: 0.98
+        measured_median_dbm: -75.4
+        predicted_median_dbm: -80.6
+      uncalibrated:
+        points: 18726
+        bias_db: -13.32
+        mae_db: 15.21
+        rmse_db: 17.98
+        within_6db: 0.205
+        correlation: 0.514
+        usable_agreement: 0.972
+        measured_median_dbm: -75.4
+        predicted_median_dbm: -87.2
+      held_out:
+        points: 18726
+        bias_db: -6.33
+        mae_db: 10.78
+        rmse_db: 13.41
+        within_6db: 0.337
+        correlation: 0.543
+        usable_agreement: 0.98
+        measured_median_dbm: -75.4
+        predicted_median_dbm: -80.7
+      settings:
+        open:
+          points: 17246
+          bias_db: -6.26
+          mae_db: 10.67
+          rmse_db: 13.2
+          within_6db: 0.337
+          correlation: 0.393
+          usable_agreement: 0.993
+          measured_median_dbm: -74.5
+          predicted_median_dbm: -79.9
+        cutting:
+          points: 786
+          bias_db: -7.04
+          mae_db: 10.68
+          rmse_db: 13.58
+          within_6db: 0.354
+          correlation: 0.386
+          usable_agreement: 0.99
+          measured_median_dbm: -81.7
+          predicted_median_dbm: -86.3
+        tunnel:
+          points: 694
+          bias_db: -5.77
+          mae_db: 12.94
+          rmse_db: 17.18
+          within_6db: 0.33
+          correlation: 0.349
+          usable_agreement: 0.644
+          measured_median_dbm: -107.6
+          predicted_median_dbm: -115.4
+      measurements:
+        fit: 438936
+        test: 319241
+    wcml_eus_glc:
+      calibrated:
+        points: 44601
+        bias_db: -4.49
+        mae_db: 11.58
+        rmse_db: 14.84
+        within_6db: 0.331
+        correlation: 0.245
+        usable_agreement: 0.976
+        measured_median_dbm: -77.7
+        predicted_median_dbm: -81.4
+      uncalibrated:
+        points: 44601
+        bias_db: -11.42
+        mae_db: 15.12
+        rmse_db: 18.42
+        within_6db: 0.221
+        correlation: 0.205
+        usable_agreement: 0.961
+        measured_median_dbm: -77.7
+        predicted_median_dbm: -87.7
+      held_out:
+        points: 44601
+        bias_db: -4.51
+        mae_db: 11.6
+        rmse_db: 14.86
+        within_6db: 0.33
+        correlation: 0.243
+        usable_agreement: 0.976
+        measured_median_dbm: -77.7
+        predicted_median_dbm: -81.5
+      settings:
+        open:
+          points: 41456
+          bias_db: -4.42
+          mae_db: 11.51
+          rmse_db: 14.74
+          within_6db: 0.331
+          correlation: 0.191
+          usable_agreement: 0.981
+          measured_median_dbm: -77.2
+          predicted_median_dbm: -80.6
+        cutting:
+          points: 2666
+          bias_db: -4.98
+          mae_db: 12.17
+          rmse_db: 15.77
+          within_6db: 0.335
+          correlation: 0.114
+          usable_agreement: 0.953
+          measured_median_dbm: -85.7
+          predicted_median_dbm: -89.1
+        tunnel:
+          points: 479
+          bias_db: -7.79
+          mae_db: 14.55
+          rmse_db: 18.43
+          within_6db: 0.276
+          correlation: 0.426
+          usable_agreement: 0.714
+          measured_median_dbm: -97.1
+          predicted_median_dbm: -106.4
+      measurements:
+        fit: 800394
+        test: 411589
+    wcml_eus_man:
+      calibrated:
+        points: 17429
+        bias_db: -2.05
+        mae_db: 10.7
+        rmse_db: 13.87
+        within_6db: 0.365
+        correlation: 0.331
+        usable_agreement: 0.97
+        measured_median_dbm: -80.9
+        predicted_median_dbm: -81.4
+      uncalibrated:
+        points: 17429
+        bias_db: -8.92
+        mae_db: 13.23
+        rmse_db: 16.53
+        within_6db: 0.282
+        correlation: 0.311
+        usable_agreement: 0.951
+        measured_median_dbm: -80.9
+        predicted_median_dbm: -87.7
+      held_out:
+        points: 17429
+        bias_db: -1.97
+        mae_db: 10.69
+        rmse_db: 13.86
+        within_6db: 0.366
+        correlation: 0.33
+        usable_agreement: 0.97
+        measured_median_dbm: -80.9
+        predicted_median_dbm: -81.4
+      settings:
+        open:
+          points: 16230
+          bias_db: -2.08
+          mae_db: 10.64
+          rmse_db: 13.81
+          within_6db: 0.368
+          correlation: 0.244
+          usable_agreement: 0.98
+          measured_median_dbm: -80.1
+          predicted_median_dbm: -80.6
+        cutting:
+          points: 833
+          bias_db: 0.17
+          mae_db: 10.89
+          rmse_db: 14.01
+          within_6db: 0.336
+          correlation: 0.215
+          usable_agreement: 0.926
+          measured_median_dbm: -92.6
+          predicted_median_dbm: -89.8
+        tunnel:
+          points: 366
+          bias_db: -5.75
+          mae_db: 12.77
+          rmse_db: 16.07
+          within_6db: 0.314
+          correlation: 0.406
+          usable_agreement: 0.653
+          measured_median_dbm: -100.4
+          predicted_median_dbm: -107.6
+      measurements:
+        fit: 294335
+        test: 134586
+    xc_bri_yrk:
+      calibrated:
+        points: 24093
+        bias_db: -3.43
+        mae_db: 10.05
+        rmse_db: 12.83
+        within_6db: 0.378
+        correlation: 0.474
+        usable_agreement: 0.975
+        measured_median_dbm: -80.1
+        predicted_median_dbm: -82.4
+      uncalibrated:
+        points: 24093
+        bias_db: -10.6
+        mae_db: 13.39
+        rmse_db: 16.45
+        within_6db: 0.266
+        correlation: 0.452
+        usable_agreement: 0.961
+        measured_median_dbm: -80.1
+        predicted_median_dbm: -88.6
+      held_out:
+        points: 24093
+        bias_db: -3.41
+        mae_db: 10.04
+        rmse_db: 12.83
+        within_6db: 0.378
+        correlation: 0.474
+        usable_agreement: 0.975
+        measured_median_dbm: -80.1
+        predicted_median_dbm: -82.4
+      settings:
+        open:
+          points: 21960
+          bias_db: -3.4
+          mae_db: 9.99
+          rmse_db: 12.76
+          within_6db: 0.38
+          correlation: 0.383
+          usable_agreement: 0.984
+          measured_median_dbm: -79.1
+          predicted_median_dbm: -80.8
+        cutting:
+          points: 1560
+          bias_db: -4.06
+          mae_db: 9.94
+          rmse_db: 12.85
+          within_6db: 0.39
+          correlation: 0.316
+          usable_agreement: 0.963
+          measured_median_dbm: -87.4
+          predicted_median_dbm: -89.1
+        tunnel:
+          points: 573
+          bias_db: -3.16
+          mae_db: 12.37
+          rmse_db: 15.29
+          within_6db: 0.264
+          correlation: 0.504
+          usable_agreement: 0.656
+          measured_median_dbm: -106.5
+          predicted_median_dbm: -113.0
+      measurements:
+        fit: 681479
+        test: 354370

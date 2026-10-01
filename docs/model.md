@@ -8,14 +8,16 @@ All constants: `config/simulation.yaml` (versioned by `model_version`).
 q_base = prior_score                       # Ofcom level → score, or Connected Nations %, or synthetic
        − cutting_penalty_max · min(1, cutting_depth / 10 m)
        − penalty_per_km · max(0, serving_cell_distance_km − 3)
-       + calibration_bias[operator]        # from tcs calibrate
+       + calibration_bias[operator]        # tcs calibrate (one route) or tcs calibrate-national (config/calibration.yaml)
 q      = clip(q_base + vehicle_offset)     # rooftop 0 · handset −0.18 (≈ −18 dB penetration)
-tunnel: q = 0.04 (no infrastructure) or 0.52 (DAS assumed: km ranges / names in the route's `das_tunnels`; none by default)
+tunnel: q = floor + (q_portal − floor) · exp(−d / portal_decay_m), the better of the two portals, where q_portal is
+        the open-air q just outside and d the distance in; floor = default_score (no in-tunnel infrastructure).
+        0.52 where DAS is assumed (km ranges / names in the route's `das_tunnels`; none by default)
 
 capacity = capacity_prior[tech] · ((q − 0.12)/0.88)^1 · (1 − 0.08·speed/200) · (1 − 0.4·handover_penalty)
 latency  = 24 + 110·(1 − q) + 80·handover_penalty        (ms)
 loss     = table(q) + 2·handover_penalty                  (%)
-rsrp     = −120 + 46·q   (flagged synthetic until calibrated)
+rsrp     = −120 + 46·q   (flagged synthetic until calibrated; then slope·q + intercept per operator, tunnels included)
 ```
 
 Handover: serving cell = nearest candidate with hysteresis (switch when < 78 % of current distance or current

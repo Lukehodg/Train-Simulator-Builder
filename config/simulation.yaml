@@ -1,5 +1,5 @@
 # Every numerical assumption lives here and is versioned with model_version.
-model_version: "0.1.0"
+model_version: "0.2.0"
 
 vehicle:
   profile: EXTERNAL_ROOFTOP_ANTENNA     # EXTERNAL_ROOFTOP_ANTENNA | PASSENGER_HANDSET_INSIDE_CARRIAGE
@@ -14,14 +14,19 @@ vehicle:
 
 cellular:
   # Level A: coverage prior + adjustments (score space 0..1)
+  # Cutting and tunnel terms fitted with the national calibration (config/calibration.yaml, `environment`):
+  # Network Rail Yellow Train LTE measurements, 2018-19, all routes. Re-fit with `tcs calibrate-national`.
   terrain:
-    cutting_penalty_max: 0.28
-    cutting_full_depth_m: 10
+    cutting_penalty_max: 0.2            # about 9 dB, reached at full_depth
+    cutting_full_depth_m: 4
   cell_distance:
     free_km: 3.0
     penalty_per_km: 0.06
   tunnels:
-    default_score: 0.04                 # no dedicated infrastructure
+    default_score: 0.1                  # deep inside a tunnel with no in-tunnel coverage (about -115 dBm): below usable
+    # Signal from outside carries some way in: the open-air score at each portal falls off exponentially with
+    # distance into the tunnel (e-folding length, m) towards default_score. null = default_score throughout.
+    portal_decay_m: 100
     das_score: 0.52                     # tunnels with in-tunnel coverage: each route lists its own (das_tunnels in its route config)
   # Networks with a modem on the train: each EDGE Rail antenna carries one network's SIM, and only these take part in
   # the onboard link management. null = every network in networks.yaml (a multi-SIM rack router); set by the presets
@@ -29,6 +34,9 @@ cellular:
   fitted_networks: null
   # score -> radio metric mapping (flagged synthetic unless calibrated against measurements)
   rsrp_dbm: {at_zero: -120, at_one: -74}
+  # Calibration used on every route without its own (`tcs calibrate` writes one per route): per-network score bias
+  # fitted by `tcs calibrate-national` to field measurements over all routes. null = uncalibrated.
+  national_calibration: config/calibration.yaml
   sinr_db:  {at_zero: -5,   at_one: 25}
   throughput:
     score_floor: 0.12                   # below this no usable data session

@@ -472,7 +472,9 @@ def _assumptions(settings: Settings) -> list[tuple[str, str]]:
         ("Distance from serving cell", f"−{cell['cell_distance']['penalty_per_km']} quality per km beyond {cell['cell_distance']['free_km']} km"),
         ("Handover", f"{cell['handover']['duration_samples']} points (≈{cell['handover']['duration_samples'] * settings.spacing_m:.0f} m), "
                      f"+{cell['handover']['latency_spike_ms']} ms, capacity ×{cell['handover']['capacity_factor']}"),
-        ("Tunnels", f"quality {cell['tunnels']['default_score']} without in-tunnel coverage; "
+        ("Tunnels", (f"signal from each portal fades inside over about {cell['tunnels']['portal_decay_m']:g} m (e-folding) to quality "
+                     f"{cell['tunnels']['default_score']} without in-tunnel coverage; " if cell["tunnels"].get("portal_decay_m")
+                     else f"quality {cell['tunnels']['default_score']} without in-tunnel coverage; ")
                     + (f"{cell['tunnels']['das_score']} where it is assumed ({_das_plain(cell['tunnels']['das_tunnels'])})"
                        if cell["tunnels"].get("das_tunnels") else "no tunnel on this route is assumed to have it")),
         ("Satellite", "; ".join(f"{p.get('name', p['id'])}: {p['terminal'].replace('_', ' ')} terminal, {p['capacity_prior_mbps'][p['terminal']]} Mbps, "
@@ -603,6 +605,25 @@ def _coverage_row(meta: dict) -> tuple[str, str, str]:
     return ("Mobile coverage", "Stand-in coverage prior", "synthetic stand-in")
 
 
+def _month(iso: str) -> str:
+    return datetime.strptime(iso[:7], "%Y-%m").strftime("%b %Y")
+
+
+def period_text(p: dict | None) -> str:
+    """{"from": "2018-06-02", "to": "2018-12-18"} -> "Jun 2018 – Dec 2018"."""
+    return f"{_month(p['from'])} – {_month(p['to'])}" if p and p.get("from") and p.get("to") else ""
+
+
+def _calibration_row(cal: dict | None) -> tuple[str, str, str]:
+    what = "Calibration of mobile signal"
+    if not cal:
+        return (what, "None: predictions are not yet calibrated against field measurements", "not calibrated")
+    if cal.get("scope") == "route":
+        return (what, "Field measurements attached to this route", "calibrated")
+    return (what, f"{cal.get('source')}, {period_text(cal.get('fit_period'))} (fit) and {period_text(cal.get('test_period'))} (test), "
+                  f"over {cal.get('routes')} routes", "calibrated")
+
+
 def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")[:40] or "x"
 
@@ -656,6 +677,7 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
         ("Cell sites and handovers", {"opencellid": "OpenCellID"}.get(meta.get("cell_source", ""), meta.get("cell_source", "") or "Stand-in cell sites"), live(meta.get("cell_source") == "opencellid")),
         ("Satellite", "Predictive sky-visibility model" + (" with terminal telemetry" if any("telemetry" in str(x) for x in obs["source_flags"].unique()) else ""), "predictive"),
         ("Timetable", "Route configuration" if settings.route.get("timetable", {}).get("source", "yaml") == "yaml" else str(settings.route["timetable"]["source"]), "configured"),
+        _calibration_row(meta.get("calibration")),
     ]
     charts = {"capacity": _chart_capacity(samples, rc, stations), "sections": _chart_sections(sec), "links": _chart_links(links),
               "heatmap": _chart_heatmap(samples, stations, bands), "networks": _chart_networks(samples, stations, obs, names, bands["signal"])}

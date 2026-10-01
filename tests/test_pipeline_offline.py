@@ -192,9 +192,11 @@ def test_report_all_places_packs_beside_the_viewer_bundle(pipeline, tmp_path, mo
 
     base, edge = (Document(str(out / r["docx"]["file"])) for r in idx["reports"])
     headings = [p.text for p in base.paragraphs if p.style.name.startswith("Heading")]
-    for h in ("Executive summary", "1   Introduction", "2.4   Route heat maps", "8   Validation status", "Appendix A   Station-to-station results", "Appendix B   Glossary"):
+    for h in ("Executive summary", "1   Introduction", "2.4   Route heat maps", "8   Calibration and validation", "Appendix A   Station-to-station results", "Appendix B   Glossary"):
         assert h in headings
     assert "9.2   Sensitivity to the main assumptions" in headings
+    calibrated = [p.text for p in base.paragraphs if "is calibrated against" in p.text]   # the national calibration and its test
+    assert calibrated and "never saw" in calibrated[0]
     text = " ".join(p.text for p in base.paragraphs).replace("\xa0", " ")   # the methodology describes the sources this build really used
     assert "approximate line through the stations" in text and "come from OpenStreetMap" not in text
     assert "a stand-in coverage estimate" in text and "sampled every 500 m" in text
@@ -256,8 +258,8 @@ def test_sensitivity_moves_results_the_right_way(pipeline):
     assert both.sim["vehicle"]["profiles"]["EDGE_RAIL_ACTIVE_ANTENNA"]["score_offset"] == pytest.approx(offset / 2 - 5 / span_db)
 
 
-@pytest.mark.parametrize("calibrated", [False, True])
-def test_browser_model_parity(pipeline, calibrated):
+@pytest.mark.parametrize("calibrated,portal_decay_m", [(False, None), (True, None), (True, 150)])
+def test_browser_model_parity(pipeline, calibrated, portal_decay_m):
     import copy
     import json
     import shutil
@@ -270,6 +272,9 @@ def test_browser_model_parity(pipeline, calibrated):
     if not node or not (ROOT / "web/node_modules/typescript").exists():
         pytest.skip("Install Node.js and web dependencies to run browser parity checks")
     s, b, _, prior, serving, obs, _ = pipeline
+    s = copy.deepcopy(s)
+    s.sim["cellular"]["tunnels"]["portal_decay_m"] = portal_decay_m        # signal carried in from the portals, or the floor
+    assert b.samples["in_tunnel"].any()                                    # so the tunnel model is exercised
     cal = {"version": 2, "rsrp_input": "corrected_quality", "section_km": 10,
            "bias": {"ee": 0.08}, "sections": {"ee": {"1": -0.05}},
            "rsrp_map": {"ee": {"slope": 42, "intercept": -119}}} if calibrated else None
