@@ -108,32 +108,51 @@ def link_terms(rsrp_dbm, sinr_db, gv_offset_db: float, cable_db, a: dict):
 
 
 # ---------------------------------------------------------------- inputs
-def load_gv(path: Path, samples: pd.DataFrame, proj, cache: Path) -> pd.DataFrame:
-    """Global View 4G readings near the route: the strongest cell per (second, train, network, carrier)."""
+def read_gv_table(path: Path) -> pd.DataFrame:
+    """Global View 4G readings, the strongest cell per (second, train, network, carrier): from the scanner's CSV, or
+    from a parquet of such rows (e.g. a previous read)."""
+    if path.suffix == ".parquet":
+        c = pd.read_parquet(path).rename(columns={"Latitude": "latitude", "Longitude": "longitude", "net": "network", "timestamp": "ts"})
+        return c[[k for k in ("ts", "train", "network", "band", "rsrp", "sinr", "latitude", "longitude") if k in c]]
+    nets = {10: "o2", 15: "vodafone", 20: "three", 30: "ee", 33: "ee", 34: "ee"}
+    parts = []
+    cols = ["train", "date", "time", "mcc", "mnc", "earfcn", "dlfreq", "rsrp", "sinr", "Latitude", "Longitude"]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for ch in pd.read_csv(path, encoding="utf-8-sig", index_col=False, usecols=cols, chunksize=2_000_000,
+                              dtype={"date": str, "time": str, "train": str}):
+            for k in ("rsrp", "sinr", "mcc", "mnc", "dlfreq", "Latitude", "Longitude"):
+                ch[k] = pd.to_numeric(ch[k], errors="coerce")
+            ch = ch[ch.rsrp.between(-160, -20) & ch.sinr.between(-40, 60) & (ch.mcc == 234)]
+            ch = ch.assign(network=ch.mnc.map(nets)).dropna(subset=["network"])
+            parts.append(ch.sort_values("rsrp", ascending=False).drop_duplicates(["date", "time", "train", "network", "earfcn"]))
+    c = pd.concat(parts).rename(columns={"Latitude": "latitude", "Longitude": "longitude"})
+    c["ts"] = pd.to_datetime(c.date + " " + c.time, format="%d/%m/%Y %H:%M:%S", errors="coerce")
+    f = c.dlfreq
+    c["band"] = np.select([f < 790.5, f < 822, (f > 920) & (f < 961), (f > 1450) & (f < 1500), (f > 1800) & (f < 1881),
+                           (f > 2100) & (f < 2171), (f > 2600) & (f < 2691)], ["700", "800", "900", "1400", "1800", "2100", "2600"], "other")
+    return c[["ts", "train", "network", "band", "rsrp", "sinr", "latitude", "longitude"]]
+
+
+def national_bands(table: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    """Per (network, band), over every Global View reading: how far below the network's strongest carrier the band
+    typically sits (dB), and the share of seconds it is heard. Stands in on routes the scanner barely covered."""
+    t = table[table.band != "other"]
+    key = ["ts", "train", "network"] if {"ts", "train"} <= set(t.columns) else ["latitude", "longitude", "network"]
+    top = t.groupby(key).rsrp.transform("max")
+    delta = (t.rsrp - top).groupby([t.network, t.band]).median()
+    seconds = t.drop_duplicates(key).groupby("network").size()
+    share = t.drop_duplicates(key + ["band"]).groupby(["network", "band"]).size() / seconds
+    return delta, share
+
+
+def load_gv(table: pd.DataFrame, samples: pd.DataFrame, proj, cache: Path) -> pd.DataFrame:
+    """The Global View readings within 50 m of the route, each on its nearest sample."""
     from tcs.sources.measurements import attach_to_route
 
     if cache.exists():
         return pd.read_parquet(cache)
-    if path.suffix == ".parquet":
-        c = pd.read_parquet(path).rename(columns={"Latitude": "latitude", "Longitude": "longitude", "net": "network"})
-    else:
-        nets = {10: "o2", 15: "vodafone", 20: "three", 30: "ee", 33: "ee", 34: "ee"}
-        parts = []
-        cols = ["train", "date", "time", "mcc", "mnc", "earfcn", "dlfreq", "rsrp", "sinr", "Latitude", "Longitude"]
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            for ch in pd.read_csv(path, encoding="utf-8-sig", index_col=False, usecols=cols, chunksize=2_000_000,
-                                  dtype={"date": str, "time": str, "train": str}):
-                for k in ("rsrp", "sinr", "mcc", "mnc", "dlfreq", "Latitude", "Longitude"):
-                    ch[k] = pd.to_numeric(ch[k], errors="coerce")
-                ch = ch[ch.rsrp.between(-160, -20) & ch.sinr.between(-40, 60) & (ch.mcc == 234)]
-                ch = ch.assign(network=ch.mnc.map(nets)).dropna(subset=["network"])
-                parts.append(ch.sort_values("rsrp", ascending=False).drop_duplicates(["date", "time", "train", "network", "earfcn"]))
-        c = pd.concat(parts).rename(columns={"Latitude": "latitude", "Longitude": "longitude"})
-        f = c.dlfreq
-        c["band"] = np.select([f < 790.5, f < 822, (f > 920) & (f < 961), (f > 1450) & (f < 1500), (f > 1800) & (f < 1881),
-                               (f > 2100) & (f < 2171), (f > 2600) & (f < 2691)], ["700", "800", "900", "1400", "1800", "2100", "2600"], "other")
-    m = attach_to_route(c[["network", "band", "rsrp", "sinr", "latitude", "longitude"]], samples, proj, max_distance_m=50)
+    m = attach_to_route(table[["network", "band", "rsrp", "sinr", "latitude", "longitude"]], samples, proj, max_distance_m=50)
     cache.parent.mkdir(parents=True, exist_ok=True)
     m.to_parquet(cache, index=False)
     return m
@@ -143,7 +162,18 @@ def hinge(rsrp, floor, knee, slope, bend=10.0):
     return floor + slope * bend * np.logaddexp(0.0, (np.asarray(rsrp, dtype=float) - knee) / bend)
 
 
-def carriers_along(route: str, gv: Path, sinr_fit: Path, out: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+def sinr_curves(sinr_fit: Path) -> pd.DataFrame:
+    """Median SINR-against-RSRP hinge per band, from scripts/fit_rsrp_sinr.py's fit.csv."""
+    fit = pd.read_csv(sinr_fit)
+    fit = fit[(fit.percentile == 50) & fit.group.str.startswith("band ")].assign(band=lambda f: f.group.str.extract(r"band (\d+)")[0])
+    return fit.set_index("band")[["floor_db", "knee_dbm", "slope_db_per_db"]]
+
+
+MIN_MEASURED_SAMPLES = 200        # a network's own band mix on a route needs this many measured samples; else national
+
+
+def carriers_along(route: str, table: pd.DataFrame, curve: pd.DataFrame, national: tuple[pd.Series, pd.Series],
+                   out: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """One row per (sample, network, band) a train would use: RSRP and SINR at Global View level, measured where the
     scanner passed and modelled elsewhere."""
     import yaml
@@ -160,19 +190,22 @@ def carriers_along(route: str, gv: Path, sinr_fit: Path, out: Path) -> tuple[pd.
     offset = -float((yaml.safe_load(open(ROOT / "config" / "calibration.yaml")).get("current_check") or {}).get("level_offset_db", -7.1))
     obs, _ = simulate(s, samples, pd.read_parquet(it / "coverage_prior.parquet"), pd.read_parquet(it / "serving.parquet"),
                       calibration=calibration.for_route(s, it))
-    meas = load_gv(gv, samples, b.proj, out / "gv_readings.parquet")
+    meas = load_gv(table, samples, b.proj, out / "gv_readings.parquet")
     meas = meas[meas.band != "other"]
     measured = meas.groupby(["sample_id", "network", "band"], as_index=False).agg(rsrp=("rsrp", "median"), sinr=("sinr", "median"), n=("rsrp", "size"))
     measured["source"] = "measured"
 
     # where the scanner did not pass: the simulator's signal for the network, spread over the bands that network
-    # uses on this route (each band's typical offset from the strongest), SINR from the fitted median curve
-    fit = pd.read_csv(sinr_fit)
-    fit = fit[(fit.percentile == 50) & fit.group.str.startswith("band ")].assign(band=lambda f: f.group.str.extract(r"band (\d+)")[0])
-    curve = fit.set_index("band")[["floor_db", "knee_dbm", "slope_db_per_db"]]
+    # uses on this route (each band's typical offset from the strongest; nationally where the route has too few
+    # readings), SINR from the fitted median curve
     top = measured.groupby(["sample_id", "network"]).rsrp.transform("max")
     delta = (measured.rsrp - top).groupby([measured.network, measured.band]).median()
     share = measured.groupby(["network", "band"]).sample_id.nunique() / measured.groupby("network").sample_id.nunique()
+    enough = measured.groupby("network").sample_id.nunique()
+    own = {n for n in NETWORKS if enough.get(n, 0) >= MIN_MEASURED_SAMPLES}
+    n_delta, n_share = national
+    delta = pd.concat([delta[delta.index.get_level_values(0).isin(own)], n_delta[~n_delta.index.get_level_values(0).isin(own)]])
+    share = pd.concat([share[share.index.get_level_values(0).isin(own)], n_share[~n_share.index.get_level_values(0).isin(own)]])
     model = obs[obs.provider_id.isin(NETWORKS)][["sample_id", "provider_id", "signal_primary", "available"]].rename(columns={"provider_id": "network"})
     have = set(zip(measured.sample_id, measured.network))
     model = model[[(a, n) not in have for a, n in zip(model.sample_id, model.network)]]
@@ -185,17 +218,19 @@ def carriers_along(route: str, gv: Path, sinr_fit: Path, out: Path) -> tuple[pd.
         rows.append(pd.DataFrame({"sample_id": mm.sample_id.to_numpy(), "network": net, "band": band, "rsrp": rsrp,
                                   "sinr": hinge(rsrp, *curve.loc[band]), "n": 0, "source": "modelled",
                                   "available": mm.available.to_numpy()}))
-    modelled = pd.concat(rows, ignore_index=True)
+    modelled = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=["sample_id", "network", "band", "rsrp", "sinr", "n", "source", "available"])
     modelled = modelled[modelled.available.astype(bool)].drop(columns="available")   # the simulator's own no-service (tunnels)
     car = pd.concat([measured[measured.network.isin(NETWORKS)], modelled], ignore_index=True)
 
     # how far the modelled SINR is from the measured where both exist (the fallback's own error)
     chk = measured.merge(obs[["sample_id", "provider_id", "signal_primary"]].rename(columns={"provider_id": "network"}), on=["sample_id", "network"])
     chk = chk[chk.band.isin(curve.index)]
-    chk_r = chk.signal_primary - offset + chk.apply(lambda r: delta.get((r.network, r.band), 0.0), axis=1)
-    chk_s = hinge(chk_r, *[curve.loc[chk.band, c].to_numpy() for c in ("floor_db", "knee_dbm", "slope_db_per_db")])
-    meta = {"gv_offset_db": offset, "fallback_sinr_mae_db": float(np.mean(np.abs(chk_s - chk.sinr))),
-            "fallback_sinr_bias_db": float(np.median(chk_s - chk.sinr))}
+    meta = {"gv_offset_db": offset, "fallback_sinr_mae_db": float("nan"), "fallback_sinr_bias_db": float("nan"),
+            "own_band_mix": sorted(own)}
+    if len(chk):
+        chk_r = chk.signal_primary.to_numpy() - offset + np.array([delta.get((n, bd), 0.0) for n, bd in zip(chk.network, chk.band)])
+        chk_s = hinge(chk_r, *[curve.loc[chk.band, c].to_numpy() for c in ("floor_db", "knee_dbm", "slope_db_per_db")])
+        meta |= {"fallback_sinr_mae_db": float(np.mean(np.abs(chk_s - chk.sinr))), "fallback_sinr_bias_db": float(np.median(chk_s - chk.sinr))}
     return car, samples, meta
 
 
@@ -337,35 +372,104 @@ def chart(cases: dict[str, pd.DataFrame], stations: pd.DataFrame, title: str, pa
     plt.close(fig)
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("route")
-    ap.add_argument("--gv", type=Path, required=True, help="Global View 4G CSV, or a parquet of its per-carrier readings")
-    ap.add_argument("--sinr-fit", type=Path, required=True, help="fit.csv from scripts/fit_rsrp_sinr.py")
-    ap.add_argument("--out", type=Path, default=None, help="default data/aa/compare/<route>")
-    a = ap.parse_args()
-    from tcs.config import ROOT, load_settings
+def run_route(route: str, table: pd.DataFrame, curve: pd.DataFrame, national, out: Path) -> list[dict]:
+    """The comparison on one route: per-sample results, KPIs, breakdown and chart in `out`; one summary row per case."""
+    from tcs.config import load_settings
 
-    s = load_settings(route_id=a.route)
-    out = a.out or ROOT / "data" / "aa" / "compare" / a.route
+    s = load_settings(route_id=route)
     out.mkdir(parents=True, exist_ok=True)
-    car, samples, meta = carriers_along(a.route, a.gv, a.sinr_fit, out)
+    car, samples, meta = carriers_along(route, table, curve, national, out)
     cases = {c: compare(car, samples, meta["gv_offset_db"], interference=c) for c in INTERFERENCE}
     pd.concat([d.assign(case=c) for c, d in cases.items()]).to_parquet(out / "samples.parquet", index=False)
     k = pd.concat({c: kpis(d) for c, d in cases.items()}, names=["interference"])
     k.round(2).to_csv(out / "summary.csv")
-    bd = pd.concat([breakdown(d).assign(interference=c) for c, d in cases.items()])
-    bd.round(3).to_csv(out / "breakdown.csv", index=False)
+    pd.concat([breakdown(d).assign(interference=c) for c, d in cases.items()]).round(3).to_csv(out / "breakdown.csv", index=False)
     stations = pd.read_parquet(s.paths()["processed"] / "stations.parquet")
-    chart(cases, stations, f"{s.route['name']}: EDGE Rail active antenna vs passive rack-router installs", out / f"compare_{a.route}.png")
+    chart(cases, stations, f"{s.route['name']}: EDGE Rail active antenna vs passive rack-router installs", out / f"compare_{route}.png")
     df = cases["like noise"]
-    measured = float(df.dt_s[df.source == "measured"].sum() / df.dt_s.sum())
-    print(f"{s.route['name']}: {measured:.0%} of the journey time on measured carriers; fallback SINR error "
-          f"{meta['fallback_sinr_mae_db']:.1f} dB (bias {meta['fallback_sinr_bias_db']:+.1f})")
-    with pd.option_context("display.width", 240, "display.max_columns", 20):
-        print(k.round(2).to_string())
-        print(bd[bd.by != "source"].round(2).to_string(index=False))
-    print(f"-> {out}/")
+    rows = []
+    for c, d in cases.items():
+        kk = k.loc[c]
+        rows.append({"route": route, "name": s.route["name"], "km": round(float(d.distance_m.max()) / 1000, 1), "interference": c,
+                     "share_time_measured": float(d.dt_s[d.source == "measured"].sum() / d.dt_s.sum()),
+                     "share_time_tunnel": float(d.dt_s[d.in_tunnel].sum() / d.dt_s.sum()),
+                     "fallback_sinr_mae_db": meta["fallback_sinr_mae_db"],
+                     **{f"{m}_{pr}": float(kk.loc[pr, m]) for pr in PROFILES for m in ("p50_mbps", "p10_mbps", "share_time_10mbps", "no_service_minutes")},
+                     "A_vs_P2_median_x": float(kk.loc["P2", "uplift_median_x"]), "A_vs_P4_median_x": float(kk.loc["P4", "uplift_median_x"])})
+    print(f"{route}: {rows[0]['share_time_measured']:.0%} measured; A vs P2 {rows[1]['A_vs_P2_median_x']:.2f}-{rows[0]['A_vs_P2_median_x']:.2f}x, "
+          f"A vs P4 {rows[1]['A_vs_P4_median_x']:.2f}-{rows[0]['A_vs_P4_median_x']:.2f}x; median A {rows[0]['p50_mbps_A']:.0f} Mbit/s"
+          + ("" if len(df) else " (no samples)"))
+    return rows
+
+
+def chart_routes(summary: pd.DataFrame, path: Path) -> None:
+    """Every route: typical train throughput per install, and the active antenna's advantage as a range."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    hi = summary[summary.interference == "like noise"].set_index("route")
+    lo = summary[summary.interference == "correlated"].set_index("route")
+    order = hi.sort_values("A_vs_P2_median_x").index
+    hi, lo = hi.loc[order], lo.loc[order]
+    y = np.arange(len(order))
+    ink, muted, grid = "#222222", "#6b6b6b", "#e4e4e0"
+    fig, ax = plt.subplots(1, 2, figsize=(13, 0.42 * len(order) + 2.2), sharey=True, gridspec_kw={"width_ratios": [1.2, 1]})
+    for a_ in ax:
+        a_.grid(True, axis="x", color=grid, linewidth=0.6)
+        a_.spines[["top", "right"]].set_visible(False)
+        a_.tick_params(colors=muted, labelsize=8)
+    for k, size, marker in (("A", 90, "o"), ("P4", 22, "o"), ("P2", 40, "D")):
+        ax[0].scatter(hi[f"p50_mbps_{k}"], y, s=size, color=COLOURS[k], marker=marker, zorder=3,
+                      facecolors="none" if k == "A" else COLOURS[k], linewidths=1.6 if k == "A" else 0, label=f"{k}  {PROFILES[k]['label']}")
+    ax[0].set_xlabel("Typical train throughput, Mbit/s (median over the journey)", color=ink, fontsize=9)
+    ax[0].set_xlim(left=0)
+    ax[0].legend(fontsize=8, frameon=False, loc="lower right")
+    labels = [f"{n}  ·  {m:.0%} measured" for n, m in zip(hi.name, hi.share_time_measured)]
+    ax[0].set_yticks(y, labels, fontsize=8, color=ink)
+    for k, off in (("P2", 0.13), ("P4", -0.13)):
+        a, b = lo[f"A_vs_{k}_median_x"].to_numpy(), hi[f"A_vs_{k}_median_x"].to_numpy()
+        ax[1].hlines(y + off, np.minimum(a, b), np.maximum(a, b), color=COLOURS[k], linewidth=5, alpha=0.85)
+        ax[1].scatter(b, y + off, s=14, color=COLOURS[k], zorder=3)
+        ax[1].annotate(f"vs {k}", (b[-1], y[-1] + off), xytext=(6, 0), textcoords="offset points", fontsize=8, color=ink, va="center")
+    ax[1].axvline(1, color=muted, linewidth=0.8)
+    ax[1].set_xlabel("Active antenna's advantage, median (x): bar from correlated interference to interference like noise",
+                     color=ink, fontsize=9)
+    fig.suptitle("EDGE Rail active antenna vs passive rack-router installs, every route (4G, first cut)", x=0.01, ha="left", fontsize=12, color=ink)
+    fig.text(0.01, 0.005, "Throughput: interference treated like noise. Assumptions as aa/compare_route.py ASSUME (the same for every install). "
+             "Unmeasured stretches modelled from the simulator.", fontsize=7, color=muted)
+    fig.tight_layout(rect=(0, 0.02, 1, 1))
+    fig.savefig(path, dpi=140)
+    plt.close(fig)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("route", help="route id, or 'all'")
+    ap.add_argument("--gv", type=Path, required=True, help="Global View 4G CSV, or a parquet of its per-carrier readings")
+    ap.add_argument("--sinr-fit", type=Path, required=True, help="fit.csv from scripts/fit_rsrp_sinr.py")
+    ap.add_argument("--out", type=Path, default=None, help="default data/aa/compare")
+    a = ap.parse_args()
+    from tcs.config import ROOT, list_routes
+
+    root = a.out or ROOT / "data" / "aa" / "compare"
+    table = read_gv_table(a.gv)
+    national = national_bands(table)
+    curve = sinr_curves(a.sinr_fit)
+    ids = [r["id"] for r in list_routes()] if a.route == "all" else [a.route]
+    rows = []
+    for rid in ids:
+        rows += run_route(rid, table, curve, national, root / rid)
+    summary = pd.DataFrame(rows)
+    if a.route == "all":
+        summary.round(3).to_csv(root / "summary_all_routes.csv", index=False)
+        chart_routes(summary, root / "compare_all_routes.png")
+    with pd.option_context("display.width", 240, "display.max_columns", 30):
+        cols = ["name", "interference", "share_time_measured", "p50_mbps_A", "p50_mbps_P4", "p50_mbps_P2", "p10_mbps_A", "p10_mbps_P2",
+                "A_vs_P2_median_x", "A_vs_P4_median_x", "no_service_minutes_A", "no_service_minutes_P2"]
+        print(summary[cols].round(2).to_string(index=False))
+    print(f"-> {root}/")
 
 
 if __name__ == "__main__":
