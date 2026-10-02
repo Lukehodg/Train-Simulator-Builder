@@ -19,3 +19,9 @@ dist/
 web/test-results/
 web/playwright-report/
 web/tests/.generated/
+# Active antenna modelling: vendor reports, test logs and everything derived from them stay out of git (aa/README.md)
+data/aa/
+aa/**/*.pdf
+aa/**/*.zip
+aa/**/*.csv
+aa/**/*.xlsx
