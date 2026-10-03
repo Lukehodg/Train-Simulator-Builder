@@ -142,17 +142,35 @@ weight, applied through the model, against the Global View measurements from the
 
 | | model as calibrated | with measured corrections |
 |---|---|---|
-| mean absolute error | 9.67 dB | 8.30 dB |
-| within ±6 dB | 40.1 % | 48.3 % |
-| correlation | 0.39 | 0.55 |
-| usable / not usable (−110 dBm) agreement | 92.6 % | 92.8 % |
+| mean absolute error | 9.74 dB | 8.20 dB |
+| within ±6 dB | 39.9 % | 49.3 % |
+| correlation | 0.38 | 0.56 |
+| usable / not usable (−110 dBm) agreement | 92.6 % | 92.9 % |
 
-Better on every one of the 15 routes the 2026 logs cover (by 0.7–2.3 dB). Global View's earlier trips alone give
-8.66 dB; the 2018–19 Yellow Train logs still help because hills and cuttings have not moved. Tested offline before
-building it in: a Gaussian scale of 100 m and a shrink of 0.5 did best (75–150 m and 0.25–1 within 0.03 dB), Yellow
-Train at 0.1 better than 0.25 or 0.5. The production corrections (`config/route_corrections.parquet`, 365k route points on all 18
-routes, typically 3–5 dB) use every measurement, so on the routes the logs cover the published model sits nearer the
-measurements than this test shows; a route no train has measured gets none, and the model alone (9.67 dB).
+(On the routes as published on 3 October 2026, with the masts placed from the logs; the routes the first version of
+this test ran on gave 9.67 and 8.30 dB.) Better on every one of the 15 routes the 2026 logs cover, by 0.8–4.0 dB. Global View's
+earlier trips alone give 8.60 dB; the 2018–19 Yellow Train logs still help because hills and cuttings have not moved.
+Tested offline before building it in: a Gaussian scale of 100 m and a shrink of 0.5 did best (75–150 m and 0.25–1
+within 0.03 dB), Yellow Train at 0.1 better than 0.25 or 0.5. The production corrections
+(`config/route_corrections.parquet`, 371k route points on all 18 routes, typically 3–5 dB) use every measurement, so on
+the routes the logs cover the published model sits nearer the measurements than this test shows; a route no train has
+measured gets none, and the model alone (9.74 dB).
+
+**One level per measurement set, and tunnels (model 0.4.1).** The first version took each set's own level per route and
+network, so an error the model makes along a whole route went with the scanner's level; it also left tunnels to the
+portal model. The level is now one per set and network over every route the set covers, and in-tunnel errors correct
+the portal or DAS model where trains measured inside (smoothed apart from open-air ones). Same routes, same test:
+
+| corrections | mean error | within ±6 dB | correlation | in tunnels (1.2k points) |
+|---|---|---|---|---|
+| level per route, tunnels left out (0.4.0) | 8.35 dB | 48.0 % | 0.547 | 11.43 dB |
+| one level per set and network | 8.21 dB | 49.2 % | 0.558 | 11.41 dB |
+| tunnels corrected | 8.33 dB | 48.1 % | 0.549 | 9.24 dB |
+| both (0.4.1) | 8.20 dB | 49.3 % | 0.561 | 9.19 dB |
+
+Brighton gains most (8.22 to 6.79 dB; its bias from +4.6 to +1.0 dB), then HS1 (8.56 to 8.00), South Western (9.32 to
+8.83), Midland Main Line (6.93 to 6.57) and TransPennine (9.09 to 8.86); Vodafone 9.38 to 9.13 dB. Chiltern (9.01 to
+9.08) and the North Wales Coast (36 test points) are within 0.1 dB of where they were.
 
 Looked at and left out:
 
