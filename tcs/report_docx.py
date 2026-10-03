@@ -53,6 +53,8 @@ GLOSSARY = [
     ("Handover", "The train's modem moving from one cell site to the next; briefly reduces throughput and raises latency."),
     ("Latency", "Round-trip delay of the combined onboard WAN, in milliseconds."),
     ("Link manager / policy", "The onboard router logic that decides which links carry traffic: bonding, load balancing or failover."),
+    ("Mast positions", "Where each network's 4G masts stand, worked out from how their signal rises and falls along the track in "
+                       "Network Rail's Global View scanner logs; used in place of OpenCellID's positions for the same masts."),
     ("Median (P50)", "The value exceeded over half of the route."),
     ("Ofcom coverage prediction", "Mobile operators' predicted outdoor coverage by postcode, published through the Ofcom API."),
     ("OpenCellID", "Community-collected database of cell-site locations, used for serving-cell distance and handovers."),
@@ -847,6 +849,9 @@ class _Report:
                     "partly stand-in": "the operator's predicted coverage (Ofcom) where it was available and a neutral stand-in elsewhere",
                     }.get(status.get("Mobile coverage", ""), "a stand-in coverage estimate, as Ofcom's predictions were not available for this build")
         cells = "sites from OpenCellID" if status.get("Cell sites and handovers") == "live" else "a stand-in site layout"
+        if status.get("Cell sites and handovers") == "live" and (m.get("fitted_masts") or {}).get("masts"):
+            cells += (f", with {m['fitted_masts']['masts']} masts placed from Network Rail's Global View 4G logs in place of "
+                      "OpenCellID's positions, which are typically about 1 km out")
         horizon = ("a 30 m terrain model's horizon around each point" if status.get("Terrain and sky visibility") == "live"
                    else "the horizon around each point on flat stand-in terrain (hills are not modelled for this build)")
         lidar = lidar_text(m) if status.get("Terrain and sky visibility") == "live" else ""

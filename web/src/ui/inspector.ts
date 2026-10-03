@@ -205,6 +205,13 @@ function lidarText(m: Meta): string {
     + 'and trees, buildings and bridges over the line on the skyline from the surface model.'
 }
 
+function mastsText(m: Meta): string {
+  const f = m.fitted_masts
+  if (!f?.masts) return ''
+  return ` ${f.masts.toLocaleString()} masts placed from Network Rail Global View 4G logs (from how their signal rises and falls along the track) `
+    + `stand in for OpenCellID's positions of the same masts, which are typically about 1 km out; they serve ${Math.round(f.serving_share * 100)} % of the route.`
+}
+
 function renderSources(store: Store) {
   const m = store.state.data.meta
   const live = (flag: boolean, liveLabel = 'live', synthLabel = 'synthetic') => `<em class="${flag ? 'live' : 'synth'}">${flag ? liveLabel : synthLabel}</em>`
@@ -220,7 +227,7 @@ function renderSources(store: Store) {
     ['Cellular coverage prior', covLive, covLive ? `${esc(m.coverage_sources.join(', '))} — operator predictions on Ofcom's 50 m grid mapped to a model score; never presented as measured RSRP.`
       : covShare > 0 ? `Only ${Math.round(covShare * 100)} % of the route has Ofcom predictions (usually the Ofcom call quota ran out part-way); the rest is a neutral stand-in. Rebuild the route once the quota resets.`
       : 'Synthetic prior (noise field). Set <code>OFCOM_API_KEY</code>, or enable Connected Nations open data, to replace it.', covShare > 0 && !covLive ? 'partly live' : undefined],
-    ['Cell sites', cellLive, cellLive ? 'OpenCellID corridor extract (CC BY-SA 4.0). Logical cells; top-5 candidates per sample; serving cell with hysteresis.' : 'Synthetic site layout. Set <code>OPENCELLID_TOKEN</code> to use the community database.'],
+    ['Cell sites', cellLive, cellLive ? 'OpenCellID corridor extract (CC BY-SA 4.0). Logical cells; top-5 candidates per sample; serving cell with hysteresis.' + mastsText(m) : 'Synthetic site layout. Set <code>OPENCELLID_TOKEN</code> to use the community database.'],
     ['Satcom', false, `Predictive obstruction model (${esc(m.providers.find(p => p.type === 'satcom')?.terminal ?? 'performance')} terminal). No public route-level Starlink RF telemetry exists; confidence capped at 0.35 until terminal telemetry is ingested.`, 'predictive'],
     ['Calibration', !!m.calibration, calibrationText(m.calibration), m.calibration ? undefined : 'none'],
   ] as [string, boolean, string, string?][]

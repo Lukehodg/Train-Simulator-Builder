@@ -55,3 +55,8 @@ opencellid:
   candidate_radius_m: 12000
   candidates_per_sample: 5
   attribution: "OpenCellID (CC BY-SA 4.0) - community contributed; a missing cell does not mean no service."
+
+fitted_masts:
+  # 4G masts placed from scanner logs by `tcs locate-masts` (positions only): each stands in for OpenCellID's cells of
+  # the same mast (network + eNodeB), whose positions are typically ~1 km out. null = OpenCellID positions only.
+  file: config/masts.csv

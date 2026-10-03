@@ -446,8 +446,30 @@ def calibrate_national(measurements: Path = typer.Argument(..., help="Measuremen
                     f"({tc['points']} points): in-tunnel coverage; add it to the route's das_tunnels and re-run")
     env, cur = doc["environment"], national.environment_of(load_settings())
     if env != cur:
-        console.log(f"[yellow]set these in config/simulation.yaml (cellular.terrain / cellular.tunnels): {env} (now {cur})")
+        console.log(f"[yellow]set these in config/simulation.yaml (cellular.terrain / cellular.tunnels / cellular.cell_distance): {env} (now {cur})")
     console.log(f"wrote {out}")
+
+
+@app.command("locate-masts")
+def locate_masts(measurements: Path = typer.Argument(..., help="Scanner logs naming the cell behind each reading, e.g. Global View 4G (CSV or parquet)"),
+                 preset: str = typer.Option("global_view_4g"),
+                 before: str | None = typer.Option(None, help="Use only readings before this date (to test the masts on later trips)"),
+                 source: str = typer.Option("Network Rail Global View 4G measurements (Rail Data Marketplace)", help="Named in the file"),
+                 workers: int | None = typer.Option(None, help="Processes (default: all cores but one)"),
+                 out: Path = typer.Option(ROOT / "config" / "masts.csv")):
+    """Place each network's 4G masts from how their signal rises and falls along the track (tcs/masts.py); writes
+    config/masts.csv (positions only). Built routes then use these positions for serving-cell distance and handovers
+    in place of OpenCellID's for the same masts: re-run the routes, then `tcs calibrate-national`."""
+    from . import masts
+
+    s = load_settings()
+    r = masts.readings(measurements, s.operators, preset=preset, before=before)
+    if r.empty:
+        raise typer.BadParameter(f"no readings in {measurements} name their cell (E-UTRAN cell identity)")
+    m = masts.locate(r, workers=workers, log=console.log)
+    period = (str(pd.Timestamp(r["timestamp"].min()).date()), str(pd.Timestamp(r["timestamp"].max()).date()))
+    masts.save(m, out, source=source, period=period)
+    console.log(f"wrote {len(m):,} masts to {out} ({', '.join(f'{k} {v:,}' for k, v in m['network'].value_counts().items())})")
 
 
 @app.command("check-national")

@@ -65,6 +65,7 @@ export interface Meta {
   coverage_sources: string[]
   coverage_share?: Record<string, number>   // share of sample-operator pairs per coverage source (bundles from late 2026 on)
   cell_source: string
+  fitted_masts?: { masts: number; serving_share: number }   // masts placed from scanner logs (bundles from Oct 2026 on)
   calibration?: CalibrationMeta | null   // bundles from Oct 2026 on
   model_version: string
   warnings: string[]

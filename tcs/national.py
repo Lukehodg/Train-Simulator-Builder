@@ -37,6 +37,10 @@ PORTAL_DECAY_M = [None, 50, 100, 150, 200, 300, 450, 700]
 # coverage there is no usable service. The measurements barely tell floors around that threshold apart (Yellow Train
 # 2018-19: within 0.02 dB of absolute error from 0.10 to 0.14), so a tie never lights a long tunnel.
 TUNNEL_FLOOR = [0.0, 0.02, 0.04, 0.06, 0.08, 0.1]
+# Distance to the serving mast: score lost per km beyond a free radius (cellular.cell_distance). Fitted since the masts'
+# positions come from the scanner logs (config/masts.csv); OpenCellID's were typically ~1 km out, too rough to fit on.
+CELL_FREE_KM = [0.0, 1.0, 2.0, 3.0, 5.0, 8.0]
+CELL_PENALTY_PER_KM = [0.0, 0.01, 0.02, 0.03, 0.045, 0.06, 0.08, 0.1, 0.15]
 
 
 @dataclass
@@ -103,13 +107,16 @@ def with_environment(s: Settings, env: dict) -> Settings:
     c["terrain"]["cutting_full_depth_m"] = env["cutting_full_depth_m"]
     c["tunnels"]["portal_decay_m"] = env["portal_decay_m"]
     c["tunnels"]["default_score"] = env["tunnel_floor"]
+    if "cell_free_km" in env:
+        c["cell_distance"] = {"free_km": env["cell_free_km"], "penalty_per_km": env["cell_penalty_per_km"]}
     return out
 
 
 def environment_of(s: Settings) -> dict:
     c = s.sim["cellular"]
     return {"cutting_penalty_max": c["terrain"]["cutting_penalty_max"], "cutting_full_depth_m": c["terrain"]["cutting_full_depth_m"],
-            "portal_decay_m": c["tunnels"].get("portal_decay_m"), "tunnel_floor": c["tunnels"]["default_score"]}
+            "portal_decay_m": c["tunnels"].get("portal_decay_m"), "tunnel_floor": c["tunnels"]["default_score"],
+            "cell_free_km": c["cell_distance"]["free_km"], "cell_penalty_per_km": c["cell_distance"]["penalty_per_km"]}
 
 
 def predict(r: RouteData, env: dict, cal: dict | None) -> pd.DataFrame:
@@ -201,7 +208,8 @@ def tunnel_coverage(routes: list[RouteData], deep_m: float = 250.0, min_points: 
 
 def search_environment(routes: list[RouteData], base: dict, log=print) -> tuple[dict, dict]:
     """The environment terms that best fit the fit-period points, each network's calibration refitted for every try.
-    Cuttings are chosen on open-air points, then the tunnel terms on tunnel points (they do not affect each other)."""
+    Cuttings are chosen on open-air points, then the distance to the serving mast, then the tunnel terms on tunnel
+    points (they do not affect each other)."""
     best = None
     for pmax, depth in itertools.product(CUTTING_PENALTY_MAX, CUTTING_FULL_DEPTH_M):
         env = dict(base, cutting_penalty_max=pmax, cutting_full_depth_m=depth)
@@ -213,6 +221,18 @@ def search_environment(routes: list[RouteData], base: dict, log=print) -> tuple[
             best = (err, env, cal)
     _, env, cal = best
     log(f"cuttings: penalty {env['cutting_penalty_max']} of score at {env['cutting_full_depth_m']} m deep and more")
+    best = None
+    for free, per_km in itertools.product(CELL_FREE_KM, CELL_PENALTY_PER_KM):
+        if per_km == 0 and free != CELL_FREE_KM[0]:
+            continue                                        # no penalty: the free radius does nothing
+        e = dict(env, cell_free_km=free, cell_penalty_per_km=per_km)
+        c = fit_networks(routes, e)
+        j = pd.concat([predict(r, e, c) for r in routes])
+        err = _abs_error(j[(j["period"] == "fit") & ~j["_in_tunnel"]])
+        if best is None or err < best[0]:
+            best = (err, e, c)
+    _, env, cal = best
+    log(f"mast distance: {env['cell_penalty_per_km']} of score per km beyond {env['cell_free_km']} km from the serving mast")
     best = None
     usable = float(routes[0].settings.sim["cellular"]["throughput"]["score_floor"])
     for decay, floor in itertools.product(PORTAL_DECAY_M, [f for f in TUNNEL_FLOOR if f < usable]):

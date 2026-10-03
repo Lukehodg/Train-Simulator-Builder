@@ -5,7 +5,7 @@
                                               │
         ┌─────────────────────────────────────┼──────────────────────────────────────┐
         ▼                                     ▼                                      ▼
-  sources/osm_route      sources/terrain (Copernicus / OS T50)        sources/ofcom_coverage · opencellid
+  sources/osm_route      sources/terrain (Copernicus / OS T50)        sources/ofcom_coverage · opencellid (+ masts.py)
   (Overpass, file)       + sources/lidar (GB, 2 m near the track)     measurements · starlink · timetable
                          + sky_visibility (horizon → solid angle)
         │                                     │                                      │

@@ -10,6 +10,7 @@ import pyarrow as pa
 import pyarrow.feather as feather
 
 from ..config import Settings
+from ..masts import SOURCE as FITTED_SOURCE
 from ..model.calibration import describe as describe_calibration
 from ..model.cellular import das_mask
 from ..schema import PROVIDER_OBSERVATION, ROUTE_CONNECTIVITY
@@ -135,7 +136,8 @@ def export_all(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame, s
         "provenance": bundle.provenance,
         "coverage_sources": sorted(set(prior["source"].dropna().astype(str))),
         "coverage_share": {str(k): round(float(v), 4) for k, v in prior["source"].fillna("no_coverage_record").value_counts(normalize=True).items()},
-        "cell_source": str(cells["source"].iloc[0]) if len(cells) else "none",
+        "cell_source": _cell_source(cells),
+        **_fitted_masts_meta(cells, obs),           # masts placed from scanner logs, standing in for OpenCellID's positions
         "model_version": settings.sim["model_version"],
         "calibration": describe_calibration(settings, paths["interim"]),   # what the predictions were calibrated against, and how well
         "warnings": bundle.warnings,
@@ -143,6 +145,20 @@ def export_all(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame, s
     (web / "meta.json").write_text(json.dumps(meta, indent=1, default=_json_default), encoding="utf-8")
     written["web_meta"] = web / "meta.json"
     return written
+
+
+def _cell_source(cells: pd.DataFrame) -> str:
+    """The cell database behind the route (opencellid, or the synthetic stand-in); fitted masts refine it (below)."""
+    src = [s for s in cells["source"].astype(str).unique() if s != FITTED_SOURCE] if len(cells) else []
+    return src[0] if src else ("none" if not len(cells) else FITTED_SOURCE)
+
+
+def _fitted_masts_meta(cells: pd.DataFrame, obs: pd.DataFrame) -> dict:
+    if not len(cells) or not (cells["source"] == FITTED_SOURCE).any():
+        return {}
+    fitted = set(cells.loc[cells["source"] == FITTED_SOURCE, "cell_key"])
+    serving = obs.loc[(obs["provider_type"] == "cellular") & obs["serving_cell"].notna(), "serving_cell"]
+    return {"fitted_masts": {"masts": len(fitted), "serving_share": round(float(serving.isin(fitted).mean()), 4) if len(serving) else 0.0}}
 
 
 def _lidar_meta(samples: pd.DataFrame) -> dict:
