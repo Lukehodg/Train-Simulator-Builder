@@ -21,6 +21,8 @@ def cellular_confidence(settings: Settings, obs: pd.DataFrame, measured_sample_i
     conf = np.where(~obs["_has_prior"].values, 0.15, conf)
     calibration_mask = obs["_calibrated"].to_numpy(dtype=bool) if "_calibrated" in obs else np.zeros(len(obs), dtype=bool)
     conf = np.where(ofcom & calibration_mask, conf + c["calibrated_bonus"], conf)
+    if "_meas_w" in obs:                       # measured corrections nearby (tcs/corrections.py): at least one point's worth
+        conf = np.where(obs["_meas_w"].to_numpy(float) >= 1.0, np.maximum(conf, c.get("measured_correction", conf)), conf)
     if measured_sample_ids:
         m = obs["sample_id"].isin(measured_sample_ids).values
         conf = np.where(m, c["measured"], conf)

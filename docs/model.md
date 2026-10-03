@@ -7,8 +7,9 @@ All constants: `config/simulation.yaml` (versioned by `model_version`).
 ```
 q_base = prior_score                       # Ofcom level → score, or Connected Nations %, or synthetic
        − cutting_penalty_max · min(1, cutting_depth / cutting_full_depth_m)   # 0.28 at 8 m (fitted; depth from LiDAR in GB)
-       − penalty_per_km · max(0, serving_cell_distance_km − 3)
+       − penalty_per_km · max(0, serving_cell_distance_km − free_km)       # 0.01 beyond 8 km (fitted; masts placed from scanner logs)
        + calibration_bias[operator]        # tcs calibrate (one route) or tcs calibrate-national (config/calibration.yaml)
+       + measured_correction_db / slope    # where trains measured: earlier trips' errors here (tcs correct-routes)
 q      = clip(q_base + vehicle_offset)     # rooftop 0 · handset −0.18 (≈ −18 dB penetration)
 tunnel: q = floor + (q_portal − floor) · exp(−d / portal_decay_m), the better of the two portals, where q_portal is
         the open-air q just outside and d the distance in; floor = default_score (no in-tunnel infrastructure).
@@ -21,7 +22,21 @@ rsrp     = −120 + 46·q   (flagged synthetic until calibrated; then slope·q +
 ```
 
 Handover: serving cell = nearest candidate with hysteresis (switch when < 78 % of current distance or current
-> 9 km); a switch opens a 6-sample (300 m) penalty window that decays linearly.
+> 9 km); a switch opens a 6-sample (300 m) penalty window that decays linearly. Candidates are OpenCellID's cells,
+except that a 4G mast placed from the Global View logs (`config/masts.csv`) stands in for OpenCellID's cells of the
+same mast at its fitted position (docs/data-sources.md, 4a).
+
+The distance penalty was hand-set at 0.06 per km beyond 3 km until the national fit searched it (October 2026). With
+OpenCellID's positions or with the fitted ones, the measurements choose almost none: 0.01 per km beyond 8 km. The
+hand-set value made far-from-mast stretches too weak; removing it cut the 2026 check's error from 10.2 to 9.7 dB.
+
+**Measured corrections** (`tcs/corrections.py`). Where scanner trains have measured a route, the calibrated model's
+error at each measured route point (after one level per measurement set and network) is smoothed along the track
+with a 100 m Gaussian and shrunk where few measurements are near (correction = Σwg·e / (Σwg + 0.5)), with weight 1 for
+the 2026 Global View logs and 0.1 for the 2018–19 Yellow Train logs. The correction (dB) enters the score through the
+calibration's dB scale before the clip, so capacity, latency and the viewer follow; tunnels keep the portal model.
+Signal at a given spot repeats from trip to trip much more closely than coverage predictions place it, so this is the
+largest single accuracy gain the model has (docs/validation.md). Confidence there is 0.85.
 
 ## Vehicle profiles and the EDGE Rail preset
 

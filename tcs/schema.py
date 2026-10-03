@@ -50,6 +50,7 @@ PROVIDER_OBSERVATION = pa.schema([
     ("serving_distance_m", pa.float32()),
     ("handover", pa.bool_()),
     ("source_flags", pa.string()),       # pipe-separated provenance e.g. ofcom_predicted|opencellid|synthetic_rsrp
+    ("measured_correction_db", pa.float32()),   # measured correction applied here (tcs/corrections.py), NaN where none
     ("model_version", pa.string()),
 ])
 

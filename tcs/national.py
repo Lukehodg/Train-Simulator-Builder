@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from . import corrections
 from .config import Settings, load_settings
 from .model import calibration
 from .model.cellular import cellular_observations
@@ -37,6 +38,10 @@ PORTAL_DECAY_M = [None, 50, 100, 150, 200, 300, 450, 700]
 # coverage there is no usable service. The measurements barely tell floors around that threshold apart (Yellow Train
 # 2018-19: within 0.02 dB of absolute error from 0.10 to 0.14), so a tie never lights a long tunnel.
 TUNNEL_FLOOR = [0.0, 0.02, 0.04, 0.06, 0.08, 0.1]
+# Distance to the serving mast: score lost per km beyond a free radius (cellular.cell_distance). Fitted since the masts'
+# positions come from the scanner logs (config/masts.csv); OpenCellID's were typically ~1 km out, too rough to fit on.
+CELL_FREE_KM = [0.0, 1.0, 2.0, 3.0, 5.0, 8.0]
+CELL_PENALTY_PER_KM = [0.0, 0.01, 0.02, 0.03, 0.045, 0.06, 0.08, 0.1, 0.15]
 
 
 @dataclass
@@ -103,18 +108,21 @@ def with_environment(s: Settings, env: dict) -> Settings:
     c["terrain"]["cutting_full_depth_m"] = env["cutting_full_depth_m"]
     c["tunnels"]["portal_decay_m"] = env["portal_decay_m"]
     c["tunnels"]["default_score"] = env["tunnel_floor"]
+    if "cell_free_km" in env:
+        c["cell_distance"] = {"free_km": env["cell_free_km"], "penalty_per_km": env["cell_penalty_per_km"]}
     return out
 
 
 def environment_of(s: Settings) -> dict:
     c = s.sim["cellular"]
     return {"cutting_penalty_max": c["terrain"]["cutting_penalty_max"], "cutting_full_depth_m": c["terrain"]["cutting_full_depth_m"],
-            "portal_decay_m": c["tunnels"].get("portal_decay_m"), "tunnel_floor": c["tunnels"]["default_score"]}
+            "portal_decay_m": c["tunnels"].get("portal_decay_m"), "tunnel_floor": c["tunnels"]["default_score"],
+            "cell_free_km": c["cell_distance"]["free_km"], "cell_penalty_per_km": c["cell_distance"]["penalty_per_km"]}
 
 
-def predict(r: RouteData, env: dict, cal: dict | None) -> pd.DataFrame:
+def predict(r: RouteData, env: dict, cal: dict | None, corrections: pd.DataFrame | None = None) -> pd.DataFrame:
     """The model's RSRP at each measured route point, with what the accuracy breakdowns need."""
-    obs = cellular_observations(with_environment(r.settings, env), r.samples, r.prior, r.serving, calibration=cal)
+    obs = cellular_observations(with_environment(r.settings, env), r.samples, r.prior, r.serving, calibration=cal, corrections=corrections)
     obs = obs[["sample_id", "provider_id", "quality_score", "signal_primary", "_in_tunnel", "reason_code"]]
     j = r.points.merge(obs, on=["sample_id", "provider_id"])
     j = j.merge(r.samples[["sample_id", "distance_m", "cutting_depth_m"]], on="sample_id")
@@ -201,7 +209,8 @@ def tunnel_coverage(routes: list[RouteData], deep_m: float = 250.0, min_points: 
 
 def search_environment(routes: list[RouteData], base: dict, log=print) -> tuple[dict, dict]:
     """The environment terms that best fit the fit-period points, each network's calibration refitted for every try.
-    Cuttings are chosen on open-air points, then the tunnel terms on tunnel points (they do not affect each other)."""
+    Cuttings are chosen on open-air points, then the distance to the serving mast, then the tunnel terms on tunnel
+    points (they do not affect each other)."""
     best = None
     for pmax, depth in itertools.product(CUTTING_PENALTY_MAX, CUTTING_FULL_DEPTH_M):
         env = dict(base, cutting_penalty_max=pmax, cutting_full_depth_m=depth)
@@ -213,6 +222,18 @@ def search_environment(routes: list[RouteData], base: dict, log=print) -> tuple[
             best = (err, env, cal)
     _, env, cal = best
     log(f"cuttings: penalty {env['cutting_penalty_max']} of score at {env['cutting_full_depth_m']} m deep and more")
+    best = None
+    for free, per_km in itertools.product(CELL_FREE_KM, CELL_PENALTY_PER_KM):
+        if per_km == 0 and free != CELL_FREE_KM[0]:
+            continue                                        # no penalty: the free radius does nothing
+        e = dict(env, cell_free_km=free, cell_penalty_per_km=per_km)
+        c = fit_networks(routes, e)
+        j = pd.concat([predict(r, e, c) for r in routes])
+        err = _abs_error(j[(j["period"] == "fit") & ~j["_in_tunnel"]])
+        if best is None or err < best[0]:
+            best = (err, e, c)
+    _, env, cal = best
+    log(f"mast distance: {env['cell_penalty_per_km']} of score per km beyond {env['cell_free_km']} km from the serving mast")
     best = None
     usable = float(routes[0].settings.sim["cellular"]["throughput"]["score_floor"])
     for decay, floor in itertools.product(PORTAL_DECAY_M, [f for f in TUNNEL_FLOOR if f < usable]):
@@ -314,7 +335,29 @@ def _dump(doc: dict, out: Path) -> None:
     Path(out).write_text(HEADER + yaml.safe_dump(_plain(doc), sort_keys=False, allow_unicode=True, width=140), encoding="utf-8")
 
 
-def check(route_ids: list[str], path, preset: str, split: str, max_distance_m: float = 50.0, log=print) -> dict:
+def _as_calibrated(r: RouteData) -> tuple[dict, dict | None]:
+    return environment_of(r.settings), calibration.for_route(r.settings, r.settings.paths()["interim"])
+
+
+def route_corrections(sets: list[tuple[list[RouteData], float]], log=print) -> pd.DataFrame:
+    """Measured corrections for every route a measurement set covers (tcs/corrections.py), against the model as
+    calibrated now: each set's errors at its route points, weighted, pooled and smoothed along the track."""
+    errs: dict[str, tuple[RouteData, list[pd.DataFrame]]] = {}
+    for routes, weight in sets:
+        for r in routes:
+            env, cal = _as_calibrated(r)
+            errs.setdefault(r.settings.route_id, (r, []))[1].append(corrections.errors(predict(r, env, cal), weight))
+    tables = []
+    for rid, (r, e) in errs.items():
+        corr = corrections.smooth(pd.concat(e, ignore_index=True), r.samples)
+        tables.append(corrections.to_table(rid, corr, r.samples))
+        log(f"{rid}: corrections at {corr['sample_id'].nunique():,} of {len(r.samples):,} route points "
+            f"(median size {corr['correction_db'].abs().median():.1f} dB)" if len(corr) else f"{rid}: no corrections")
+    return pd.concat(tables, ignore_index=True) if tables else pd.DataFrame(columns=corrections.COLUMNS)
+
+
+def check(route_ids: list[str], path, preset: str, split: str, max_distance_m: float = 50.0, older: list[RouteData] | None = None,
+          older_weight: float = corrections.SET_WEIGHT["yellow_train"], log=print) -> dict:
     """The model as calibrated, against a later measurement set whose overall level may differ from the calibration
     data's (a scanner that logs signal before correcting for its antenna and cable). One level offset is fitted on the
     measurements before `split`; accuracy is then measured on those from `split`, per route, network and setting."""
@@ -331,9 +374,27 @@ def check(route_ids: list[str], path, preset: str, split: str, max_distance_m: f
     test = test.assign(signal_primary=test["signal_primary"] + offset)
     b = breakdown(test, names)
     log(f"level offset {offset:+.1f} dB; then {b['overall']['points']:,} test points, bias {b['overall']['bias_db']:+.1f} dB, MAE {b['overall']['mae_db']:.1f} dB")
+    # measured corrections (tcs/corrections.py) as `tcs correct-routes` makes them, but from this set's measurements before
+    # the split only (plus the older set's, if given), tested on those from it: what corrections do on later trips
+    old = {r.settings.route_id: r for r in older or []}
+    parts = []
+    for r in routes:
+        env, cal = _as_calibrated(r)
+        jr = predict(r, env, cal)
+        e = [corrections.errors(jr[jr["period"] == "fit"], 1.0)]
+        if r.settings.route_id in old:
+            e.append(corrections.errors(predict(old[r.settings.route_id], env, cal), older_weight))
+        corr = corrections.smooth(pd.concat(e, ignore_index=True), r.samples)
+        parts.append(predict(r, env, cal, corrections=corr))
+    tc = pd.concat(parts)
+    tc = tc[tc["period"] == "test"].assign(signal_primary=lambda d: d["signal_primary"] + offset)
+    bc = breakdown(tc, names)
+    log(f"with measured corrections from before {cut.date()}{' and the older set' if old else ''}: MAE {bc['overall']['mae_db']:.1f} dB")
     return {"preset": preset, "fit_period": _period(routes, "fit"), "test_period": _period(routes, "test"), "split": str(cut.date()),
             "level_offset_db": round(offset, 1), "max_distance_m": max_distance_m, "skipped": skipped, **b,
-            "routes": {rid: accuracy(g) for rid, g in test.groupby("route_id")}}
+            "routes": {rid: accuracy(g) for rid, g in test.groupby("route_id")},
+            "with_measured_corrections": {"older_set": bool(old), "older_weight": older_weight if old else None, **bc,
+                                          "routes": {rid: accuracy(g) for rid, g in tc.groupby("route_id")}}}
 
 
 # NR-ARFCN -> MHz (3GPP 38.104) and the band each falls in, for saying which 5G a scanner measured.

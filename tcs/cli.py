@@ -40,6 +40,7 @@ def run(offline: bool = typer.Option(False, help="Use cached/synthetic sources o
 
 def run_pipeline(offline: bool = False, route: str | None = None, weather: str = "nominal", policy: str | None = None, limit_postcodes: int | None = None,
                  copy_to_web: bool = True, train: Path | None = None, preset: str | None = None, satcom: bool = True):
+    from . import corrections
     from .model import calibration
     from .model.simulate import simulate
     from .pipeline.export import export_all
@@ -89,7 +90,10 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     cells.to_parquet(interim / "cells.parquet", index=False)
     serving.to_parquet(interim / "serving.parquet", index=False)
     cal = calibration.for_route(s, interim)
-    obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, policy=policy)
+    corr = corrections.for_build(s, b, interim)
+    if corr is not None:
+        console.log(f"measured corrections: {corr['sample_id'].nunique():,} of {len(b.samples):,} samples on at least one network")
+    obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, policy=policy, corrections=corr)
     written = export_all(s, b, b.samples, stations, cells, obs, rc, prior)
     if copy_to_web:
         dest = ROOT / "web" / "public" / "data" / s.route_id
@@ -252,6 +256,7 @@ def report(route: str | None = typer.Option(None, help="Route id (default: confi
 
 def _build_report(route: str | None, preset: str | None, train: Path | None, policy: str | None, weather: str, out: Path | None,
                   info: dict[str, str] | None = None, satcom: bool = True) -> dict[str, Path]:
+    from . import corrections
     from .model import calibration
     from .model.simulate import simulate
     from .pipeline.export import _lidar_meta
@@ -293,7 +298,8 @@ def _build_report(route: str | None, preset: str | None, train: Path | None, pol
     serving = pd.read_parquet(interim / "serving.parquet")
     stations = pd.read_parquet(processed / "stations.parquet")
     cal = calibration.for_route(s, interim)
-    obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather)
+    corr = corrections.load_interim(interim)
+    obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, corrections=corr)
     meta = json.loads((processed / "web" / "meta.json").read_text(encoding="utf-8"))
     meta["model_version"] = s.sim["model_version"]
     meta["calibration"] = calibration.describe(s, interim)     # as simulated now, not as when the bundle was built
@@ -310,12 +316,12 @@ def _build_report(route: str | None, preset: str | None, train: Path | None, pol
         from .report_docx import POLICIES, VEHICLES
 
         base = load_settings(route_id=route)
-        obs_b, rc_b = simulate(base, b.samples, prior, serving, calibration=cal)
+        obs_b, rc_b = simulate(base, b.samples, prior, serving, calibration=cal, corrections=corr)
         v, p = base.sim["vehicle"]["profile"], base.sim["wan"]["policy"]
         baseline = {"title": f"{VEHICLES.get(v, v).lower()}, {POLICIES.get(p, p).split(' (')[0].lower()}", "obs": obs_b, "rc": rc_b}
     from .sensitivity import run as sensitivity
 
-    sens = sensitivity(s, b.samples, prior, serving, calibration=cal, weather=weather)
+    sens = sensitivity(s, b.samples, prior, serving, calibration=cal, weather=weather, corrections=corr)
     return build_report(s, meta, b.samples, obs, rc, stations, out or (processed / "reports"), label, validation, weather=weather, baseline=baseline,
                         sensitivity=sens, variant=variant)
 
@@ -446,8 +452,68 @@ def calibrate_national(measurements: Path = typer.Argument(..., help="Measuremen
                     f"({tc['points']} points): in-tunnel coverage; add it to the route's das_tunnels and re-run")
     env, cur = doc["environment"], national.environment_of(load_settings())
     if env != cur:
-        console.log(f"[yellow]set these in config/simulation.yaml (cellular.terrain / cellular.tunnels): {env} (now {cur})")
+        console.log(f"[yellow]set these in config/simulation.yaml (cellular.terrain / cellular.tunnels / cellular.cell_distance): {env} (now {cur})")
     console.log(f"wrote {out}")
+
+
+@app.command("locate-masts")
+def locate_masts(measurements: Path = typer.Argument(..., help="Scanner logs naming the cell behind each reading, e.g. Global View 4G (CSV or parquet)"),
+                 preset: str = typer.Option("global_view_4g"),
+                 before: str | None = typer.Option(None, help="Use only readings before this date (to test the masts on later trips)"),
+                 source: str = typer.Option("Network Rail Global View 4G measurements (Rail Data Marketplace)", help="Named in the file"),
+                 workers: int | None = typer.Option(None, help="Processes (default: all cores but one)"),
+                 out: Path = typer.Option(ROOT / "config" / "masts.csv")):
+    """Place each network's 4G masts from how their signal rises and falls along the track (tcs/masts.py); writes
+    config/masts.csv (positions only). Built routes then use these positions for serving-cell distance and handovers
+    in place of OpenCellID's for the same masts: re-run the routes, then `tcs calibrate-national`."""
+    from . import masts
+
+    s = load_settings()
+    r = masts.readings(measurements, s.operators, preset=preset, before=before)
+    if r.empty:
+        raise typer.BadParameter(f"no readings in {measurements} name their cell (E-UTRAN cell identity)")
+    m = masts.locate(r, workers=workers, log=console.log)
+    period = (str(pd.Timestamp(r["timestamp"].min()).date()), str(pd.Timestamp(r["timestamp"].max()).date()))
+    masts.save(m, out, source=source, period=period)
+    console.log(f"wrote {len(m):,} masts to {out} ({', '.join(f'{k} {v:,}' for k, v in m['network'].value_counts().items())})")
+
+
+@app.command("correct-routes")
+def correct_routes(four_g: Path = typer.Option(..., "--four-g", help="Current scanner logs along the routes, e.g. Global View 4G (CSV or parquet)"),
+                   older: Path | None = typer.Option(None, help="An older measurement set (e.g. Yellow Train), at a tenth of the weight"),
+                   preset_4g: str = typer.Option("global_view_4g"), preset_older: str = typer.Option("yellow_train"),
+                   only: str | None = typer.Option(None, help="Comma-separated route ids (default: every built route)"),
+                   out: Path = typer.Option(ROOT / "config" / "route_corrections.parquet")):
+    """Measured corrections along each route (tcs/corrections.py): the calibrated model's errors at the measurements,
+    smoothed along the track, added to its predictions there on the next build. Writes positions, networks and dB only.
+    Re-run after `tcs calibrate-national`; `tcs check-national` reports how such corrections fare on later trips."""
+    import datetime
+
+    from . import corrections, national
+
+    ids = [r["id"] for r in list_routes()]
+    if only:
+        ids = [i for i in ids if i in {x.strip() for x in only.split(",")}]
+    every = pd.Timestamp("2100-01-01", tz="UTC")                 # every measurement informs the corrections
+    sets, sources = [], []
+    for path, preset, weight in ((four_g, preset_4g, corrections.SET_WEIGHT.get(preset_4g, 1.0)),
+                                 *([(older, preset_older, corrections.SET_WEIGHT.get(preset_older, 0.1))] if older else [])):
+        routes, _ = national.collect(ids, path, preset, every, log=console.log)
+        sets.append((routes, weight))
+        p = national._period(routes, "fit")
+        sources.append({"file": Path(path).name, "preset": preset, "weight": weight, **p})
+    table = national.route_corrections(sets, log=console.log)
+    cal = yaml_load(ROOT / "config" / "calibration.yaml")
+    corrections.save(table, out, meta={"sources": sources, "built_on": datetime.date.today().isoformat(),
+                                       "calibration_fitted_on": cal.get("fitted_on"), "model_version": load_settings().sim["model_version"],
+                                       "scale_m": corrections.SCALE_M, "shrink": corrections.SHRINK})
+    console.log(f"wrote {len(table):,} corrections on {table['route_id'].nunique()} routes to {out}")
+
+
+def yaml_load(path: Path) -> dict:
+    import yaml
+
+    return yaml.safe_load(Path(path).read_text(encoding="utf-8")) if Path(path).exists() else {}
 
 
 @app.command("check-national")
@@ -457,6 +523,9 @@ def check_national(four_g: Path = typer.Option(..., "--four-g", help="Later 4G m
                    split: str = typer.Option(..., help="Fit the level offset before this date, test from it"),
                    source: str = typer.Option("Network Rail Global View measurements (Rail Data Marketplace)", help="Named in reports"),
                    only: str | None = typer.Option(None, help="Comma-separated route ids (default: every built route)"),
+                   older: Path | None = typer.Option(None, help="An older measurement set (e.g. Yellow Train) whose errors also inform "
+                                                               "the measured corrections tested here, at a tenth of the weight"),
+                   preset_older: str = typer.Option("yellow_train"),
                    out: Path = typer.Option(ROOT / "config" / "calibration.yaml")):
     """Check the calibrated model against later measurements (e.g. the 2026 Global View 4G logs) and summarise where 5G
     was measured; adds `current_check` and `five_g` to config/calibration.yaml for the reports and the viewer. The
@@ -469,7 +538,8 @@ def check_national(four_g: Path = typer.Option(..., "--four-g", help="Later 4G m
     ids = [r["id"] for r in list_routes()]
     if only:
         ids = [i for i in ids if i in {x.strip() for x in only.split(",")}]
-    sections = {"current_check": {"source": source, "file": four_g.name, **national.check(ids, four_g, preset_4g, split, log=console.log)}}
+    old = national.collect(ids, older, preset_older, pd.Timestamp("2100-01-01", tz="UTC"), log=console.log)[0] if older else None
+    sections = {"current_check": {"source": source, "file": four_g.name, **national.check(ids, four_g, preset_4g, split, older=old, log=console.log)}}
     if five_g:
         sections["five_g"] = {"source": source, "file": five_g.name, **national.five_g(ids, four_g, five_g, preset_4g, preset_5g, log=console.log)}
     national.save_checks(out, **sections)

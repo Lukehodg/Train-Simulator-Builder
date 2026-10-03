@@ -5,23 +5,65 @@ import duckdb
 import numpy as np
 import pandas as pd
 
-from ..config import Settings
+from .. import masts
+from ..config import ROOT, Settings
 from ..sources import synthetic
 from ..sources.base import SourceUnavailable, console
 from ..sources.opencellid import fetch_cells_bulk
 from .sample_route import RouteBundle
 
+FITTED_SOURCE = masts.SOURCE
+
 
 def corridor_cells(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame) -> pd.DataFrame:
     if not settings.offline:
+        corridor_m = float(settings.route.get("corridor_m", 2500))
         try:
-            cells = fetch_cells_bulk(settings, bundle.proj, samples, settings.paths()["raw"], corridor_m=float(settings.route.get("corridor_m", 2500)))
+            cells = fetch_cells_bulk(settings, bundle.proj, samples, settings.paths()["raw"], corridor_m=corridor_m)
             if len(cells):
-                return cells
+                return with_fitted_masts(settings, bundle.proj, samples, cells, corridor_m)
         except SourceUnavailable as exc:
             console.log(f"[yellow]OpenCellID: {exc}")
     console.log("[yellow]cell sites: synthetic stand-in (flagged)")
     return synthetic.synthetic_cells(samples, settings.operators, bundle.proj)
+
+
+def with_fitted_masts(settings: Settings, proj, samples: pd.DataFrame, cells: pd.DataFrame, corridor_m: float) -> pd.DataFrame:
+    """Masts placed from scanner logs (config/masts.csv, `tcs locate-masts`) stand in for OpenCellID's cells of the same
+    mast (network and eNodeB): one row per mast at the fitted position. OpenCellID positions are averages of where phones
+    heard a cell, typically ~1 km from the mast; the fitted ones predict later trips' signal from distance markedly
+    better (docs/validation.md). Masts the logs never placed keep OpenCellID's cells."""
+    path = (settings.networks.get("fitted_masts") or {}).get("file")
+    if not path or cells.empty:
+        return cells
+    m = masts.load(ROOT / path)
+    ops = {op["id"]: op for op in settings.operators}
+    m = m[m["network"].isin(ops)].reset_index(drop=True)
+    if m.empty:
+        return cells
+    x, y = proj.to_xy(m["longitude"].to_numpy(float), m["latitude"].to_numpy(float))
+    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+    sx, sy = samples["x"].to_numpy()[::10], samples["y"].to_numpy()[::10]       # every 500 m is enough for a corridor cut
+    from shapely import points
+    from shapely.strtree import STRtree
+
+    idx = STRtree(points(sx, sy)).nearest(points(x, y))
+    near = np.hypot(sx[idx] - x, sy[idx] - y) <= corridor_m + 500
+    m, x, y = m[near].reset_index(drop=True), x[near], y[near]
+    if m.empty:
+        return cells
+    mcc = m["network"].map({k: int(op["mcc"]) for k, op in ops.items()})
+    fitted = pd.DataFrame({
+        "cell_key": mcc.astype(str) + "-" + m["mnc"].astype(str) + "-enb-" + m["enb"].astype(str), "provider_id": m["network"], "radio": "LTE",
+        "mcc": mcc.astype(int), "mnc": m["mnc"].astype(int), "area_or_tac": np.int64(-1), "cell_id": m["enb"].astype("int64"), "pci_or_unit": np.int64(-1),
+        "latitude": m["latitude"].astype(float), "longitude": m["longitude"].astype(float), "x": x, "y": y, "elevation_m": np.float32(np.nan),
+        "samples": m["locations"].astype(int), "range_m": 0, "source": FITTED_SOURCE,
+    })
+    placed = set(zip(fitted["mnc"].tolist(), fitted["cell_id"].tolist()))
+    lte = (cells["radio"] == "LTE").to_numpy()
+    same = np.array([(int(a), int(c) // 256) in placed for a, c in zip(cells["mnc"], cells["cell_id"])], dtype=bool) & lte
+    console.log(f"masts placed from scanner logs: {len(fitted)} in the corridor, standing in for {int(same.sum())} OpenCellID cells")
+    return pd.concat([cells[~same], fitted], ignore_index=True)
 
 
 def candidate_cells(settings: Settings, samples: pd.DataFrame, cells: pd.DataFrame) -> pd.DataFrame:

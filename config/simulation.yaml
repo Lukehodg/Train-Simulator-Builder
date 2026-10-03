@@ -1,5 +1,5 @@
 # Every numerical assumption lives here and is versioned with model_version.
-model_version: "0.3.0"
+model_version: "0.4.0"
 
 vehicle:
   profile: EXTERNAL_ROOFTOP_ANTENNA     # EXTERNAL_ROOFTOP_ANTENNA | PASSENGER_HANDSET_INSIDE_CARRIAGE
@@ -23,8 +23,8 @@ cellular:
     cutting_penalty_max: 0.28           # about 13 dB, reached at full_depth (cutting depth from LiDAR in GB)
     cutting_full_depth_m: 8
   cell_distance:
-    free_km: 3.0
-    penalty_per_km: 0.06
+    free_km: 0.0
+    penalty_per_km: 0.01
   tunnels:
     default_score: 0.08                 # deep inside a tunnel with no in-tunnel coverage (about -116 dBm): below usable
     # Signal from outside carries some way in: the open-air score at each portal falls off exponentially with
@@ -40,6 +40,9 @@ cellular:
   # Calibration used on every route without its own (`tcs calibrate` writes one per route): per-network score bias
   # fitted by `tcs calibrate-national` to field measurements over all routes. null = uncalibrated.
   national_calibration: config/calibration.yaml
+  # Measured corrections along each route where scanner trains have measured (`tcs correct-routes`; tcs/corrections.py):
+  # earlier trips' errors, smoothed along the track, added to the prediction there. null = none.
+  measured_corrections: config/route_corrections.parquet
   sinr_db:  {at_zero: -5,   at_one: 25}
   throughput:
     score_floor: 0.12                   # below this no usable data session
@@ -83,6 +86,7 @@ confidence:
   calibrated_bonus: 0.15
   measured_within_m: 250
   measured: 0.92
+  measured_correction: 0.85         # within ~100 m of route points measured on earlier trips (tcs correct-routes)
   tunnel_deterministic: 0.90
   starlink_predictive: 0.35
   starlink_telemetry: 0.85

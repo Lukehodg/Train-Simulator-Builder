@@ -39,7 +39,7 @@ export interface CalibrationMeta {
   overall_before?: Accuracy
   route?: { calibrated: Accuracy; uncalibrated: Accuracy; held_out: Accuracy | null; measurements?: Record<string, number> } | null
   /** the model against later measurements (tcs check-national), level-matched */
-  current_check?: { source?: string; fit_period?: { from: string; to: string }; test_period?: { from: string; to: string }; level_offset_db?: number; overall?: Accuracy; route?: Accuracy | null } | null
+  current_check?: { source?: string; fit_period?: { from: string; to: string }; test_period?: { from: string; to: string }; level_offset_db?: number; overall?: Accuracy; route?: Accuracy | null; with_measured_corrections?: { overall?: Accuracy; route?: Accuracy | null } | null } | null
   /** share of measured route points with usable 5G, per network (name -> 0..1) */
   five_g?: { source?: string; period?: { from: string; to: string }; bands?: string[]; networks?: Record<string, number>; route?: { points: number; networks: Record<string, number> } | null } | null
 }
@@ -65,6 +65,8 @@ export interface Meta {
   coverage_sources: string[]
   coverage_share?: Record<string, number>   // share of sample-operator pairs per coverage source (bundles from late 2026 on)
   cell_source: string
+  fitted_masts?: { masts: number; serving_share: number }   // masts placed from scanner logs (bundles from Oct 2026 on)
+  measured_corrections?: { share: number; built_on?: string; sources: { file: string; preset: string; weight: number; from?: string; to?: string }[] }   // earlier trips' errors along the route (bundles from Oct 2026 on)
   calibration?: CalibrationMeta | null   // bundles from Oct 2026 on
   model_version: string
   warnings: string[]
@@ -114,6 +116,7 @@ export interface ProviderBase {
   celld: Float32Array
   src: (string | null)[]
   rsrp: Float32Array       // Python's signal_primary for reference
+  meas?: Float32Array      // measured correction applied, dB (NaN where none; bundles from Oct 2026 on)
 }
 
 export interface CellRecord { key: string; provider: string; radio: string; lat: number; lon: number; samples: number; range: number; source: string }

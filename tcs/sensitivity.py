@@ -93,7 +93,7 @@ def cases(s: Settings) -> list[Case]:
 
 
 def run(settings: Settings, samples: pd.DataFrame, prior: pd.DataFrame, serving: pd.DataFrame, *, calibration: dict | None = None,
-        weather: str = "nominal") -> dict:
+        weather: str = "nominal", corrections: pd.DataFrame | None = None) -> dict:
     """{"central": kpis, "cases": [{key, label, low, high, low_kpis, high_kpis}], "combined": {"low": kpis, "high": kpis}}."""
     from .model.simulate import simulate
     from .report import kpis
@@ -104,7 +104,7 @@ def run(settings: Settings, samples: pd.DataFrame, prior: pd.DataFrame, serving:
         s = copy.deepcopy(settings)
         for m in mutators:
             m(s)
-        _, rc = simulate(s, samples, prior, serving, calibration=calibration, weather=weather)
+        _, rc = simulate(s, samples, prior, serving, calibration=calibration, weather=weather, corrections=corrections)
         k = kpis(rc, samples, spacing)
         return {m: k[m] for m in MEASURES}
 

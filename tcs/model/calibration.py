@@ -147,7 +147,10 @@ def _check_for(c: dict | None, rid: str) -> dict | None:
     """The model against later measurements (tcs check-national), nationally and on this route."""
     if not c:
         return None
-    return {k: c.get(k) for k in ("source", "fit_period", "test_period", "level_offset_db", "overall", "networks")} | {"route": (c.get("routes") or {}).get(rid)}
+    w = c.get("with_measured_corrections") or {}
+    corrected = {"overall": w.get("overall"), "route": (w.get("routes") or {}).get(rid)} if w.get("overall") else None
+    return ({k: c.get(k) for k in ("source", "fit_period", "test_period", "level_offset_db", "overall", "networks")}
+            | {"route": (c.get("routes") or {}).get(rid), "with_measured_corrections": corrected})
 
 
 def _five_g_for(f: dict | None, rid: str) -> dict | None:

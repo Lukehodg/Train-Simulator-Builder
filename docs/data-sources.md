@@ -11,7 +11,7 @@ the app bar and the **Sources** tab show exactly which inputs produced the bundl
 | Cuttings, trees, bridges near the track (GB) | Open 1–2 m LiDAR: Environment Agency (England), Welsh Government (Wales), Scottish Remote Sensing Portal (Scotland) (all yes, OGL) | `tcs/sources/lidar.py` | the 30 m terrain model | — |
 | Corridor postcodes / urban density | OS Code-Point Open (yes) | `ofcom_coverage.corridor_postcodes` | station proximity | — |
 | Cellular coverage prior | Ofcom Mobile Checker UPRN Coverage API (key, postcode → UPRN rows); Connected Nations open data (yes) | `tcs/sources/ofcom_coverage.py` | synthetic prior | 0.55 / 0.65 with cells |
-| Cell sites / handovers | OpenCellID bulk MCC download (token) | `tcs/sources/opencellid.py` | synthetic sites | + cells → 0.65 |
+| Cell sites / handovers | OpenCellID bulk MCC download (token); 4G mast positions fitted to Network Rail Global View logs (`config/masts.csv`) | `tcs/sources/opencellid.py`, `tcs/masts.py` | synthetic sites | + cells → 0.65 |
 | Measured RF (calibration + validation) | Network Rail Yellow Train LTE logs and Global View 4G/5G logs (Rail Data Marketplace), Ofcom drive-test CSVs, Ofcom Connectivity on Trains study annexes, Network Survey, modem logs | `tcs/sources/measurements.py`, `tcs/model/calibration.py`, `tcs/validate/metrics.py` | none | 0.70–0.92 |
 | Satcom | Stage 1: geometry only. Stage 2: Starlink terminal telemetry (`starlink-grpc-tools` export) + train GPS | `tcs/sources/starlink.py` | predictive only | 0.35 → 0.85 |
 | Timetable | YAML calling pattern; CIF (Network Rail Open Data / RDG) with CORPUS; GTFS | `tcs/sources/timetable.py` | YAML | — |
@@ -112,7 +112,40 @@ The national bulk file is downloaded once into `data/raw/shared/opencellid_bulk/
 (OpenCellID allows two downloads of each file per day; a rate-limit response is detected and the route falls back to
 synthetic sites rather than failing). Code-Point Open and OS Terrain 50 are shared the same way.
 
+### 4a. Mast positions fitted to scanner logs (`tcs locate-masts`)
+
+OpenCellID's positions are averages of where phones heard each cell, so they lean towards roads and railways: for a
+typical mast the train's strongest reading is about 1 km from where OpenCellID puts it, and some masts it places
+15–30 km away read as strongly as ones 2 km away. Distance to the serving mast was therefore too rough to fit on.
+
+Network Rail's Global View 4G logs name the cell behind every reading (its E-UTRAN cell identity; the mast, or
+eNodeB, is that number without its last 8 bits), and each mast is seen on many trips. `tcs locate-masts <Global View
+4G file>` places every mast seen at 20 or more 50 m squares on 2 or more trips: the position, path-loss exponent and
+one level per cell that best explain how its signal rises and falls along the track (`tcs/masts.py`). Readings along
+one line cannot tell left of the track from right; a mast seen from two lines, or where the line curves, is placed
+on both axes (`side_clear`, 7 % of masts). The 2026 logs (16 March – 2 May) place 10,952 masts (EE 2,687, O2 3,019,
+Three 2,780, Vodafone 2,466); the median mast stands about 320 m from the track.
+
+`config/masts.csv` holds the positions and fit figures only, no readings (the Rail Data Marketplace licence allows
+derived results). Building a route, each placed mast in the corridor stands in for OpenCellID's cells of the same mast
+(network and eNodeB) at its fitted position; masts the logs never placed keep OpenCellID's cells. The route's
+`meta.json` records how many placed masts it has and the share of the route they serve (`fitted_masts`), shown in the
+Sources tab, the evidence pack and the publish summary. Set `fitted_masts.file: null` in `config/networks.yaml` to use
+OpenCellID's positions only. Placing masts needs scipy (`pip install -e ".[fit]"`); building routes only reads the file.
+
+How well the fitted positions predict later trips, and what they changed in the calibration: docs/validation.md.
+Terrain between mast and train (diffraction over a 90 m elevation model) was tested too and added nothing measurable,
+with either set of positions; the terrain that matters is next to the track (cuttings, from LiDAR).
+
 ## 5. Measured data — calibration and validation
+
+**Measured corrections** (`tcs correct-routes --four-g <Global View 4G> --older <Yellow Train>`): the calibrated model's
+errors at every measured route point, smoothed along the track, are written to `config/route_corrections.parquet`
+(route, network, position and dB only; the Rail Data Marketplace licence allows derived results). The next build of each
+route matches them to its samples (within 60 m, on OSM or file geometry only) and adds them to the prediction; the
+Sources tab, the evidence pack and each sample's inspector show where and by how much. They are fitted against the
+calibration of the time: re-run `tcs correct-routes` after `tcs calibrate-national`. `cellular.measured_corrections:
+null` in `config/simulation.yaml` turns them off.
 
 `tcs calibrate <csv> --preset network_survey|ofcom_drive|modem_log` attaches each measurement to its nearest
 sample (≤ 250 m) and fits, per operator:

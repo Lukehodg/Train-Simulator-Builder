@@ -10,6 +10,7 @@ import pyarrow as pa
 import pyarrow.feather as feather
 
 from ..config import Settings
+from ..masts import SOURCE as FITTED_SOURCE
 from ..model.calibration import describe as describe_calibration
 from ..model.cellular import das_mask
 from ..schema import PROVIDER_OBSERVATION, ROUTE_CONNECTIVITY
@@ -20,11 +21,11 @@ SAMPLE_COLS = ["sample_id", "distance_m", "latitude", "longitude", "elevation_m"
                "lidar", "overhead_fraction", "speed_kph", "sim_seconds", "next_station", "time_to_next_station_s", "station_nearby"]
 PROVIDER_COLS = ["quality_score", "quality_base", "signal_primary", "signal_secondary", "capacity_mbps", "latency_ms", "packet_loss_pct",
                  "available", "confidence", "reason_code", "serving_cell", "serving_distance_m", "handover", "handover_penalty",
-                 "radio_technology", "source_flags", "rsrp_slope", "rsrp_intercept"]
+                 "radio_technology", "source_flags", "rsrp_slope", "rsrp_intercept", "measured_correction_db"]
 SHORT = {"quality_score": "q", "quality_base": "qb", "signal_primary": "sig", "signal_secondary": "sig2", "capacity_mbps": "cap", "latency_ms": "lat",
          "packet_loss_pct": "loss", "available": "avail", "confidence": "conf", "reason_code": "reason", "serving_cell": "cell",
          "serving_distance_m": "celld", "handover": "ho", "handover_penalty": "hp", "radio_technology": "tech", "source_flags": "src",
-         "rsrp_slope": "rsrp_slope", "rsrp_intercept": "rsrp_intercept"}
+         "rsrp_slope": "rsrp_slope", "rsrp_intercept": "rsrp_intercept", "measured_correction_db": "meas"}
 
 
 def _cast(df: pd.DataFrame, schema: pa.Schema) -> pa.Table:
@@ -135,7 +136,9 @@ def export_all(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame, s
         "provenance": bundle.provenance,
         "coverage_sources": sorted(set(prior["source"].dropna().astype(str))),
         "coverage_share": {str(k): round(float(v), 4) for k, v in prior["source"].fillna("no_coverage_record").value_counts(normalize=True).items()},
-        "cell_source": str(cells["source"].iloc[0]) if len(cells) else "none",
+        "cell_source": _cell_source(cells),
+        **_fitted_masts_meta(cells, obs),           # masts placed from scanner logs, standing in for OpenCellID's positions
+        **_corrections_meta(settings, obs),         # measured corrections along the route (tcs/corrections.py)
         "model_version": settings.sim["model_version"],
         "calibration": describe_calibration(settings, paths["interim"]),   # what the predictions were calibrated against, and how well
         "warnings": bundle.warnings,
@@ -143,6 +146,33 @@ def export_all(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame, s
     (web / "meta.json").write_text(json.dumps(meta, indent=1, default=_json_default), encoding="utf-8")
     written["web_meta"] = web / "meta.json"
     return written
+
+
+def _cell_source(cells: pd.DataFrame) -> str:
+    """The cell database behind the route (opencellid, or the synthetic stand-in); fitted masts refine it (below)."""
+    src = [s for s in cells["source"].astype(str).unique() if s != FITTED_SOURCE] if len(cells) else []
+    return src[0] if src else ("none" if not len(cells) else FITTED_SOURCE)
+
+
+def _fitted_masts_meta(cells: pd.DataFrame, obs: pd.DataFrame) -> dict:
+    if not len(cells) or not (cells["source"] == FITTED_SOURCE).any():
+        return {}
+    fitted = set(cells.loc[cells["source"] == FITTED_SOURCE, "cell_key"])
+    serving = obs.loc[(obs["provider_type"] == "cellular") & obs["serving_cell"].notna(), "serving_cell"]
+    return {"fitted_masts": {"masts": len(fitted), "serving_share": round(float(serving.isin(fitted).mean()), 4) if len(serving) else 0.0}}
+
+
+def _corrections_meta(settings: Settings, obs: pd.DataFrame) -> dict:
+    from .. import corrections
+
+    if "measured_correction_db" not in obs:
+        return {}
+    cell = obs[(obs["provider_type"] == "cellular") & (obs["reason_code"] != "TUNNEL")]
+    has = cell["measured_correction_db"].notna()
+    if not has.any():
+        return {}
+    md = corrections.meta(corrections.path_of(settings))
+    return {"measured_corrections": {"share": round(float(has.mean()), 4), "sources": md.get("sources", []), "built_on": md.get("built_on")}}
 
 
 def _lidar_meta(samples: pd.DataFrame) -> dict:

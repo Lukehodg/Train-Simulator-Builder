@@ -42,7 +42,9 @@ sites live. To host the simulator for colleagues with the live feeds refreshed m
    cumulative distance, bearing, tunnel / cutting / embankment / bridge / maxspeed flags, station proximity.
 2. **Terrain** – DEM at each sample, smoothed railhead profile, cutting depth, 16-ray horizon → sky visibility.
 3. **Coverage prior** – Ofcom level per postcode per operator → model score (or Connected Nations, or synthetic).
-4. **Cells** – OpenCellID corridor extract → 5 candidates per sample → serving cell with hysteresis → handovers.
+4. **Cells** – OpenCellID corridor extract, with the 4G masts placed from Network Rail Global View logs
+   (`config/masts.csv`, `tcs locate-masts`) standing in for OpenCellID's positions → 5 candidates per sample →
+   serving cell with hysteresis → handovers.
 5. **Movement** – line-speed caps + accel/decel + dwell, stretched to the timetable → sim clock per sample.
 6. **Simulate** – cellular (prior + terrain + cell distance + vehicle loss + handover), satcom (obstruction →
    availability → capacity), link manager (bonding/failover/…), passenger Wi-Fi, confidence.
