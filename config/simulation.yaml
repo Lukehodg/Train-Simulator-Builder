@@ -1,5 +1,5 @@
 # Every numerical assumption lives here and is versioned with model_version.
-model_version: "0.3.0"
+model_version: "0.4.0"
 
 vehicle:
   profile: EXTERNAL_ROOFTOP_ANTENNA     # EXTERNAL_ROOFTOP_ANTENNA | PASSENGER_HANDSET_INSIDE_CARRIAGE
@@ -23,8 +23,8 @@ cellular:
     cutting_penalty_max: 0.28           # about 13 dB, reached at full_depth (cutting depth from LiDAR in GB)
     cutting_full_depth_m: 8
   cell_distance:
-    free_km: 3.0
-    penalty_per_km: 0.06
+    free_km: 0.0
+    penalty_per_km: 0.01
   tunnels:
     default_score: 0.08                 # deep inside a tunnel with no in-tunnel coverage (about -116 dBm): below usable
     # Signal from outside carries some way in: the open-air score at each portal falls off exponentially with

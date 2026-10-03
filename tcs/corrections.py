@@ -16,8 +16,9 @@ correction towards zero where few measurements are near, so a stretch measured o
 often. Corrections are in dB of RSRP, added to the score through the calibration's dB scale, so everything downstream
 (capacity, latency, the viewer) follows; inside tunnels the portal model still applies.
 
-Tested on later trips (Global View, corrections from 16 Mar - 6 Apr 2026 plus Yellow Train, tested from 7 Apr): the
-error fell from 10.2 to 8.1 dB on average (docs/validation.md). `tcs check-national` repeats that test on each run.
+Tested on later trips (Global View, corrections from 16 Mar - 6 Apr 2026 plus Yellow Train, tested from 7 Apr through
+the model): the error fell from 9.7 to 8.3 dB on average, on every route (docs/validation.md). `tcs check-national`
+repeats that test on each run.
 The corrections (config/route_corrections.parquet) are derived results: position, network and dB, no measurements.
 They are fitted against the calibrated model of the time: re-run `tcs correct-routes` after re-calibrating.
 """

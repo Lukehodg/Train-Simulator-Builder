@@ -39,7 +39,7 @@ export interface CalibrationMeta {
   overall_before?: Accuracy
   route?: { calibrated: Accuracy; uncalibrated: Accuracy; held_out: Accuracy | null; measurements?: Record<string, number> } | null
   /** the model against later measurements (tcs check-national), level-matched */
-  current_check?: { source?: string; fit_period?: { from: string; to: string }; test_period?: { from: string; to: string }; level_offset_db?: number; overall?: Accuracy; route?: Accuracy | null } | null
+  current_check?: { source?: string; fit_period?: { from: string; to: string }; test_period?: { from: string; to: string }; level_offset_db?: number; overall?: Accuracy; route?: Accuracy | null; with_measured_corrections?: { overall?: Accuracy; route?: Accuracy | null } | null } | null
   /** share of measured route points with usable 5G, per network (name -> 0..1) */
   five_g?: { source?: string; period?: { from: string; to: string }; bands?: string[]; networks?: Record<string, number>; route?: { points: number; networks: Record<string, number> } | null } | null
 }

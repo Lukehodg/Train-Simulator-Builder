@@ -78,6 +78,38 @@ track (LiDAR surface model), measured signal is 3–4 dB lower relative to the m
 and the test period. A term for it would cut the mean error by only about 0.05 dB, so the model does not carry one.
 Embankments are about 1.5 dB better than modelled above 3 m; also too small to add.
 
+### Distance to the serving mast, fitted (October 2026)
+
+The penalty for distance to the serving mast (`cellular.cell_distance`) had been hand-set at 0.06 of score per km beyond
+3 km. OpenCellID's mast positions were too rough to fit it on (for a typical mast the train's strongest reading is
+about 1 km from where OpenCellID puts it), so the masts were first placed from the Global View logs themselves
+(`tcs locate-masts`, docs/data-sources.md 4a). On later trips (masts placed from 16 March – 6 April, 250k readings from
+7 April at 2,609 masts both place), predicting each reading from distance to its mast:
+
+| mast positions | distance only | + terrain between mast and train | + each mast's own level |
+|---|---|---|---|
+| OpenCellID | 10.5 dB | 10.5 dB | 8.6 dB |
+| placed from the logs | 8.8 dB | 8.8 dB | 7.2 dB |
+
+(a network-and-band average alone: 11.4 dB). Terrain between mast and train (knife-edge diffraction over a 90 m
+elevation model) added nothing, with either set of positions and even where 42 % of the paths cross a ridge.
+
+`tcs calibrate-national` now searches the distance terms with the others. With OpenCellID's positions, with masts placed
+before the check's split only, and with masts placed from all the logs, it chose almost no penalty (0.01 per km), and
+the three gave the same accuracy to within 0.02 dB: the hand-set penalty had been making stretches far from a mast too
+weak. Production uses the masts from all the logs (penalty 0.01 per km from the mast):
+
+| | before (0.06 per km beyond 3 km) | fitted |
+|---|---|---|
+| 2019 test, mean absolute error | 11.14 dB | 10.66 dB |
+| within ±6 dB | 34.1 % | 35.2 % |
+| correlation | 0.42 | 0.47 |
+| routes held out of the fit, median error | 10.89 dB | 10.62 dB |
+| 2026 Global View 4G check (182k points, after the level offset) | 10.18 dB | 9.67 dB |
+| 2026 check, correlation | 0.33 | 0.39 |
+
+The placed masts' value is mainly realism: the masts the model hands over between are the ones trains use.
+
 ## Checks against later measurements (`tcs check-national`)
 
 ```
@@ -98,3 +130,40 @@ and train, which coverage changes would not do. So the 2026 data check the calib
 
 Both go into `config/calibration.yaml` (a re-run of `tcs calibrate-national` keeps them) and appear in the reports
 (sections 8.2 and 8.3, and the sources table) and in the viewer's Sources tab.
+
+
+### Measured corrections (`tcs correct-routes`)
+
+Signal at a given spot repeats from trip to trip far more closely than any coverage prediction places it (a mast's own
+power and aim, a bend behind a hill, a cutting). Where trains have measured a route, the calibrated model's error there,
+smoothed along the track, corrects it (tcs/corrections.py; docs/model.md). `tcs check-national` tests this every run:
+corrections built from the Global View measurements before the split, plus the Yellow Train logs at a tenth of the
+weight, applied through the model, against the Global View measurements from the split (182k route points):
+
+| | model as calibrated | with measured corrections |
+|---|---|---|
+| mean absolute error | 9.67 dB | 8.30 dB |
+| within ±6 dB | 40.1 % | 48.3 % |
+| correlation | 0.39 | 0.55 |
+| usable / not usable (−110 dBm) agreement | 92.6 % | 92.8 % |
+
+Better on every one of the 15 routes the 2026 logs cover (by 0.7–2.3 dB). Global View's earlier trips alone give
+8.66 dB; the 2018–19 Yellow Train logs still help because hills and cuttings have not moved. Tested offline before
+building it in: a Gaussian scale of 100 m and a shrink of 0.5 did best (75–150 m and 0.25–1 within 0.03 dB), Yellow
+Train at 0.1 better than 0.25 or 0.5. The production corrections (`config/route_corrections.parquet`, 365k route points on all 18
+routes, typically 3–5 dB) use every measurement, so on the routes the logs cover the published model sits nearer the
+measurements than this test shows; a route no train has measured gets none, and the model alone (9.67 dB).
+
+Looked at and left out:
+
+- **A learned adjustment** (gradient-boosted trees on the score model's error, from what is known everywhere along the
+  track: Ofcom level, LiDAR cutting and skyline, distance to the serving mast, urban density, line speed, height above
+  the surrounding land). Trained on the other routes' Yellow Train logs, on routes it never saw it cut the error by
+  0.8 dB on the 2019 test and 0.5 dB on the 2026 check (better on all 15 routes). With measured corrections it adds
+  nothing (8.25 against 8.24 dB), and every route in the catalogue has been measured, so it is not built in; it is the
+  next step for a route no train has measured.
+- **Ofcom Connected Nations 2025 downloads** (coverage as of July 2025): shares of premises, land and roads covered by
+  0–4 networks per local authority and constituency, per network only for the UK and nations. Nothing is located along
+  the track, so they cannot sharpen a prediction at a point; the Ofcom API the model queries already returns the
+  operators' predictions location by location.
+

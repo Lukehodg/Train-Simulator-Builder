@@ -189,6 +189,8 @@ function currentText(cal: CalibrationMeta): string {
     h += ` <br><br>Checked against ${esc(cc.source ?? 'later measurements')} 4G, ${period({ from: cc.fit_period!.from, to: cc.test_period!.to })}: `
       + (here?.points ? `on this route, ${here.points.toLocaleString()} points, mean error ${here.mae_db?.toFixed(1)} dB` : `not measured on this route; all routes, mean error ${cc.overall.mae_db?.toFixed(1)} dB`)
       + ` once their level (${(cc.level_offset_db ?? 0) >= 0 ? '+' : '−'}${Math.abs(cc.level_offset_db ?? 0).toFixed(0)} dB, the scanner's uncorrected antenna and cable) is matched.`
+    const wc = cc.with_measured_corrections, wr = wc?.route
+    if (wc?.overall?.points) h += ` With corrections from the earlier trips' measurements: ${wr?.points ? `${wr.mae_db?.toFixed(1)} dB on this route` : `${wc.overall.mae_db?.toFixed(1)} dB on all routes`}.`
   }
   const fg = cal.five_g, nets = fg?.route?.networks
   if (fg?.networks && nets) {
@@ -220,7 +222,7 @@ function correctionsText(m: Meta): string {
     + `${s.from ? ` (${esc(s.from)} to ${esc(s.to ?? '')})` : ''}${s.weight < 1 ? ` at ${s.weight}× weight` : ''}`).join(' and ')
   return `Where trains measured this route, the model's error at those measurements, smoothed over about 100 m along the track, `
     + `corrects its prediction: ${Math.round(c.share * 100)} % of the open-air route and networks here, from ${sets || 'scanner logs'}. `
-    + 'Signal at a spot repeats from trip to trip, so earlier passes are the best guide to later ones; on later trips this cut the average error from about 10 to 8 dB.'
+    + 'Signal at a spot repeats from trip to trip, so earlier passes are the best guide to later ones; on later trips this cut the average error from 9.7 to 8.3 dB.'
 }
 
 function renderSources(store: Store) {

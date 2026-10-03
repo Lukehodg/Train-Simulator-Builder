@@ -990,7 +990,15 @@ class _Report:
                   f"of {fit} and the model then tested on those of {test}.", keep=True)
         r = cc.get("route") or {}
         rows = ([["This route", *acc(r)]] if r.get("points") else []) + [["All routes", *acc(cc.get("overall"))]]
+        w = cc.get("with_measured_corrections") or {}
+        if (w.get("overall") or {}).get("points"):
+            wr = w.get("route") or {}
+            rows += ([["This route, with measured corrections", *acc(wr)]] if wr.get("points") else []) + [["All routes, with measured corrections", *acc(w["overall"])]]
         self.table(cols, rows, f"Calibrated model against 2026 measurements once their level is matched, {test}", size=8.5, bold_first=True)
+        if (w.get("overall") or {}).get("points"):
+            self.para(f"With measured corrections: the model's errors at the measurements of {fit} (and the 2018–19 Yellow Train "
+                      "logs, at a tenth of the weight), smoothed along the track, added to its predictions, then tested on the later "
+                      "measurements. The published route carries corrections from all the measurements.", size=9, color=MUTED)
         if not r.get("points"):
             self.para("The 2026 measurements do not cover this route; the figures are for the routes they do cover.", size=9, color=MUTED)
         elif r["points"] < 500:
