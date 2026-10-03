@@ -650,6 +650,16 @@ def lidar_text(meta: dict) -> str:
     return f"open 2 m LiDAR ({who}; OGL) on {share * 100:.0f} % of the route"
 
 
+def _corrections_rows(meta: dict) -> list[tuple[str, str, str]]:
+    c = meta.get("measured_corrections") or {}
+    if not c:
+        return []
+    names = {"global_view_4g": "Network Rail Global View 4G", "yellow_train": "Network Rail Yellow Train"}
+    sets = " and ".join(f"{names.get(s.get('preset'), s.get('preset'))} ({s.get('from')} to {s.get('to')})" for s in c.get("sources", []))
+    return [("Measured corrections", f"Earlier trips' errors along the route, smoothed over about 100 m, on {c['share']:.0%} of it"
+             + (f": {sets}" if sets else ""), "measured")]
+
+
 def cells_text(meta: dict) -> str:
     """Where the cell sites came from: OpenCellID, with the masts placed from scanner logs standing in for its positions."""
     src = meta.get("cell_source", "")
@@ -719,6 +729,7 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
         ("Timetable", "Route configuration" if settings.route.get("timetable", {}).get("source", "yaml") == "yaml" else str(settings.route["timetable"]["source"]), "configured"),
         _calibration_row(meta.get("calibration")),
         *_check_rows(meta.get("calibration")),
+        *_corrections_rows(meta),
     ]
     charts = {"capacity": _chart_capacity(samples, rc, stations), "sections": _chart_sections(sec), "links": _chart_links(links),
               "heatmap": _chart_heatmap(samples, stations, bands), "networks": _chart_networks(samples, stations, obs, names, bands["signal"])}

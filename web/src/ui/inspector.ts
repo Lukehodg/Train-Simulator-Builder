@@ -124,6 +124,8 @@ function renderSample(store: Store, i: number) {
       if (cut > 0.005) rows.push([`cutting ${d.cutting[i].toFixed(0)} m`, `−${cut.toFixed(2)}`])
       const dk = b.celld[i] / 1000, dp = Number.isNaN(dk) ? 0 : Math.max(0, dk - cfg.cell_distance.free_km) * cfg.cell_distance.penalty_per_km
       if (dp > 0.005) rows.push([`cell ${dk.toFixed(1)} km away`, `−${dp.toFixed(2)}`])
+      const mc = b.meas ? b.meas[i] : NaN
+      if (Number.isFinite(mc) && Math.abs(mc) >= 0.5) rows.push(['measured correction (earlier trips here)', `${mc > 0 ? '+' : '−'}${Math.abs(mc).toFixed(1)} dB`])
       if (vprof.score_offset) rows.push([vprof.score_offset < 0 ? 'carriage penetration loss' : `active antenna (+${vprof.db_offset} dB)`, `${vprof.score_offset > 0 ? '+' : ''}${vprof.score_offset.toFixed(2)}`])
       if (vprof.capacity_factor && vprof.capacity_factor !== 1) rows.push(['antenna / MIMO factor', `×${vprof.capacity_factor}`])
       if (L.reason[i] === 'NOT_FITTED') rows.push(['on this train', 'not fitted: no modem for this network, so the router cannot use it'])
@@ -212,6 +214,15 @@ function mastsText(m: Meta): string {
     + `stand in for OpenCellID's positions of the same masts, which are typically about 1 km out; they serve ${Math.round(f.serving_share * 100)} % of the route.`
 }
 
+function correctionsText(m: Meta): string {
+  const c = m.measured_corrections!
+  const sets = c.sources.map(s => `${esc(s.preset === 'global_view_4g' ? 'Network Rail Global View 4G' : s.preset === 'yellow_train' ? 'Network Rail Yellow Train' : s.preset)}`
+    + `${s.from ? ` (${esc(s.from)} to ${esc(s.to ?? '')})` : ''}${s.weight < 1 ? ` at ${s.weight}× weight` : ''}`).join(' and ')
+  return `Where trains measured this route, the model's error at those measurements, smoothed over about 100 m along the track, `
+    + `corrects its prediction: ${Math.round(c.share * 100)} % of the open-air route and networks here, from ${sets || 'scanner logs'}. `
+    + 'Signal at a spot repeats from trip to trip, so earlier passes are the best guide to later ones; on later trips this cut the average error from about 10 to 8 dB.'
+}
+
 function renderSources(store: Store) {
   const m = store.state.data.meta
   const live = (flag: boolean, liveLabel = 'live', synthLabel = 'synthetic') => `<em class="${flag ? 'live' : 'synth'}">${flag ? liveLabel : synthLabel}</em>`
@@ -230,9 +241,10 @@ function renderSources(store: Store) {
     ['Cell sites', cellLive, cellLive ? 'OpenCellID corridor extract (CC BY-SA 4.0). Logical cells; top-5 candidates per sample; serving cell with hysteresis.' + mastsText(m) : 'Synthetic site layout. Set <code>OPENCELLID_TOKEN</code> to use the community database.'],
     ['Satcom', false, `Predictive obstruction model (${esc(m.providers.find(p => p.type === 'satcom')?.terminal ?? 'performance')} terminal). No public route-level Starlink RF telemetry exists; confidence capped at 0.35 until terminal telemetry is ingested.`, 'predictive'],
     ['Calibration', !!m.calibration, calibrationText(m.calibration), m.calibration ? undefined : 'none'],
+    ...(m.measured_corrections ? [['Measured corrections', true, correctionsText(m), 'measured'] as [string, boolean, string, string]] : []),
   ] as [string, boolean, string, string?][]
   let h = `<div class="src-list">`
-  for (const [title, ok, text, alt] of items) h += `<div class="src"><h5>${title}${live(ok, title === 'Calibration' ? 'calibrated' : 'live', alt ?? 'synthetic')}</h5><p>${text}</p></div>`
+  for (const [title, ok, text, alt] of items) h += `<div class="src"><h5>${title}${live(ok, title === 'Calibration' ? 'calibrated' : title === 'Measured corrections' ? 'measured' : 'live', alt ?? 'synthetic')}</h5><p>${text}</p></div>`
   h += `<div class="src"><h5>Model ${esc(m.model_version)}</h5><p>${m.n_samples.toLocaleString()} samples at ${m.route.sample_spacing_m} m · ${(m.length_m / 1000).toFixed(1)} km · scenario switching runs the same link-manager and Wi-Fi model in the browser.</p></div>`
   if (m.warnings?.length) h += `<div class="src"><h5>Warnings</h5><p>${m.warnings.map(esc).join('<br>')}</p></div>`
   h += `</div>`

@@ -33,10 +33,11 @@ def fitted_links(settings: Settings, obs: pd.DataFrame) -> pd.DataFrame:
 
 
 def simulate(settings: Settings, samples: pd.DataFrame, prior: pd.DataFrame, serving: pd.DataFrame, *, calibration: dict | None = None,
-             measured_sample_ids: set[int] | None = None, weather: str = "nominal", policy: str | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+             measured_sample_ids: set[int] | None = None, weather: str = "nominal", policy: str | None = None,
+             corrections: pd.DataFrame | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Returns (provider_observation long table, route_connectivity table). The observations cover every network, so the
     viewer can switch scenarios; the connectivity uses only the fitted ones (fitted_links)."""
-    cell = cellular_observations(settings, samples, prior, serving, calibration=calibration)
+    cell = cellular_observations(settings, samples, prior, serving, calibration=calibration, corrections=corrections)
     cell["confidence"] = cellular_confidence(settings, cell, measured_sample_ids, calibrated=bool(calibration))
     cell = cell.drop(columns=[c for c in cell.columns if c.startswith("_")])
     sat = satcom_observations(settings, samples, weather=weather)

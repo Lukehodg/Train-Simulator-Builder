@@ -139,6 +139,14 @@ with either set of positions; the terrain that matters is next to the track (cut
 
 ## 5. Measured data — calibration and validation
 
+**Measured corrections** (`tcs correct-routes --four-g <Global View 4G> --older <Yellow Train>`): the calibrated model's
+errors at every measured route point, smoothed along the track, are written to `config/route_corrections.parquet`
+(route, network, position and dB only; the Rail Data Marketplace licence allows derived results). The next build of each
+route matches them to its samples (within 60 m, on OSM or file geometry only) and adds them to the prediction; the
+Sources tab, the evidence pack and each sample's inspector show where and by how much. They are fitted against the
+calibration of the time: re-run `tcs correct-routes` after `tcs calibrate-national`. `cellular.measured_corrections:
+null` in `config/simulation.yaml` turns them off.
+
 `tcs calibrate <csv> --preset network_survey|ofcom_drive|modem_log` attaches each measurement to its nearest
 sample (≤ 250 m) and fits, per operator:
 

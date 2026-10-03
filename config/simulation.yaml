@@ -40,6 +40,9 @@ cellular:
   # Calibration used on every route without its own (`tcs calibrate` writes one per route): per-network score bias
   # fitted by `tcs calibrate-national` to field measurements over all routes. null = uncalibrated.
   national_calibration: config/calibration.yaml
+  # Measured corrections along each route where scanner trains have measured (`tcs correct-routes`; tcs/corrections.py):
+  # earlier trips' errors, smoothed along the track, added to the prediction there. null = none.
+  measured_corrections: config/route_corrections.parquet
   sinr_db:  {at_zero: -5,   at_one: 25}
   throughput:
     score_floor: 0.12                   # below this no usable data session
@@ -83,6 +86,7 @@ confidence:
   calibrated_bonus: 0.15
   measured_within_m: 250
   measured: 0.92
+  measured_correction: 0.85         # within ~100 m of route points measured on earlier trips (tcs correct-routes)
   tunnel_deterministic: 0.90
   starlink_predictive: 0.35
   starlink_telemetry: 0.85

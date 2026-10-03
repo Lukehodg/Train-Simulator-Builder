@@ -66,6 +66,7 @@ export interface Meta {
   coverage_share?: Record<string, number>   // share of sample-operator pairs per coverage source (bundles from late 2026 on)
   cell_source: string
   fitted_masts?: { masts: number; serving_share: number }   // masts placed from scanner logs (bundles from Oct 2026 on)
+  measured_corrections?: { share: number; built_on?: string; sources: { file: string; preset: string; weight: number; from?: string; to?: string }[] }   // earlier trips' errors along the route (bundles from Oct 2026 on)
   calibration?: CalibrationMeta | null   // bundles from Oct 2026 on
   model_version: string
   warnings: string[]
@@ -115,6 +116,7 @@ export interface ProviderBase {
   celld: Float32Array
   src: (string | null)[]
   rsrp: Float32Array       // Python's signal_primary for reference
+  meas?: Float32Array      // measured correction applied, dB (NaN where none; bundles from Oct 2026 on)
 }
 
 export interface CellRecord { key: string; provider: string; radio: string; lat: number; lon: number; samples: number; range: number; source: string }
