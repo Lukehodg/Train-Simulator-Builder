@@ -162,6 +162,11 @@ Looked at and left out:
   0.8 dB on the 2019 test and 0.5 dB on the 2026 check (better on all 15 routes). With measured corrections it adds
   nothing (8.25 against 8.24 dB), and every route in the catalogue has been measured, so it is not built in; it is the
   next step for a route no train has measured.
+- **Snapping placed masts to OpenStreetMap's mapped masts** (11,937 telecom masts and towers in GB, export of
+  3 October 2026). Only 17 % of the masts placed from the logs have a mapped mast within 500 m. On the later-trips test
+  (masts placed before 7 April, 418k readings from it) moving each to the nearest mapped mast made the error worse
+  (8.98 dB as placed; 9.04 dB snapping within 500 m, 9.34 dB within 1 km), and moving it to the mapped mast the earlier
+  readings fit best changed nothing (8.97 dB). The positions stay as the logs place them.
 - **Ofcom Connected Nations 2025 downloads** (coverage as of July 2025): shares of premises, land and roads covered by
   0–4 networks per local authority and constituency, per network only for the UK and nations. Nothing is located along
   the track, so they cannot sharpen a prediction at a point; the Ofcom API the model queries already returns the
