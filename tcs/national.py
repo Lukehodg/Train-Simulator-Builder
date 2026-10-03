@@ -344,9 +344,10 @@ def route_corrections(sets: list[tuple[list[RouteData], float]], log=print) -> p
     calibrated now: each set's errors at its route points, weighted, pooled and smoothed along the track."""
     errs: dict[str, tuple[RouteData, list[pd.DataFrame]]] = {}
     for routes, weight in sets:
-        for r in routes:
-            env, cal = _as_calibrated(r)
-            errs.setdefault(r.settings.route_id, (r, []))[1].append(corrections.errors(predict(r, env, cal), weight))
+        js = [(r, predict(r, *_as_calibrated(r))) for r in routes]
+        level = corrections.levels(pd.concat([j for _, j in js]))          # the set's own level, over all its routes
+        for r, j in js:
+            errs.setdefault(r.settings.route_id, (r, []))[1].append(corrections.errors(j, weight, level))
     tables = []
     for rid, (r, e) in errs.items():
         corr = corrections.smooth(pd.concat(e, ignore_index=True), r.samples)
@@ -377,13 +378,16 @@ def check(route_ids: list[str], path, preset: str, split: str, max_distance_m: f
     # measured corrections (tcs/corrections.py) as `tcs correct-routes` makes them, but from this set's measurements before
     # the split only (plus the older set's, if given), tested on those from it: what corrections do on later trips
     old = {r.settings.route_id: r for r in older or []}
+    olds = {rid: predict(r, *_as_calibrated(r)) for rid, r in old.items()}
+    level = corrections.levels(fit)
+    old_level = corrections.levels(pd.concat(olds.values())) if olds else None
     parts = []
     for r in routes:
         env, cal = _as_calibrated(r)
         jr = predict(r, env, cal)
-        e = [corrections.errors(jr[jr["period"] == "fit"], 1.0)]
-        if r.settings.route_id in old:
-            e.append(corrections.errors(predict(old[r.settings.route_id], env, cal), older_weight))
+        e = [corrections.errors(jr[jr["period"] == "fit"], 1.0, level)]
+        if r.settings.route_id in olds:
+            e.append(corrections.errors(olds[r.settings.route_id], older_weight, old_level))
         corr = corrections.smooth(pd.concat(e, ignore_index=True), r.samples)
         parts.append(predict(r, env, cal, corrections=corr))
     tc = pd.concat(parts)

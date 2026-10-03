@@ -31,10 +31,12 @@ OpenCellID's positions or with the fitted ones, the measurements choose almost n
 hand-set value made far-from-mast stretches too weak; removing it cut the 2026 check's error from 10.2 to 9.7 dB.
 
 **Measured corrections** (`tcs/corrections.py`). Where scanner trains have measured a route, the calibrated model's
-error at each measured route point (after one level per measurement set and network) is smoothed along the track
+error at each measured route point (after one level per measurement set and network, taken over every route the set
+covers, so a route the model over- or under-rates keeps that offset in its corrections) is smoothed along the track
 with a 100 m Gaussian and shrunk where few measurements are near (correction = Σwg·e / (Σwg + 0.5)), with weight 1 for
 the 2026 Global View logs and 0.1 for the 2018–19 Yellow Train logs. The correction (dB) enters the score through the
-calibration's dB scale before the clip, so capacity, latency and the viewer follow; tunnels keep the portal model.
+calibration's dB scale before the clip, so capacity, latency and the viewer follow. Inside a tunnel trains have
+measured, in-tunnel errors alone (against the portal or DAS model) are smoothed and added to that model there.
 Signal at a given spot repeats from trip to trip much more closely than coverage predictions place it, so this is the
 largest single accuracy gain the model has (docs/validation.md). Confidence there is 0.85.
 
