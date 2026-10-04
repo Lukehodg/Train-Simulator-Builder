@@ -187,3 +187,81 @@ def test_reports_say_how_much_of_the_route_the_lidar_covers():
     assert _terrain_row(m)[1].startswith("Copernicus DEM GLO-30 (30 m); near the track, open 2 m LiDAR") and _terrain_row(m)[2] == "live"
     assert lidar_text({"lidar_share": 0.5, "lidar_sources": {"lidar_scotland": 1.0}}) == "open 2 m LiDAR (Scottish public sector; OGL) on 50 % of the route"
     assert lidar_text({"terrain_source": "copernicus_glo30"}) == "" and _lidar_meta(pd.DataFrame({"x": [1]})) == {}
+
+
+def test_only_the_named_samples_are_read_and_a_second_slower_pass_retries_what_still_fails():
+    reads = []
+
+    class Counting(FakeLidar):
+        def read(self, bbox, layer):
+            reads.append(bbox)
+            return super().read(bbox, layer)
+
+    ys = np.arange(0.0, 900.0, 50.0)
+    only = np.zeros(len(ys), bool)
+    only[7] = True
+    f = corridor_features(np.full(len(ys), TRACK_X), ys, np.zeros(len(ys)), np.zeros(len(ys), bool), np.zeros(len(ys), bool), Counting(),
+                          corridor_m=60, segment=3, workers=1, retry_pause_s=0, only=only, log=lambda *a: None)
+    assert f["lidar_ok"][6:9].all() and not f["lidar_ok"][:6].any() and not f["lidar_ok"][9:].any()   # just the stretch holding sample 7
+    assert len(reads) == 2                                                    # one stretch: terrain and surface
+    calls = {"n": 0}
+
+    class TwiceDown(FakeLidar):
+        def read(self, bbox, layer):
+            calls["n"] += 1
+            g, src = super().read(bbox, layer)
+            if calls["n"] <= 2:                                              # the first try and the first retry fail
+                g.arr[:] = np.nan
+                g.failed = True
+                return g, None
+            return g, src
+
+    f = corridor_features(np.full(2, TRACK_X), np.array([500.0, 1200.0]), np.zeros(2), np.zeros(2, bool), np.zeros(2, bool), TwiceDown(),
+                          corridor_m=60, segment=3, workers=1, retry_pause_s=0, log=lambda *a: None)
+    assert f["lidar_ok"].all() and not f["lidar_failed"].any()
+
+
+def test_a_build_keeps_what_it_read_and_the_next_reads_only_what_failed(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import pandas as pd
+    from pyproj import CRS
+
+    import tcs.config as config
+    import tcs.sources.lidar as lidar_mod
+    from tcs.config import load_settings
+    from tcs.geo import Projector
+    from tcs.pipeline.obstruction import lidar_features
+
+    monkeypatch.setattr(config, "RAW", tmp_path / "raw")
+    state = {"build": 1, "reads": 0}
+
+    class Service(FakeLidar):
+        def __init__(self, *a, **k):
+            pass
+
+        def read(self, bbox, layer):
+            state["reads"] += 1
+            g, src = super().read(bbox, layer)
+            if state["build"] == 1 and bbox[1] > 1000:                       # first build: the service fails north of y = 1000
+                g.arr[:] = np.nan
+                g.failed = True
+                return g, None
+            return g, src
+
+    monkeypatch.setattr(lidar_mod, "Lidar", Service)
+    s = load_settings(route_id="ecml_kgx_edb")
+    s.offline = False
+    s.terrain["lidar"] = {"enabled": True, "workers": 1}
+    ys = np.arange(0.0, 2000.0, 50.0)
+    samples = pd.DataFrame({"x": np.full(len(ys), TRACK_X), "y": ys, "bearing_deg": 0.0, "on_bridge": False, "canopy_probability": 0.0})
+    bundle = SimpleNamespace(samples=samples, proj=Projector(CRS.from_epsg(27700)))
+    monkeypatch.setattr(lidar_mod.time, "sleep", lambda s: None)
+    first = lidar_features(s, bundle)
+    assert first["lidar_ok"][ys < 900].all() and not first["lidar_ok"][ys >= 1200].any()       # stretches reaching below y = 1000 read
+    state.update(build=2, reads=0)
+    second = lidar_features(s, bundle)
+    assert second["lidar_ok"].all()
+    assert 0 < state["reads"] <= 2 * (int((ys > 900).sum()) // 6 + 2)          # only the failed stretches were read again
+    state.update(build=3, reads=0)
+    assert lidar_features(s, bundle)["lidar_ok"].all() and state["reads"] == 0   # complete: served from the cache

@@ -131,6 +131,28 @@ def enrich_terrain(settings: Settings, bundle: RouteBundle) -> pd.DataFrame:
 LIDAR_VERSION = "lidar-v2"                                # bump when the feature definitions change: the cache key includes it
 
 
+def _lidar_frame(f: dict[str, np.ndarray], azimuths: int) -> pd.DataFrame:
+    df = pd.DataFrame({k: v for k, v in f.items() if k != "horizon_near_deg"})
+    for k in range(azimuths):
+        df[f"hz_{k:02d}"] = f["horizon_near_deg"][:, k]
+    df["lidar_source"] = df["lidar_source"].astype(str)
+    return df
+
+
+def _merge_lidar(old: pd.DataFrame | None, new: pd.DataFrame, todo: np.ndarray | None) -> pd.DataFrame:
+    """A re-read of an earlier build's failed samples (todo) laid over what that build did read."""
+    if old is None:
+        return new
+    old = old.copy()
+    if "lidar_failed" not in old:
+        old["lidar_failed"] = False
+    for c in new.columns:
+        old.loc[todo, c] = new.loc[todo, c].to_numpy()
+    old["lidar_failed"] = old["lidar_failed"].astype(bool)
+    old["lidar_ok"] = old["lidar_ok"].astype(bool)
+    return old
+
+
 def lidar_features(settings: Settings, bundle: RouteBundle) -> dict[str, np.ndarray] | None:
     """Per-sample LiDAR features for a GB route (sources.lidar), cached by route geometry; None where it does not apply."""
     import hashlib
@@ -147,30 +169,32 @@ def lidar_features(settings: Settings, bundle: RouteBundle) -> dict[str, np.ndar
     key = hashlib.sha1(np.round(np.c_[s["x"].values, s["y"].values, s["bearing_deg"].values], 1).tobytes() + on_bridge.tobytes() + roofed.tobytes()
                        + f"{LIDAR_VERSION}|{corridor}|{azimuths}".encode()).hexdigest()[:16]
     cache = settings.paths()["raw"] / "lidar" / f"features_{key}.parquet"
-    if cache.exists():
-        df = pd.read_parquet(cache)
-    else:
+    df = pd.read_parquet(cache) if cache.exists() else None
+    todo = None if df is None else (df["lidar_failed"].to_numpy(dtype=bool) if "lidar_failed" in df else np.zeros(len(df), dtype=bool))
+    if df is None or todo.any():                          # nothing yet, or samples an earlier build could not read
         from ..sources.lidar import Lidar, corridor_features
 
         try:
             lidar = Lidar(settings.paths()["raw"].parent / "shared" / "lidar_index")
         except Exception as exc:  # noqa: BLE001
-            console.log(f"[yellow]LiDAR unavailable ({exc}); using the 30 m terrain model")
-            return None
-        console.log(f"LiDAR: reading a {corridor:.0f} m corridor either side of {len(s):,} samples (England, Wales, Scotland open surveys)")
-        f = corridor_features(s["x"].values, s["y"].values, s["bearing_deg"].values, on_bridge, roofed, lidar, corridor_m=corridor,
-                              azimuths=azimuths, workers=int(lcfg.get("workers", 8)))
-        df = pd.DataFrame({k: v for k, v in f.items() if k not in ("horizon_near_deg", "lidar_failed")})
-        for k in range(azimuths):
-            df[f"hz_{k:02d}"] = f["horizon_near_deg"][:, k]
-        df["lidar_source"] = df["lidar_source"].astype(str)
-        if f["lidar_failed"].any():                       # not cached: the next build asks the services again
-            console.log(f"[yellow]LiDAR: {int(f['lidar_failed'].sum()):,} samples could not be read (service errors); they use the 30 m "
-                        "terrain model in this build")
-        else:
+            if df is None:
+                console.log(f"[yellow]LiDAR unavailable ({exc}); using the 30 m terrain model")
+                return None
+            lidar = None
+        if lidar is not None:
+            if df is None:
+                console.log(f"LiDAR: reading a {corridor:.0f} m corridor either side of {len(s):,} samples (England, Wales, Scotland open surveys)")
+            else:
+                console.log(f"LiDAR: {int(todo.sum()):,} samples could not be read last time; reading them again")
+            f = corridor_features(s["x"].values, s["y"].values, s["bearing_deg"].values, on_bridge, roofed, lidar, corridor_m=corridor,
+                                  azimuths=azimuths, workers=int(lcfg.get("workers", 8)), only=todo)
+            df = _merge_lidar(df, _lidar_frame(f, azimuths), todo)
             cache.parent.mkdir(parents=True, exist_ok=True)
-            df.to_parquet(cache, index=False)
-    out = {c: df[c].to_numpy() for c in df.columns if not c.startswith("hz_")}
+            df.to_parquet(cache, index=False)             # kept with what failed, so the next build reads only that
+        if df["lidar_failed"].any():
+            console.log(f"[yellow]LiDAR: {int(df['lidar_failed'].sum()):,} samples could not be read (service errors); they use the 30 m "
+                        "terrain model in this build and are read again next time")
+    out = {c: df[c].to_numpy() for c in df.columns if not c.startswith("hz_") and c != "lidar_failed"}
     out["lidar_ok"] = out["lidar_ok"].astype(bool)
     out["horizon_near_deg"] = df[[f"hz_{k:02d}" for k in range(azimuths)]].to_numpy(dtype=np.float32)
     console.log(f"LiDAR: {out['lidar_ok'].mean():.0%} of samples covered ("

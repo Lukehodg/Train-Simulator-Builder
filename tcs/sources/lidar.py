@@ -419,13 +419,16 @@ OVERHEAD_M = 5.5                                 # surface this far above the ra
 
 def corridor_features(x: np.ndarray, y: np.ndarray, bearing_deg: np.ndarray, on_bridge: np.ndarray, roofed: np.ndarray,
                       lidar: Lidar, *, corridor_m: float = 60.0, antenna_h_m: float = 4.0, azimuths: int = 16,
-                      segment: int = 6, workers: int = 8, retry_pause_s: float = 5.0, log=console.log) -> dict[str, np.ndarray]:
+                      segment: int = 6, workers: int = 8, retry_pause_s: float = 5.0, retries: int = 2,
+                      only: np.ndarray | None = None, log=console.log) -> dict[str, np.ndarray]:
     """For every route sample: rail level, cutting walls / embankment fall either side, the near-field skyline
     (DSM, per azimuth, out to corridor_m), the share of the stretch under a structure, and the share of the ground
     within 30 m under trees or buildings. lidar_ok is False where the surveys have no data (keep the DEM values there).
 
     on_bridge: the line itself is on a structure (OSM), so its rail level is the deck (DSM), not the ground below.
-    roofed: a station roof spans the line here, so a long run of high surface is a roof, not a viaduct."""
+    roofed: a station roof spans the line here, so a long run of high surface is a roof, not a viaduct.
+    only: read just the stretches holding these samples (an earlier build's failures); the rest are left empty.
+    A stretch whose read failed is tried again `retries` times, each pass slower (fewer requests at once, longer pause)."""
     from concurrent.futures import ThreadPoolExecutor
 
     n = len(x)
@@ -500,7 +503,7 @@ def corridor_features(x: np.ndarray, y: np.ndarray, bearing_deg: np.ndarray, on_
             out["lidar_source"][i] = src
         return not dtm.failed
 
-    starts = list(range(0, n, segment))
+    starts = [s0 for s0 in range(0, n, segment) if only is None or bool(np.any(only[s0:s0 + segment]))]
     done, failed = 0, []
     with ThreadPoolExecutor(max_workers=workers) as ex:
         for s0, good in zip(starts, ex.map(run, starts)):
@@ -509,11 +512,16 @@ def corridor_features(x: np.ndarray, y: np.ndarray, bearing_deg: np.ndarray, on_
                 failed.append(s0)
             if done % 200 == 0:
                 log(f"LiDAR: {done * segment:,} of {n:,} samples")
-    if failed:                                           # busy services: one slower pass over what failed
-        log(f"LiDAR: {len(failed) * segment:,} samples hit a service error; trying them again")
-        time.sleep(retry_pause_s)
-        with ThreadPoolExecutor(max_workers=2) as ex:
+    pause = retry_pause_s
+    for attempt in range(retries):                       # busy services: slower passes over what failed
+        if not failed:
+            break
+        log(f"LiDAR: {len(failed) * segment:,} samples hit a service error; trying them again" + (f" (pass {attempt + 1})" if attempt else ""))
+        time.sleep(pause)
+        with ThreadPoolExecutor(max_workers=max(1, 2 >> attempt)) as ex:
             failed = [s0 for s0, good in zip(failed, ex.map(run, failed)) if not good]
+        pause *= 4
+    if failed:
         for s0 in failed:
             out["lidar_failed"][s0:s0 + segment] = True
     # a rail level far from its neighbours is a misplaced centreline or a gap in the survey, not a step in the railway

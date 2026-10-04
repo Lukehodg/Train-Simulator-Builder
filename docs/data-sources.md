@@ -72,7 +72,9 @@ mosaic of both sides. Per sample the features are:
 A sample whose rail level jumps more than 3 m from its neighbours (a misplaced centreline, a gap in the survey) and
 is not on a bridge falls back to the terrain model. Features are cached per route geometry under
 `data/raw/<route>/lidar/`, and tile listings under `data/raw/shared/lidar_index/`; a route takes one to five minutes
-the first time. `terrain.lidar.enabled: false` in `config/route.yaml` turns it off; routes outside GB never use it.
+the first time. A busy service (the Environment Agency's often refuses many requests from GitHub's build servers) is
+tried again twice, each pass slower; stretches that still fail use the terrain model in that build and are kept in the
+cache as failed, so the next build (the publish workflow restores `data/raw`) reads only those and fills the gaps. `terrain.lidar.enabled: false` in `config/route.yaml` turns it off; routes outside GB never use it.
 
 ## 3. Cellular coverage prior — Ofcom
 
