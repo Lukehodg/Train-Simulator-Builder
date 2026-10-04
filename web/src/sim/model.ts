@@ -73,6 +73,8 @@ export function simulate(data: RouteData, sc: Scenario): SimResult {
         const isDas = tun && dasAt(das, data.tunnelName[i], data.distance[i] / 1000)
         let q = open(i)
         if (isDas) q = cfg.tunnels.das_score; else if (tun) q = inside(i)
+        // measured inside a tunnel: the correction goes on the portal or DAS model (open air has it in qb already)
+        if (tun && b.meas && Number.isFinite(b.meas[i])) q += b.meas[i] / (b.rsrpSlope?.[i] ?? (cfg.rsrp_dbm.at_one - cfg.rsrp_dbm.at_zero))
         q = clamp(q, 0, 1)
         const hp = b.hp[i] || 0
         const tech = b.tech[i] ?? '4G'

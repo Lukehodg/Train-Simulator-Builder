@@ -115,22 +115,24 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
         if not np.isfinite(correction).all():
             raise ValueError("calibration biases must be finite")
         q_base = q_base + correction
-    meas_db, meas_w = np.full(len(df), np.nan), np.zeros(len(df))
+    meas_db, meas_w, meas_q = np.full(len(df), np.nan), np.zeros(len(df)), np.zeros(len(df))
     if corrections is not None and len(corrections):
         m = df[["sample_id", "provider_id"]].merge(corrections[["sample_id", "provider_id", "correction_db", "weight"]], on=["sample_id", "provider_id"], how="left")
         meas_db, meas_w = m["correction_db"].to_numpy(float), m["weight"].fillna(0).to_numpy(float)
         nominal = float(cfg["rsrp_dbm"]["at_one"] - cfg["rsrp_dbm"]["at_zero"])
         slope_db = df["provider_id"].map({k: float(v["slope"]) for k, v in (calibration or {}).get("rsrp_map", {}).items()}).fillna(nominal).to_numpy(float)
-        q_base = q_base + np.where(np.isfinite(meas_db), meas_db / slope_db, 0.0)
+        meas_q = np.where(np.isfinite(meas_db), meas_db / slope_db, 0.0)
+    tun = df["in_tunnel"].fillna(False).values.astype(bool)
+    q_base = q_base + np.where(tun, 0.0, meas_q)            # inside tunnels the correction goes on the tunnel model, below
     q_base = np.clip(q_base, 0, 1).astype(np.float32)
     q = np.clip(q_base + vehicle, 0, 1)
-    tun = df["in_tunnel"].fillna(False).values.astype(bool)
     tun_das = tun & das_mask(das, df["tunnel_name"].values, df["distance_m"].values / 1000.0)
     tcfg = cfg["tunnels"]
     ordered = samples.sort_values("distance_m", kind="stable").reset_index(drop=True)
     pos = df["sample_id"].map(pd.Series(np.arange(len(ordered)), index=ordered["sample_id"].to_numpy())).to_numpy()
     q_tun = tunnel_quality(q, pos, df["provider_id"].to_numpy(), ordered, float(tcfg["default_score"]), tcfg.get("portal_decay_m"))
     q = np.where(tun_das, tcfg["das_score"], np.where(tun, q_tun, q))
+    q = np.where(tun, q + meas_q, q)                        # measured inside: corrects the portal or DAS model there
     q = np.clip(q, 0, 1).astype(np.float32)
 
     # Handover degradation
@@ -171,7 +173,7 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
     flags = np.char.add(flags.astype(str), np.where(mapped, "|calibrated_rsrp", "|synthetic_rsrp"))
     flags = np.where(df["serving_cell"].notna().values, np.char.add(flags.astype(str), "|cells"), flags)
     flags = np.char.add(flags.astype(str), np.where(calibrated, "|calibrated", ""))
-    flags = np.char.add(flags.astype(str), np.where(np.isfinite(meas_db) & ~tun, "|measured_correction", ""))
+    flags = np.char.add(flags.astype(str), np.where(np.isfinite(meas_db), "|measured_correction", ""))
 
     out = pd.DataFrame({
         "sample_id": df["sample_id"].values, "route_id": settings.route_id, "provider_id": df["provider_id"].values,
@@ -183,8 +185,8 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
         "handover": df["handover"].fillna(False).values.astype(bool), "source_flags": flags, "model_version": settings.sim["model_version"],
         "quality_base": q_base, "handover_penalty": hp,
         "rsrp_slope": rsrp_slope, "rsrp_intercept": rsrp_intercept,
-        "measured_correction_db": np.where(tun, np.nan, meas_db).astype(np.float32),
-        "_calibrated": calibrated, "_meas_w": np.where(tun, 0.0, meas_w),
+        "measured_correction_db": meas_db.astype(np.float32),
+        "_calibrated": calibrated, "_meas_w": meas_w,
         "_has_prior": has_prior, "_prior_source": df["source"].astype(str).values, "_in_tunnel": tun,
     })
     return out

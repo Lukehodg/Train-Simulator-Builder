@@ -1,5 +1,5 @@
 # Every numerical assumption lives here and is versioned with model_version.
-model_version: "0.4.0"
+model_version: "0.4.1"
 
 vehicle:
   profile: EXTERNAL_ROOFTOP_ANTENNA     # EXTERNAL_ROOFTOP_ANTENNA | PASSENGER_HANDSET_INSIDE_CARRIAGE

@@ -18,15 +18,38 @@ def _points(dist, err, provider="ee", tunnel=False, level=0.0):
                          "signal_primary": -90.0, "rsrp_dbm": -90.0 + level + np.asarray(err, float)})
 
 
-def test_errors_drop_the_sets_own_level_and_tunnels():
+def test_errors_drop_the_sets_own_level_and_keep_tunnels_apart():
     err = np.zeros(20)
     err[5:9] = 6.0                                                          # a stretch 6 dB better than modelled
     j = _points(np.arange(0, 1000, 50.0), err, level=-7.0)                  # read by a scanner 7 dB low everywhere
     j.loc[3, "_in_tunnel"] = True
+    j.loc[3, "rsrp_dbm"] = -60.0                                            # far better inside than the portal model says
     e = corrections.errors(j, weight=0.1)
-    assert len(e) == 19 and e["w"].eq(0.1).all()
-    assert e.loc[~e["distance_m"].between(250, 400), "error_db"].abs().max() == pytest.approx(0.0)   # its own level is gone
-    assert e.loc[e["distance_m"].between(250, 400), "error_db"].tolist() == pytest.approx([6.0] * 4)
+    assert len(e) == 20 and e["w"].eq(0.1).all() and e["in_tunnel"].sum() == 1
+    open_air = e[~e["in_tunnel"]]
+    assert open_air.loc[~open_air["distance_m"].between(250, 400), "error_db"].abs().max() == pytest.approx(0.0)   # its own level is gone
+    assert open_air.loc[open_air["distance_m"].between(250, 400), "error_db"].tolist() == pytest.approx([6.0] * 4)
+    assert e.loc[e["in_tunnel"], "error_db"].iloc[0] == pytest.approx(37.0)  # the level comes from open air only
+
+
+def test_a_set_level_over_all_its_routes_keeps_a_route_the_model_overrates():
+    dist = np.arange(0, 1000, 50.0)
+    a = _points(dist, np.zeros(20), level=-7.0)                             # scanner 7 dB low; the model right here
+    b = _points(dist, np.full(20, -4.0), level=-7.0)                        # ...and 4 dB too hopeful on this route
+    big = pd.concat([a] * 3 + [b])                                          # most of the set's points are on the first route
+    level = corrections.levels(big)
+    assert level["ee"] == pytest.approx(-7.0)
+    assert corrections.errors(b, 1.0, level)["error_db"].tolist() == pytest.approx([-4.0] * 20)   # kept
+    assert corrections.errors(b, 1.0)["error_db"].abs().max() == pytest.approx(0.0)              # the route's own level: lost
+
+
+def test_tunnel_and_open_air_errors_each_correct_their_own_samples():
+    samples = pd.DataFrame({"sample_id": np.arange(40), "distance_m": np.arange(40) * 50.0, "in_tunnel": np.arange(40) >= 20})
+    err = pd.DataFrame({"provider_id": "ee", "distance_m": [950.0] * 10 + [1050.0] * 10, "in_tunnel": [False] * 10 + [True] * 10,
+                        "error_db": [-3.0] * 10 + [8.0] * 10, "w": 1.0})
+    c = corrections.smooth(err, samples).set_index("sample_id")["correction_db"]
+    assert c[19] == pytest.approx(-3.0 * 10 / 10.5, abs=0.05) and c[20] == pytest.approx(8.0 * 10 / 10.5, abs=0.05)
+    assert (c[c.index < 20] < 0).all() and (c[c.index >= 20] > 0).all()     # nothing leaks across the portal
 
 
 def test_a_correction_is_shrunk_where_measurements_are_few_and_fades_away_from_them():
@@ -40,7 +63,7 @@ def test_a_correction_is_shrunk_where_measurements_are_few_and_fades_away_from_t
     assert 50 not in c.index                                                 # nothing measured near: no correction
 
 
-def test_corrections_move_the_prediction_by_their_size_and_leave_tunnels_to_the_portal_model(tmp_path):
+def test_corrections_move_the_prediction_by_their_size_in_open_air_and_in_tunnels(tmp_path):
     s = load_settings(offline=True)
     s.route["sample_spacing_m"] = 500
     s.terrain["horizon_azimuths"] = 8
@@ -58,6 +81,14 @@ def test_corrections_move_the_prediction_by_their_size_and_leave_tunnels_to_the_
     row = lambda d: d[(d["sample_id"] == sid) & (d["provider_id"] == "ee")].iloc[0]
     assert row(got)["signal_primary"] - row(base)["signal_primary"] == pytest.approx(-4.6, abs=0.05)
     assert "measured_correction" in row(got)["source_flags"] and row(got)["measured_correction_db"] == pytest.approx(-4.6)
+    # inside a tunnel the correction goes on the tunnel model
+    inside = base[base["_in_tunnel"] & base["quality_score"].between(0.1, 0.8) & (base["provider_id"] == "ee")]
+    tid = int(inside["sample_id"].iloc[0])
+    got_t = cellular_observations(s, b.samples, prior, serving, corrections=pd.DataFrame(
+        {"sample_id": [tid], "provider_id": ["ee"], "correction_db": [5.0], "weight": [3.0]}))
+    rt = lambda d: d[(d["sample_id"] == tid) & (d["provider_id"] == "ee")].iloc[0]
+    assert rt(got_t)["signal_primary"] - rt(base)["signal_primary"] == pytest.approx(5.0, abs=0.05)
+    assert "measured_correction" in rt(got_t)["source_flags"] and rt(got_t)["quality_base"] == pytest.approx(rt(base)["quality_base"])
     others = got[(got["sample_id"] != sid) | (got["provider_id"] != "ee")]
     assert others["measured_correction_db"].isna().all() and not others["source_flags"].str.contains("measured_correction").any()
     # stored by position and matched back to the samples
