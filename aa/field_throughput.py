@@ -136,7 +136,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("log", type=Path)
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--unit", default="Mbit/s", help="What the log's download_rate column holds (check with whoever exported it)")
+    ap.add_argument("--unit", default="Mbit/s", help="What the log's download_rate column holds (Mbit/s in the EDGE Rail exports)")
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     t, cadence = tests(load(a.log))
