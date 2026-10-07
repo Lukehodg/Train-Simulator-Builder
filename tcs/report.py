@@ -460,7 +460,7 @@ def _das_plain(entries: list[str]) -> str:
     return ", ".join(f"km {e[3:].replace('-', '–')}" if e.startswith("km:") else e for e in entries)
 
 
-def _assumptions(settings: Settings) -> list[tuple[str, str]]:
+def _assumptions(settings: Settings, meta: dict | None = None) -> list[tuple[str, str]]:
     from .report_docx import POLICIES, VEHICLES
 
     sim = settings.sim
@@ -492,7 +492,10 @@ def _assumptions(settings: Settings) -> list[tuple[str, str]]:
         ("Passenger demand", f"{pw['passengers']} seats, load factor {lo}–{hi} along the route, {pw['active_share'] * 100:.0f} % online, "
                              f"{pw['per_user_demand_mbps']} Mbps each; access points {pw['ap_capacity_mbps']} Mbps in total"),
         ("Service-class thresholds (score out of 100)", ", ".join(f"{c} ≥ {v}" for c, v in pw["classes"].items())),
-        ("Timetable", f"departure {settings.route.get('timetable', {}).get('departure')}, {settings.route.get('timetable', {}).get('dwell_s')} s dwell at each stop"),
+        ("Timetable", (f"{(meta or {}).get('timetable', {}).get('route', 'train')} {meta['timetable']['train']} from the operator's GTFS feed, "
+                       if ((meta or {}).get("timetable") or {}).get("train") else "")
+                      + f"departure {(meta or {}).get('departure') or settings.route.get('timetable', {}).get('departure')}, "
+                        f"{settings.route.get('timetable', {}).get('dwell_s')} s dwell at each stop"),
         ("Model version", str(sim.get("model_version", ""))),
     ]
     return rows
@@ -742,7 +745,8 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
         _coverage_row(meta),
         ("Cell sites and handovers", cells_text(meta), live(meta.get("cell_source") == "opencellid")),
         ("Satellite", "Predictive sky-visibility model" + (" with terminal telemetry" if any("telemetry" in str(x) for x in obs["source_flags"].unique()) else ""), "predictive"),
-        ("Timetable", "Route configuration" if settings.route.get("timetable", {}).get("source", "yaml") == "yaml" else str(settings.route["timetable"]["source"]), "configured"),
+        ("Timetable", f"Operator GTFS feed (feed {meta['timetable'].get('feed_version')}, train {meta['timetable']['train']})" if (meta.get("timetable") or {}).get("train")
+         else "Route configuration", "live" if (meta.get("timetable") or {}).get("train") else "configured"),
         _calibration_row(meta.get("calibration")),
         *_check_rows(meta.get("calibration")),
         *_corrections_rows(meta),
@@ -775,7 +779,7 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
     ev = Evidence(
         meta=meta, route_name=meta["route"]["name"], origin=meta["stations"][0]["name"], destination=meta["stations"][-1]["name"],
         k=k, sec=sec, links=links, outages=outage_stretches(samples, rc, stations), shares=shares, charts=charts,
-        assumptions=_assumptions(settings), sources=sources, validation=validation, scenario_title=title, scenario_detail=detail,
+        assumptions=_assumptions(settings, meta), sources=sources, validation=validation, scenario_title=title, scenario_detail=detail,
         vehicle=VEHICLES.get(vname, vname), policy=POLICIES.get(policy, policy),
         satcom=(" and ".join(sat) if sat and sim.get("satcom_enabled", True) else "no satellite link"),
         passengers=f"{pw['passengers']} seats; {pw['active_share'] * 100:.0f} % of passengers online, {pw['per_user_demand_mbps']} Mbps demand each",

@@ -124,6 +124,7 @@ def export_all(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame, s
         "length_m": float(samples["distance_m"].max()),
         "duration_s": float(samples["sim_seconds"].max()),
         "departure": settings.route.get("timetable", {}).get("departure", "09:00"),
+        "timetable": {k: v for k, v in (settings.route.get("timetable", {}).get("resolved") or {"source": settings.route.get("timetable", {}).get("source", "yaml")}).items() if k != "stops"},
         "n_samples": int(len(samples)),
         "providers": providers,
         "stations": [{"crs": r["crs"], "name": r["name"], "lat": float(r["latitude"]), "lon": float(r["longitude"]), "distance_m": float(r["distance_m"]),

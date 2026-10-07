@@ -64,10 +64,17 @@ def latest_as_of(settings, raw_dir: Path) -> str:
 
 
 def list_files(settings, raw_dir: Path, as_of: str, provider_id: str, state_fips: str) -> list[dict]:
-    doc = _get_json(settings, f"downloads/listAvailabilityData/{as_of}", raw_dir, "fcc_bdc_list",
-                    params={"category": "Provider", "subcategory": "Mobile Broadband", "provider_id": provider_id, "state_fips": state_fips})
+    """Mobile coverage files one provider filed for one state. The API filters by technology_type (not subcategory);
+    the rows are filtered again here in case a filter is ignored."""
+    params = {"category": "Provider", "technology_type": "Mobile Broadband", "provider_id": provider_id, "state_fips": state_fips}
+    doc = _get_json(settings, f"downloads/listAvailabilityData/{as_of}", raw_dir, "fcc_bdc_list", params=params)
     rows = doc.get("data", []) or []
-    return [r for r in rows if str(r.get("provider_id", provider_id)) == str(provider_id) and str(r.get("state_fips", state_fips)).zfill(2) == state_fips]
+    mine = [r for r in rows if str(r.get("provider_id", provider_id)) == str(provider_id) and str(r.get("state_fips", state_fips)).zfill(2) == state_fips
+            and "mobile" in str(r.get("technology_type", "mobile")).lower()]
+    if not mine:
+        console.log(f"[yellow]FCC BDC: no mobile files for provider {provider_id} in state {state_fips} ({len(rows)} rows listed"
+                    + (f"; first: {json.dumps(rows[0])[:300]}" if rows else "") + ")")
+    return mine
 
 
 def classify(row: dict) -> tuple[str | None, str]:
@@ -82,8 +89,13 @@ def classify(row: dict) -> tuple[str | None, str]:
 
 
 def _file_type_rank(row: dict) -> int:
+    """Lower is better: the operator's own coverage polygons before the hexagon summaries, GeoPackage first."""
     t = (str(row.get("file_type", "")) + " " + str(row.get("file_name", ""))).lower()
-    return 0 if "gpkg" in t or "geopackage" in t else 1 if "shp" in t or "shape" in t else 2 if "gdb" in t else 9
+    fmt = 0 if "gpkg" in t or "geopackage" in t else 1 if "shp" in t or "shape" in t else 2 if "gdb" in t else 9
+    if fmt == 9:
+        return 9
+    sub = str(row.get("subcategory", "")).lower()
+    return fmt + (3 if "hexagon" in sub else 0)
 
 
 def _download(settings, raw_dir: Path, row: dict) -> Path:
@@ -145,7 +157,7 @@ def coverage_flags(settings, samples: pd.DataFrame, raw_dir: Path) -> dict[str, 
             best: dict[str, dict] = {}
             for r in rows:
                 tech, env = classify(r)
-                if tech is None or _file_type_rank(r) > 2:
+                if tech is None or _file_type_rank(r) >= 9:
                     continue
                 k = f"{env}_{tech.lower()}"
                 if k not in best or _file_type_rank(r) < _file_type_rank(best[k]):

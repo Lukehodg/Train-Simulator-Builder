@@ -49,6 +49,7 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     from .pipeline.movement import movement
     from .pipeline.obstruction import enrich_terrain
     from .pipeline.sample_route import build_route, save_bundle
+    from .sources import gtfs_feed
 
     s = load_settings(offline=offline, route_id=route)
     interim = _interim(s)
@@ -87,6 +88,7 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
         cells = corridor_cells(s, b, b.samples)
     cand = candidate_cells(s, b.samples, cells)
     serving = serving_cells(s, b.samples, cand)
+    gtfs_feed.apply(s)                                         # timetable.source: gtfs -> one real train's calls
     b.samples, stations = movement(s, b.samples, b.stations)
     b.stations = stations
     save_bundle(b, interim)

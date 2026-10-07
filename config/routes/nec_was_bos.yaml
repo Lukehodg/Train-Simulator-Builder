@@ -46,9 +46,15 @@ route:
   # In-station coverage at New York Penn (a distributed antenna system on the platforms); none assumed in the river tunnels.
   das_tunnels: [New York Penn Station]
   timetable:
-    source: yaml
+    # The first weekday Acela from Washington to Boston leaving at or after depart_after, from Amtrak's GTFS feed
+    # (keyless, refreshed weekly). Set `train` to pin a train number. The calls below are used if the feed can't be read.
+    source: gtfs
+    gtfs:
+      url: https://content.amtrak.com/content/gtfs/GTFS.zip
+      route: Acela
+      depart_after: '06:00'
     departure: 06:00
-    calls:                      # approximate weekday Acela timings
+    calls:                      # fallback: approximate weekday Acela timings
       WAS: 06:00
       BWI: 06:20
       BAL: 06:32

@@ -101,9 +101,10 @@ the route list shows that region's routes, and `?region=us` opens the US directl
 | Networks | EE, O2, Vodafone, Three | AT&T, Verizon, T-Mobile, matched to OpenCellID by their US PLMNs (several MCCs each) |
 | Coverage prior | Ofcom API / Connected Nations by postcode | Distance to each network's OpenCellID sites (`tcs/sources/cell_prior.py`), uncalibrated |
 | Terrain | OS Terrain 50 + open LiDAR | Copernicus GLO-30 |
+| Timetable | Route file calls | One real Acela from Amtrak's GTFS feed (`timetable.source: gtfs`, keyless, weekly); the route file's calls if the feed can't be read |
 | Calibration | Yellow Train national fit, Global View corrections and masts | None yet: the figures are uncalibrated until US measurements are fitted |
 
-The viewer's route picker groups routes by country, the evidence packs drop the Ofcom and Network Rail wording for US
+The viewer's region switch (UK / USA) picks the country, the evidence packs drop the Ofcom and Network Rail wording for US
 routes, and the publish workflow's live-Ofcom check applies to GB routes only. Add another country by adding
 `config/countries/<CC>/profile.yaml` (and its networks file) and route files with that `country`.
 

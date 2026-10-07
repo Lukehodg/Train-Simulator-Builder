@@ -29,6 +29,10 @@ def movement(settings: Settings, samples: pd.DataFrame, stations: pd.DataFrame) 
     n = len(samples)
     a, b = float(rcfg.get("accel_mps2", 0.5)), float(rcfg.get("decel_mps2", 0.7))
     vmax = line_speed_kph(settings, samples["distance_m"].values, samples.get("line_maxspeed_kph", pd.Series(np.nan, index=samples.index)).values) / 3.6
+    resolved = rcfg.get("timetable", {}).get("resolved") or {}
+    if resolved.get("stops"):                       # a GTFS train: it stops where it calls, and passes the rest
+        stations = stations.copy()
+        stations["stop"] = stations["crs"].isin(resolved["stops"])
     stops = stations[stations["stop"]].sort_values("distance_m")
     stop_idx = set(int(i) for i in stops["sample_id"].values)
     v = np.zeros(n)
@@ -44,7 +48,7 @@ def movement(settings: Settings, samples: pd.DataFrame, stations: pd.DataFrame) 
 
     # Stretch section run times to match the timetable where the schedule is slower than physics.
     tcfg = rcfg.get("timetable", {})
-    calls = from_yaml(tcfg) if tcfg.get("source", "yaml") == "yaml" else pd.DataFrame(columns=["crs", "time", "stop"])
+    calls = from_yaml(tcfg) if tcfg.get("source", "yaml") in ("yaml", "gtfs") else pd.DataFrame(columns=["crs", "time", "stop"])
     sched = schedule_seconds(calls, tcfg.get("departure", "00:00"))
     stop_rows = [(str(r["crs"]), int(r["sample_id"])) for _, r in stops.iterrows()]
     for k, ((c0, i0), (c1, i1)) in enumerate(zip(stop_rows[:-1], stop_rows[1:])):

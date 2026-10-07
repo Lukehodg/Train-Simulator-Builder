@@ -157,3 +157,68 @@ def test_fcc_prior_scores_in_vehicle_highest(monkeypatch):
     p = fcc_bdc.fcc_prior(s, samples, None)["prior_score"].to_numpy()
     assert p[0] > p[1] > p[2] > p[3] and set(fcc_bdc.fcc_prior(s, samples, None)["source"]) == {"fcc_bdc"}
     assert live_coverage_share({"coverage_share": {"fcc_bdc": 0.95}}) >= LIVE_COVERAGE_MIN
+
+
+def _gtfs(tmp_path):
+    import zipfile
+
+    files = {
+        "routes.txt": "route_id,route_long_name\n1,Acela\n2,Northeast Regional\n",
+        "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+                        "wk,1,1,1,1,1,0,0,20261001,20261031\nsat,0,0,0,0,0,1,0,20261001,20261031\n",
+        "trips.txt": "route_id,service_id,trip_id,trip_short_name\n1,wk,a,2100\n1,wk,b,2150\n1,sat,c,2000\n1,wk,d,2101\n2,wk,e,170\n",
+        "stops.txt": "stop_id,stop_code,stop_name\nWAS,WAS,Washington\nNYP,NYP,New York\nBOS,BOS,Boston\n",
+        "stop_times.txt": "trip_id,arrival_time,departure_time,stop_id,stop_sequence\n"
+                          "a,05:00:00,05:00:00,WAS,1\na,07:50:00,07:55:00,NYP,2\na,10:40:00,10:40:00,BOS,3\n"
+                          "b,23:00:00,23:00:00,WAS,1\nb,25:50:00,25:52:00,NYP,2\nb,28:30:00,28:30:00,BOS,3\n"
+                          "c,06:00:00,06:00:00,WAS,1\nc,10:00:00,10:00:00,BOS,2\n"
+                          "d,06:30:00,06:30:00,BOS,1\nd,11:00:00,11:00:00,WAS,2\n"
+                          "e,06:10:00,06:10:00,WAS,1\ne,11:00:00,11:00:00,BOS,2\n",
+        "feed_info.txt": "feed_publisher_name,feed_version\nAmtrak,20261007\n",
+    }
+    p = tmp_path / "gtfs.zip"
+    with zipfile.ZipFile(p, "w") as z:
+        for n, body in files.items():
+            z.writestr(n, body)
+    return p
+
+
+def test_gtfs_picks_a_weekday_train_end_to_end(tmp_path):
+    from tcs.sources.gtfs_feed import pick_trip
+
+    feed = _gtfs(tmp_path)
+    r = pick_trip(feed, "acela", "WAS", "BOS", depart_after="04:00")
+    assert r["train"] == "2100" and r["departure"] == "05:00" and r["calls"] == {"WAS": "05:00", "NYP": "07:55", "BOS": "10:40"}
+    assert r["feed_version"] == "20261007"
+    late = pick_trip(feed, "Acela", "WAS", "BOS", depart_after="12:00")    # Saturday-only and northbound-only trips skipped
+    assert late["train"] == "2150" and late["calls"]["BOS"] == "04:30"     # GTFS 28:30 is 04:30 the next morning
+    with pytest.raises(SourceUnavailable):
+        pick_trip(feed, "Acela", "WAS", "BOS", train="9999")
+
+
+def test_gtfs_train_sets_calls_and_passing_points(tmp_path, monkeypatch):
+    from tcs.pipeline.movement import movement
+    from tcs.pipeline.sample_route import build_route
+    from tcs.sources import gtfs_feed
+
+    s = load_settings(offline=True, route_id=US_ROUTE)
+    s.route["sample_spacing_m"] = 400
+    b = build_route(s)
+    r = {"train": "2252", "departure": "06:40", "feed_version": "x", "stops": ["WAS", "BAL", "NYP", "BOS"],
+         "calls": {"WAS": "06:40", "BAL": "07:12", "NYP": "09:51", "BOS": "13:46"}}
+    monkeypatch.setattr(gtfs_feed, "http_get", lambda *a, **k: _gtfs(tmp_path))
+    monkeypatch.setattr(gtfs_feed, "pick_trip", lambda *a, **k: r)
+    gtfs_feed.apply(s)
+    assert s.route["timetable"]["departure"] == "06:40" and s.route["timetable"]["resolved"]["train"] == "2252"
+    samples, st = movement(s, b.samples, b.stations)
+    assert set(st.loc[st["stop"], "crs"]) == {"WAS", "BAL", "NYP", "BOS"}      # BWI, PHL, ... become passing points
+    assert samples["sim_seconds"].max() >= (13 * 60 + 46 - (6 * 60 + 40)) * 60 - 1
+
+
+def test_gtfs_unavailable_keeps_the_route_file_calls(monkeypatch):
+    from tcs.sources import gtfs_feed
+
+    s = load_settings(offline=True, route_id=US_ROUTE)
+    before = dict(s.route["timetable"]["calls"])
+    assert gtfs_feed.apply(s) is None                                        # offline with no cached feed
+    assert s.route["timetable"]["calls"] == before and "resolved" not in s.route["timetable"]
