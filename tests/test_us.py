@@ -222,3 +222,39 @@ def test_gtfs_unavailable_keeps_the_route_file_calls(monkeypatch):
     before = dict(s.route["timetable"]["calls"])
     assert gtfs_feed.apply(s) is None                                        # offline with no cached feed
     assert s.route["timetable"]["calls"] == before and "resolved" not in s.route["timetable"]
+
+
+def test_ookla_tiles_join_the_route_and_compare_with_the_model():
+    from tcs.sources import ookla
+
+    assert list(ookla.quadkey(np.array([-160.0406]), np.array([70.6336]))) == ["0022133222330201"]   # a tile from the real file
+    lon = np.linspace(-74.0, -73.8, 60)                                                 # ~290 m apart: two samples a tile
+    samples = pd.DataFrame({"sample_id": np.arange(60), "longitude": lon, "latitude": np.full(60, 40.75), "distance_m": np.arange(60) * 1000.0})
+    qk = ookla.quadkey(lon, np.full(60, 40.75))
+    speed = np.where(np.arange(60) < 30, 20_000, 200_000)                               # slow first half, fast second
+    tiles = pd.DataFrame({"quadkey": qk[::2], "avg_d_kbps": speed[::2], "avg_u_kbps": 10_000, "avg_lat_ms": 30, "tests": 4})
+    o = ookla.along_route(samples, tiles)
+    assert o["ookla_down_mbps"].notna().all() and o.loc[0, "ookla_down_mbps"] == pytest.approx(20.0)
+    obs = pd.DataFrame({"sample_id": np.repeat(np.arange(60), 2), "provider_type": "cellular", "available": True,
+                        "capacity_mbps": np.repeat(np.where(np.arange(60) < 30, 15.0, 90.0), 2)})
+    c = ookla.check(samples, obs, o, "2026-Q2")
+    assert c["section_rank_correlation"] > 0.8 and c["slowest_fifth_overlap"] == 1.0 and c["samples_with_tests"] == 1.0
+
+
+def test_fcc_hexagon_csv_files_flag_the_samples_inside(tmp_path):
+    import zipfile
+
+    import h3
+
+    from tcs.sources.fcc_bdc import _clip, _file_type_rank, _hits
+
+    lat, lon = np.array([40.75, 40.75, 41.50]), np.array([-73.99, -73.80, -72.00])
+    covered = [h3.latlng_to_cell(40.75, -73.99, 8), h3.latlng_to_cell(35.0, -100.0, 8)]   # one on the route, one far off
+    z = tmp_path / "hex.zip"
+    with zipfile.ZipFile(z, "w") as f:
+        f.writestr("bdc_36_130077_4GLTE_mobile_broadband_h3.csv", "h3_res8_id,env\n" + "\n".join(f"{c},1" for c in covered))
+    clip = _clip(z, (-74.5, 40.0, -71.0, 42.0))
+    assert list(clip["h3"]) == [covered[0]]                                      # the far cell is cut away
+    assert list(_hits(clip, lon, lat, None)) == [0]
+    row = {"subcategory": "Hexagon Coverage", "file_type": "csv", "file_name": "x.csv"}
+    assert _file_type_rank(row) < 9 and _file_type_rank({"subcategory": "Raw Coverage", "file_type": "gpkg"}) < _file_type_rank(row)

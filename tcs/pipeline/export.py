@@ -35,7 +35,7 @@ def _cast(df: pd.DataFrame, schema: pa.Schema) -> pa.Table:
 
 
 def export_all(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame, stations: pd.DataFrame, cells: pd.DataFrame,
-               obs: pd.DataFrame, rc: pd.DataFrame, prior: pd.DataFrame) -> dict[str, Path]:
+               obs: pd.DataFrame, rc: pd.DataFrame, prior: pd.DataFrame, extra_meta: dict | None = None) -> dict[str, Path]:
     paths = settings.paths()
     out, web = paths["processed"], paths["web"]
     out.mkdir(parents=True, exist_ok=True)
@@ -144,6 +144,7 @@ def export_all(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame, s
         "calibration": describe_calibration(settings, paths["interim"]),   # what the predictions were calibrated against, and how well
         "warnings": bundle.warnings,
     }
+    meta.update(extra_meta or {})
     (web / "meta.json").write_text(json.dumps(meta, indent=1, default=_json_default), encoding="utf-8")
     written["web_meta"] = web / "meta.json"
     return written

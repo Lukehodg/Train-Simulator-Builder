@@ -100,7 +100,18 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     if corr is not None:
         console.log(f"measured corrections: {corr['sample_id'].nunique():,} of {len(b.samples):,} samples on at least one network")
     obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, policy=policy, corrections=corr)
-    written = export_all(s, b, b.samples, stations, cells, obs, rc, prior)
+    extra = {}
+    if s.country_profile.get("ookla_check"):                 # crowd-sourced phone speeds as a check on an uncalibrated model
+        from .sources import ookla
+
+        got = ookla.for_build(s, b.samples, s.paths()["raw"])
+        if got is not None:
+            b.samples = b.samples.merge(got[0], on="sample_id", how="left")
+            extra["ookla_check"] = ookla.check(b.samples, obs, got[0], got[1])
+            c = extra["ookla_check"]
+            console.log(f"Ookla check: median phone download {c['median_ookla_down_mbps']} Mbps vs model best network {c['median_model_best_mbps']} Mbps; "
+                        f"section rank correlation {c.get('section_rank_correlation')}, slowest-fifth overlap {c.get('slowest_fifth_overlap')}")
+    written = export_all(s, b, b.samples, stations, cells, obs, rc, prior, extra_meta=extra)
     if copy_to_web:
         dest = ROOT / "web" / "public" / "data" / s.route_id
         dest.mkdir(parents=True, exist_ok=True)

@@ -18,6 +18,10 @@ coverage_prior: opencellid_sites
 # are set: they replace the site-distance estimate for every network that has them (tcs/sources/fcc_bdc.py).
 fcc_prior: true
 
+# Ookla Open Data (keyless, quarterly): crowd-sourced phone speed tests per ~600 m tile, all networks pooled. Used only
+# as a check on the uncalibrated model (meta.json `ookla_check`): it does not change the predictions.
+ookla_check: true
+
 terrain:
   source: copernicus_glo30       # OS Terrain 50 and the open LiDAR surveys are GB-only
   lidar: {enabled: false}

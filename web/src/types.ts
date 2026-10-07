@@ -54,6 +54,9 @@ export interface Meta {
   length_m: number
   duration_s: number
   departure: string
+  timetable?: { source: string; route?: string; train?: string; feed_version?: string | null }   // a GTFS train (US) names itself
+  ookla_check?: { quarter: string; samples_with_tests: number; median_ookla_down_mbps: number | null; median_model_best_mbps: number | null
+    sections: number; section_km: number; section_rank_correlation?: number | null; slowest_fifth_overlap?: number | null }
   n_samples: number
   providers: ProviderMeta[]
   stations: StationMeta[]

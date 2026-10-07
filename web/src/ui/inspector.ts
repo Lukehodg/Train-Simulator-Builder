@@ -225,6 +225,14 @@ function correctionsText(m: Meta): string {
     + 'Signal at a spot repeats from trip to trip, so earlier passes are the best guide to later ones; on later trips this cut the average error from 9.7 to 8.3 dB.'
 }
 
+function ooklaText(c: NonNullable<Meta['ookla_check']>): string {
+  const pct = (v: number | null | undefined) => (v == null ? '–' : `${Math.round(v * 100)} %`)
+  return `Speedtest by Ookla open data, ${esc(c.quarter)} (CC BY-NC-SA 4.0): phones on every network, mostly off the train, within ~600 m of ${pct(c.samples_with_tests)} of the route. `
+    + `Median phone download ${c.median_ookla_down_mbps ?? '–'} Mbps; the model's best network here ${c.median_model_best_mbps ?? '–'} Mbps. `
+    + (c.section_rank_correlation != null ? `Over ${c.sections} sections of ${c.section_km} km the two agree on which are slower with a rank correlation of ${c.section_rank_correlation.toFixed(2)}, and ${pct(c.slowest_fifth_overlap)} of the slowest fifth by phone tests is also in the model's slowest fifth. ` : '')
+    + 'A check only: it does not change the predictions.'
+}
+
 function renderSources(store: Store) {
   const m = store.state.data.meta
   const live = (flag: boolean, liveLabel = 'live', synthLabel = 'synthetic') => `<em class="${flag ? 'live' : 'synth'}">${flag ? liveLabel : synthLabel}</em>`
@@ -249,9 +257,11 @@ function renderSources(store: Store) {
     ['Satcom', false, `Predictive obstruction model (${esc(m.providers.find(p => p.type === 'satcom')?.terminal ?? 'performance')} terminal). No public route-level Starlink RF telemetry exists; confidence capped at 0.35 until terminal telemetry is ingested.`, 'predictive'],
     ['Calibration', !!m.calibration, calibrationText(m.calibration), m.calibration ? undefined : 'none'],
     ...(m.measured_corrections ? [['Measured corrections', true, correctionsText(m), 'measured'] as [string, boolean, string, string]] : []),
+    ...(m.timetable?.train ? [['Timetable', true, `${esc(m.timetable.route ?? 'Train')} ${esc(m.timetable.train)} from the operator's GTFS feed${m.timetable.feed_version ? ` (version ${esc(m.timetable.feed_version)})` : ''}: real calling points and times; stations it doesn't call at are passed at line speed.`] as [string, boolean, string]] : []),
+    ...(m.ookla_check ? [['Phone speed tests (check)', true, ooklaText(m.ookla_check), 'check'] as [string, boolean, string, string]] : []),
   ] as [string, boolean, string, string?][]
   let h = `<div class="src-list">`
-  for (const [title, ok, text, alt] of items) h += `<div class="src"><h5>${title}${live(ok, title === 'Calibration' ? 'calibrated' : title === 'Measured corrections' ? 'measured' : 'live', alt ?? 'synthetic')}</h5><p>${text}</p></div>`
+  for (const [title, ok, text, alt] of items) h += `<div class="src"><h5>${title}${live(ok, title === 'Calibration' ? 'calibrated' : title === 'Measured corrections' ? 'measured' : title.endsWith('(check)') ? 'check' : 'live', alt ?? 'synthetic')}</h5><p>${text}</p></div>`
   h += `<div class="src"><h5>Model ${esc(m.model_version)}</h5><p>${m.n_samples.toLocaleString()} samples at ${m.route.sample_spacing_m} m · ${(m.length_m / 1000).toFixed(1)} km · scenario switching runs the same link-manager and Wi-Fi model in the browser.</p></div>`
   if (m.warnings?.length) h += `<div class="src"><h5>Warnings</h5><p>${m.warnings.map(esc).join('<br>')}</p></div>`
   h += `</div>`

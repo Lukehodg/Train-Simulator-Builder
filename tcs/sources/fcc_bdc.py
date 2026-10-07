@@ -89,13 +89,12 @@ def classify(row: dict) -> tuple[str | None, str]:
 
 
 def _file_type_rank(row: dict) -> int:
-    """Lower is better: the operator's own coverage polygons before the hexagon summaries, GeoPackage first."""
+    """Lower is better: the operator's own coverage polygons (GeoPackage, then shapefile, then file geodatabase), then
+    the hexagon files (H3 cells, as polygons or as a CSV of cell ids); 9 = unusable."""
     t = (str(row.get("file_type", "")) + " " + str(row.get("file_name", ""))).lower()
-    fmt = 0 if "gpkg" in t or "geopackage" in t else 1 if "shp" in t or "shape" in t else 2 if "gdb" in t else 9
-    if fmt == 9:
-        return 9
-    sub = str(row.get("subcategory", "")).lower()
-    return fmt + (3 if "hexagon" in sub else 0)
+    hexagon = "hexagon" in str(row.get("subcategory", "")).lower()
+    fmt = 0 if "gpkg" in t or "geopackage" in t else 1 if "shp" in t or "shape" in t else 2 if "gdb" in t else 3 if hexagon and "csv" in t else 9
+    return 9 if fmt == 9 else fmt + (4 if hexagon else 0)
 
 
 def _download(settings, raw_dir: Path, row: dict) -> Path:
@@ -116,18 +115,53 @@ def _download(settings, raw_dir: Path, row: dict) -> Path:
 
 
 def _clip(path: Path, bbox: tuple[float, float, float, float]):
+    """The part of a coverage file inside bbox: a GeoDataFrame of polygons, or a DataFrame with an `h3` column of cell ids."""
     import geopandas as gpd
     from shapely.geometry import box
 
     with zipfile.ZipFile(path) as z:
-        inner = [n for n in z.namelist() if n.lower().endswith((".gpkg", ".shp"))]
+        names = z.namelist()
+        inner = [n for n in names if n.lower().endswith((".gpkg", ".shp"))]
+        csvs = [n for n in names if n.lower().endswith(".csv")]
+        if not inner and csvs:
+            return _clip_h3(pd.read_csv(z.open(csvs[0]), dtype=str), bbox)
     if not inner:
-        raise SourceUnavailable(f"{path.name} holds no GeoPackage or shapefile")
+        raise SourceUnavailable(f"{path.name} holds no GeoPackage, shapefile or hexagon CSV ({', '.join(names[:5])})")
     mask = gpd.GeoSeries([box(*bbox)], crs=4326)
     gdf = gpd.read_file(f"zip://{path.as_posix()}!{inner[0]}", bbox=mask)
     if gdf.crs is None:
         gdf = gdf.set_crs(4326)
     return gdf.to_crs(4326)[["geometry"]]
+
+
+def _clip_h3(df: pd.DataFrame, bbox: tuple[float, float, float, float]) -> pd.DataFrame:
+    import h3
+
+    col = next((c for c in df.columns if "h3" in c.lower()), None)
+    if col is None:
+        col = next((c for c in df.columns if df[c].astype(str).str.fullmatch(r"[0-9a-f]{15}").mean() > 0.9), None)
+    if col is None:
+        raise SourceUnavailable(f"hexagon CSV has no H3 cell column ({', '.join(df.columns[:8])})")
+    ids = df[col].dropna().astype(str).str.lower().unique()
+    ll = np.array([h3.cell_to_latlng(c) for c in ids])
+    lon0, lat0, lon1, lat1 = bbox
+    keep = (ll[:, 1] >= lon0) & (ll[:, 1] <= lon1) & (ll[:, 0] >= lat0) & (ll[:, 0] <= lat1)
+    return pd.DataFrame({"h3": ids[keep]})
+
+
+def _hits(clip, lon: np.ndarray, lat: np.ndarray, pts) -> np.ndarray:
+    """Indices of the samples inside a clipped coverage file."""
+    import geopandas as gpd
+
+    if not len(clip):
+        return np.array([], dtype=int)
+    if "h3" in clip.columns:
+        import h3
+
+        res = h3.get_resolution(str(clip["h3"].iloc[0]))
+        cells = np.array([h3.latlng_to_cell(a, o, res) for a, o in zip(lat, lon)])
+        return np.flatnonzero(np.isin(cells, clip["h3"].to_numpy()))
+    return np.asarray(gpd.sjoin(pts, clip, predicate="within", how="inner").index.unique(), dtype=int)
 
 
 def coverage_flags(settings, samples: pd.DataFrame, raw_dir: Path) -> dict[str, dict[str, np.ndarray]]:
@@ -163,20 +197,23 @@ def coverage_flags(settings, samples: pd.DataFrame, raw_dir: Path) -> dict[str, 
                 if k not in best or _file_type_rank(r) < _file_type_rank(best[k]):
                     best[k] = r
             if not best and rows:
-                console.log(f"[yellow]FCC BDC: no usable file for {op['name']} in {st}; first listed: {json.dumps(rows[0])[:300]}")
+                kinds = sorted({(str(r.get("subcategory")), str(r.get("file_type")), str(r.get("technology_code_desc")), str(r.get("file_name"))[:60]) for r in rows})
+                console.log(f"[yellow]FCC BDC: no usable file for {op['name']} in {st}; listed: {kinds[:8]}")
             for k, r in best.items():
                 clip = clips / f"{as_of}_{r.get('file_id')}.parquet"
                 if clip.exists():
-                    gdf = gpd.read_parquet(clip)
+                    c = pd.read_parquet(clip, columns=None)
+                    if "h3" not in c.columns:
+                        c = gpd.read_parquet(clip)
                 else:
                     z = _download(settings, raw_dir.parent / "shared", r)
-                    gdf = _clip(z, bbox)
-                    gdf.to_parquet(clip)
+                    c = _clip(z, bbox)
+                    c.to_parquet(clip)
                     z.unlink(missing_ok=True)          # keep only the corridor clip
-                if len(gdf):
-                    hit = gpd.sjoin(pts, gdf, predicate="within", how="inner").index.unique()
-                    flags[k][np.asarray(hit, dtype=int)] = True
+                flags[k][_hits(c, lon, lat, pts)] = True
                 found += 1
+            if best:
+                console.log(f"FCC BDC {st} {op['name']}: " + "; ".join(f"{k} <- {r.get('subcategory')} {r.get('file_type')} {str(r.get('file_name'))[:70]}" for k, r in sorted(best.items())))
         if found:
             out[op["id"]] = flags
             console.log(f"FCC BDC {as_of}: {op['name']} in-vehicle 4G on {flags['invehicle_4g'].mean():.0%} of the route, "
