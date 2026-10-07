@@ -101,8 +101,9 @@ def _file_type_rank(row: dict) -> int:
 
 
 def _env_values(v: pd.Series) -> np.ndarray:
-    """'invehicle' / 'stationary' per row from an environment column: text, or the BDC code (0 outdoor stationary,
-    1 in-vehicle mobile)."""
+    """'invehicle' / 'stationary' per row from an environment column: text, or the BDC code (0 = outdoor stationary
+    only, 1 = in-vehicle mobile and outdoor stationary). Polygons of the two codes don't overlap, so 'stationary'
+    flags mark where only outdoor coverage is filed."""
     t = v.astype(str).str.lower().str.strip()
     veh = t.str.contains("vehicle") | t.isin(["1", "1.0", "invehicle", "in-vehicle"])
     return np.where(veh, "invehicle", "stationary")
@@ -245,7 +246,7 @@ def coverage_flags(settings, samples: pd.DataFrame, raw_dir: Path) -> dict[str, 
         if found:
             out[op["id"]] = flags
             console.log(f"FCC BDC {as_of}: {op['name']} in-vehicle 4G on {flags['invehicle_4g'].mean():.0%} of the route, "
-                        f"5G on {flags['invehicle_5g'].mean():.0%}; stationary 4G on {flags['stationary_4g'].mean():.0%}")
+                        f"5G on {flags['invehicle_5g'].mean():.0%}; outdoor-only 4G on {flags['stationary_4g'].mean():.0%}")
     if not out:
         raise SourceUnavailable("FCC BDC had no coverage files for these networks and states")
     return out
