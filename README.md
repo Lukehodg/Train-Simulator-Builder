@@ -91,7 +91,8 @@ multi-track stations route correctly (mileages come out within ~1 % of the publi
 ### United States
 
 A route file with `country: US` (first: `nec_was_bos`, the Acela on the Northeast Corridor, Washington → Boston) runs
-on the US country profile in `config/countries/US/` instead of the GB defaults; GB routes are unaffected. What changes:
+on the US country profile in `config/countries/US/` instead of the GB defaults; GB routes are unaffected. In the viewer, the UK / USA switch beside the route list changes region (it opens the route last viewed there);
+the route list shows that region's routes, and `?region=us` opens the US directly. UK stays the default. What changes:
 
 | Input | GB | US |
 |---|---|---|
