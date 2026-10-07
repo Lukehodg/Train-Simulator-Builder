@@ -20,7 +20,7 @@ def test_us_profile_replaces_gb_inputs():
     s = load_settings(offline=True, route_id=US_ROUTE)
     assert s.country == "US" and not s.is_gb
     assert [op["id"] for op in s.operators] == ["att", "verizon", "tmobile"]
-    assert s.terrain["source"] == "copernicus_glo30" and s.terrain["lidar"]["enabled"] is False
+    assert s.terrain["source"] == "copernicus_glo30" and s.terrain["lidar"]["source"] == "usgs_3dep"
     assert s.sim["cellular"]["national_calibration"] is None and s.sim["cellular"]["measured_corrections"] is None
     assert s.sim["presets"]["edge_rail_fleet_connect"]["fitted_networks"] == ["att", "verizon", "tmobile"]
     assert s.sim["presets"]["edge_rail_fleet_connect"]["policy"] == "PACKET_BONDING"      # the rest of the preset is kept
@@ -258,3 +258,28 @@ def test_fcc_hexagon_csv_files_flag_the_samples_inside(tmp_path):
     assert list(_hits(clip, lon, lat, None)) == [0]
     row = {"subcategory": "Hexagon Coverage", "file_type": "csv", "file_name": "x.csv"}
     assert _file_type_rank(row) < 9 and _file_type_rank({"subcategory": "Raw Coverage", "file_type": "gpkg"}) < _file_type_rank(row)
+
+
+def test_fcc_files_split_by_their_environment_column(tmp_path):
+    import zipfile
+
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    from tcs.sources.fcc_bdc import _clip, _file_type_rank, _hits, classify
+
+    g = gpd.GeoDataFrame({"environment": [0, 1]}, geometry=[box(-74.1, 40.7, -73.9, 40.8), box(-74.0, 40.74, -73.98, 40.76)], crs=4326)
+    g.to_file(tmp_path / "cov.gpkg", driver="GPKG")
+    z = tmp_path / "raw.zip"
+    with zipfile.ZipFile(z, "w") as f:
+        f.write(tmp_path / "cov.gpkg", "bdc_36_130077_4GLTE_mobile_broadband_D25.gpkg")
+    clip = _clip(z, (-75.0, 40.0, -73.0, 41.0))
+    lon, lat = np.array([-73.99, -73.95]), np.array([40.75, 40.75])
+    pts = gpd.GeoDataFrame(geometry=gpd.points_from_xy(lon, lat), crs=4326)
+    assert list(_hits(clip[clip["env"] == "invehicle"], lon, lat, pts)) == [0]
+    assert sorted(_hits(clip[clip["env"] == "stationary"], lon, lat, pts)) == [0, 1]
+    raw = {"subcategory": "Raw Coverage", "file_type": "gis", "file_name": "bdc_11_130077_4GLTE_mobile_broadband_D25_29sep2026"}
+    hexa = {"subcategory": "Hexagon Coverage", "file_type": "gis", "file_name": "bdc_11_130077_4GLTE_mobile_broadband_h3_D25_29sep2026"}
+    assert _file_type_rank(raw) < _file_type_rank(hexa) < 9
+    assert classify({"technology_code": "500", "file_name": "bdc_11_130077_5GNR_35_3_mobile_broadband_D25"})[0] is None
+    assert classify({"technology_code": "500", "file_name": "bdc_11_130077_5GNR_7_1_mobile_broadband_D25"})[0] == "5G"

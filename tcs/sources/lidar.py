@@ -526,3 +526,52 @@ def corridor_features(x: np.ndarray, y: np.ndarray, bearing_deg: np.ndarray, on_
         bad = ok & np.isfinite(med) & (np.abs(rl - med) > 3.0) & ~on_bridge
         out["lidar_ok"][bad] = False
     return out
+
+
+# ---------------------------------------------------------------- United States
+USGS_3DEP = "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage"
+
+
+class Usgs3dep:
+    """US bare-earth elevation from the USGS 3D Elevation Program (keyless): the national best-available mosaic, which
+    is lidar-derived at 1 m wherever 3DEP lidar has been flown (all of the Northeast Corridor), read at 2 m in the
+    route's own grid. There is no national first-return surface, so the 'dsm' layer is the bare earth too: cutting
+    walls, embankments and the ground skyline are seen, trees and buildings are not (the canopy model still applies).
+    Same interface as Lidar."""
+
+    name = "usgs_3dep"
+    has_surface = False
+
+    def __init__(self, epsg: int, offline: bool = False):
+        if offline:
+            raise SourceUnavailable("3DEP needs the network")
+        self.epsg = epsg
+        self.http = _Http()
+        self._last: dict[int, tuple[tuple, Grid]] = {}
+        self._lock = threading.Lock()
+
+    def read(self, bbox: tuple[float, float, float, float], layer: str) -> tuple[Grid, str | None]:
+        tid = threading.get_ident()
+        with self._lock:
+            hit = self._last.get(tid)
+        if hit is not None and hit[0] == bbox:              # 'dsm' right after 'dtm' for the same window: one request
+            g = hit[1]
+            return Grid(g.x0, g.y1, g.arr.copy(), g.res, g.failed), (self.name if g.missing() < 1.0 else None)
+        g = Grid.blank(bbox)
+        h, w = g.arr.shape
+        params = {"bbox": ",".join(f"{v:.1f}" for v in bbox), "bboxSR": self.epsg, "imageSR": self.epsg, "size": f"{w},{h}", "format": "tiff",
+                  "pixelType": "F32", "noDataInterpretation": "esriNoDataMatchAny", "interpolation": "RSP_BilinearInterpolation", "f": "image"}
+        try:
+            r = self.http.session.get(USGS_3DEP, params=params, timeout=120)
+            got = _read_tiff(r.content) if r.ok else None
+        except requests.RequestException:
+            got = None
+        if got is None:
+            g.failed = True
+        else:
+            a, left, top, _ = got
+            if a.shape == g.arr.shape:
+                g.place(a, left, top)
+        with self._lock:
+            self._last[tid] = (bbox, g)
+        return Grid(g.x0, g.y1, g.arr.copy(), g.res, g.failed), (self.name if g.missing() < 1.0 else None)

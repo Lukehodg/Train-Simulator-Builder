@@ -77,24 +77,45 @@ def list_files(settings, raw_dir: Path, as_of: str, provider_id: str, state_fips
     return mine
 
 
+ENV_RE = re.compile(r"in[\s_-]?vehicle|vehicle|mobile[\s_-]?env")
+
+
 def classify(row: dict) -> tuple[str | None, str]:
-    """(technology '4G'/'5G' or None, environment 'invehicle'/'stationary') for a listed file, from its fields and name."""
+    """(technology '4G'/'5G' or None, environment 'invehicle'/'stationary') for a listed file, from its fields and name.
+    Most listings carry both environments in one file; coverage_flags then reads the environment inside it."""
     text = " ".join(str(v) for v in row.values()).lower()
     code = str(row.get("technology_code", ""))
     tech = "5G" if code == "500" or "5g" in text else "4G" if code == "400" or "4g" in text or "lte" in text else None
-    if tech == "5G" and re.search(r"35\s*/\s*3", text):
+    if tech == "5G" and re.search(r"35\s*[/_]\s*3(?!\d)", text):
         tech = None                           # 7/1 coverage already contains 35/3
-    env = "invehicle" if re.search(r"in[\s_-]?vehicle|mobile[\s_-]?env", text) else "stationary"
+    env = "invehicle" if ENV_RE.search(text) else "stationary"
     return tech, env
 
 
 def _file_type_rank(row: dict) -> int:
-    """Lower is better: the operator's own coverage polygons (GeoPackage, then shapefile, then file geodatabase), then
-    the hexagon files (H3 cells, as polygons or as a CSV of cell ids); 9 = unusable."""
+    """Lower is better: the operator's own coverage polygons, then the hexagon files (H3 cells); 9 = unusable."""
     t = (str(row.get("file_type", "")) + " " + str(row.get("file_name", ""))).lower()
-    hexagon = "hexagon" in str(row.get("subcategory", "")).lower()
-    fmt = 0 if "gpkg" in t or "geopackage" in t else 1 if "shp" in t or "shape" in t else 2 if "gdb" in t else 3 if hexagon and "csv" in t else 9
+    hexagon = "hexagon" in str(row.get("subcategory", "")).lower() or "_h3_" in t
+    fmt = 0 if any(k in t for k in ("gis", "gpkg", "geopackage", "shp", "shape", "gdb")) else 1 if "csv" in t else 9
     return 9 if fmt == 9 else fmt + (4 if hexagon else 0)
+
+
+def _env_values(v: pd.Series) -> np.ndarray:
+    """'invehicle' / 'stationary' per row from an environment column: text, or the BDC code (0 outdoor stationary,
+    1 in-vehicle mobile)."""
+    t = v.astype(str).str.lower().str.strip()
+    veh = t.str.contains("vehicle") | t.isin(["1", "1.0", "invehicle", "in-vehicle"])
+    return np.where(veh, "invehicle", "stationary")
+
+
+def _with_env(df: pd.DataFrame, inner_name: str) -> pd.DataFrame:
+    col = next((c for c in df.columns if c.lower() in ("environment", "env", "mobile_env", "environment_type") or "environ" in c.lower()), None)
+    if col is not None:
+        df["env"] = _env_values(df[col])
+        console.log(f"[dim]FCC BDC {inner_name}: environment column {col!r}: {df[col].astype(str).value_counts().head(4).to_dict()}")
+    else:
+        df["env"] = "invehicle" if ENV_RE.search(inner_name.lower()) else "stationary"
+    return df
 
 
 def _download(settings, raw_dir: Path, row: dict) -> Path:
@@ -115,7 +136,8 @@ def _download(settings, raw_dir: Path, row: dict) -> Path:
 
 
 def _clip(path: Path, bbox: tuple[float, float, float, float]):
-    """The part of a coverage file inside bbox: a GeoDataFrame of polygons, or a DataFrame with an `h3` column of cell ids."""
+    """The part of a coverage file inside bbox, with an `env` column ('invehicle' / 'stationary'): polygons (every
+    GeoPackage / shapefile layer in the zip), or a DataFrame with an `h3` column of cell ids."""
     import geopandas as gpd
     from shapely.geometry import box
 
@@ -124,14 +146,18 @@ def _clip(path: Path, bbox: tuple[float, float, float, float]):
         inner = [n for n in names if n.lower().endswith((".gpkg", ".shp"))]
         csvs = [n for n in names if n.lower().endswith(".csv")]
         if not inner and csvs:
-            return _clip_h3(pd.read_csv(z.open(csvs[0]), dtype=str), bbox)
+            return pd.concat([_with_env(_clip_h3(pd.read_csv(z.open(n), dtype=str), bbox), n) for n in csvs], ignore_index=True)
     if not inner:
         raise SourceUnavailable(f"{path.name} holds no GeoPackage, shapefile or hexagon CSV ({', '.join(names[:5])})")
     mask = gpd.GeoSeries([box(*bbox)], crs=4326)
-    gdf = gpd.read_file(f"zip://{path.as_posix()}!{inner[0]}", bbox=mask)
-    if gdf.crs is None:
-        gdf = gdf.set_crs(4326)
-    return gdf.to_crs(4326)[["geometry"]]
+    parts = []
+    for n in inner:
+        g = gpd.read_file(f"zip://{path.as_posix()}!{n}", bbox=mask)
+        if g.crs is None:
+            g = g.set_crs(4326)
+        g = _with_env(g.to_crs(4326), n)
+        parts.append(g[["env", "geometry"]])
+    return gpd.GeoDataFrame(pd.concat(parts, ignore_index=True), geometry="geometry", crs=4326)
 
 
 def _clip_h3(df: pd.DataFrame, bbox: tuple[float, float, float, float]) -> pd.DataFrame:
@@ -142,11 +168,12 @@ def _clip_h3(df: pd.DataFrame, bbox: tuple[float, float, float, float]) -> pd.Da
         col = next((c for c in df.columns if df[c].astype(str).str.fullmatch(r"[0-9a-f]{15}").mean() > 0.9), None)
     if col is None:
         raise SourceUnavailable(f"hexagon CSV has no H3 cell column ({', '.join(df.columns[:8])})")
-    ids = df[col].dropna().astype(str).str.lower().unique()
-    ll = np.array([h3.cell_to_latlng(c) for c in ids])
+    df = df.dropna(subset=[col]).copy()
+    df["h3"] = df[col].astype(str).str.lower()
+    ll = np.array([h3.cell_to_latlng(c) for c in df["h3"]]) if len(df) else np.zeros((0, 2))
     lon0, lat0, lon1, lat1 = bbox
-    keep = (ll[:, 1] >= lon0) & (ll[:, 1] <= lon1) & (ll[:, 0] >= lat0) & (ll[:, 0] <= lat1)
-    return pd.DataFrame({"h3": ids[keep]})
+    keep = (ll[:, 1] >= lon0) & (ll[:, 1] <= lon1) & (ll[:, 0] >= lat0) & (ll[:, 0] <= lat1) if len(df) else np.zeros(0, bool)
+    return df.loc[keep].drop(columns=[col] if col != "h3" else []).reset_index(drop=True)
 
 
 def _hits(clip, lon: np.ndarray, lat: np.ndarray, pts) -> np.ndarray:
@@ -188,21 +215,20 @@ def coverage_flags(settings, samples: pd.DataFrame, raw_dir: Path) -> dict[str, 
         found = 0
         for st in states:
             rows = list_files(settings, raw_dir, as_of, pid, FIPS[st])
-            best: dict[str, dict] = {}
+            best: dict[str, dict] = {}                # one file per technology: each holds both environments
             for r in rows:
-                tech, env = classify(r)
+                tech, _ = classify(r)
                 if tech is None or _file_type_rank(r) >= 9:
                     continue
-                k = f"{env}_{tech.lower()}"
-                if k not in best or _file_type_rank(r) < _file_type_rank(best[k]):
-                    best[k] = r
+                if tech not in best or _file_type_rank(r) < _file_type_rank(best[tech]):
+                    best[tech] = r
             if not best and rows:
                 kinds = sorted({(str(r.get("subcategory")), str(r.get("file_type")), str(r.get("technology_code_desc")), str(r.get("file_name"))[:60]) for r in rows})
                 console.log(f"[yellow]FCC BDC: no usable file for {op['name']} in {st}; listed: {kinds[:8]}")
-            for k, r in best.items():
-                clip = clips / f"{as_of}_{r.get('file_id')}.parquet"
+            for tech, r in best.items():
+                clip = clips / f"{as_of}_{r.get('file_id')}_v2.parquet"
                 if clip.exists():
-                    c = pd.read_parquet(clip, columns=None)
+                    c = pd.read_parquet(clip)
                     if "h3" not in c.columns:
                         c = gpd.read_parquet(clip)
                 else:
@@ -210,10 +236,12 @@ def coverage_flags(settings, samples: pd.DataFrame, raw_dir: Path) -> dict[str, 
                     c = _clip(z, bbox)
                     c.to_parquet(clip)
                     z.unlink(missing_ok=True)          # keep only the corridor clip
-                flags[k][_hits(c, lon, lat, pts)] = True
+                for env in ("invehicle", "stationary"):
+                    part = c[c["env"] == env]
+                    flags[f"{env}_{tech.lower()}"][_hits(part, lon, lat, pts)] = True
                 found += 1
             if best:
-                console.log(f"FCC BDC {st} {op['name']}: " + "; ".join(f"{k} <- {r.get('subcategory')} {r.get('file_type')} {str(r.get('file_name'))[:70]}" for k, r in sorted(best.items())))
+                console.log(f"FCC BDC {st} {op['name']}: " + "; ".join(f"{k} <- {r.get('subcategory')} {str(r.get('file_name'))[:70]}" for k, r in sorted(best.items())))
         if found:
             out[op["id"]] = flags
             console.log(f"FCC BDC {as_of}: {op['name']} in-vehicle 4G on {flags['invehicle_4g'].mean():.0%} of the route, "
