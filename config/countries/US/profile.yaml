@@ -14,6 +14,9 @@ stations: ntad_amtrak
 # estimated from how close its OpenCellID sites are to the track (tcs/sources/cell_prior.py). Uncalibrated: no US
 # field measurements have been fitted yet.
 coverage_prior: opencellid_sites
+# The operators' own coverage filings with the FCC (National Broadband Map), when FCC_BDC_USERNAME and FCC_BDC_TOKEN
+# are set: they replace the site-distance estimate for every network that has them (tcs/sources/fcc_bdc.py).
+fcc_prior: true
 
 terrain:
   source: copernicus_glo30       # OS Terrain 50 and the open LiDAR surveys are GB-only
@@ -24,6 +27,7 @@ simulation:
     national_calibration: null   # config/calibration.yaml is fitted to Network Rail's measurement trains (GB)
     measured_corrections: null   # config/route_corrections.parquet: GB scanner-train corrections
   confidence:
+    fcc_prior: 0.55              # operators' FCC filings, as GB's Ofcom prior (+0.10 with cells, as Ofcom)
     site_prior: 0.40             # cell-site-distance prior, uncalibrated: the bottom of the "prediction with partial
                                  # infrastructure support" band (GB's Ofcom prior is 0.55, 0.65 with cells)
   presets:

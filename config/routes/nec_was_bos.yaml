@@ -12,6 +12,7 @@ route:
   geometry:
     source: osm                 # stations from NTAD, track routed through OpenStreetMap
     ntad_route: Acela           # NTAD Amtrak Routes line used when Overpass is unavailable
+  fcc_states: [DC, MD, DE, PA, NJ, NY, CT, RI, MA]   # states the line crosses: FCC coverage files are per state
   stations:
   - {crs: WAS, name: Washington Union Station, stop: true, trainshed: true}
   - {crs: BWI, name: BWI Marshall Airport, stop: true, trainshed: false}

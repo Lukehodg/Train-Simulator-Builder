@@ -136,3 +136,24 @@ def test_index_and_catalogue_carry_the_country(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "ROOT", tmp_path)
     idx = json.loads(cli.write_index().read_text())
     assert idx["routes"][0]["country"] == "US"
+
+
+def test_fcc_files_are_classified_by_technology_and_environment():
+    from tcs.sources.fcc_bdc import classify
+
+    assert classify({"technology_code": "400", "file_name": "bdc_36_130077_4GLTE_mobile_broadband_invehicle.zip"}) == ("4G", "invehicle")
+    assert classify({"technology_code": "500", "file_name": "bdc_36_130077_5GNR_7_1_outdoor_stationary.zip"}) == ("5G", "stationary")
+    assert classify({"technology_code": "500", "file_name": "bdc_36_130077_5GNR_35/3_in-vehicle.zip"})[0] is None   # 7/1 contains 35/3
+
+
+def test_fcc_prior_scores_in_vehicle_highest(monkeypatch):
+    from tcs.sources import fcc_bdc
+
+    s = load_settings(offline=True, route_id=US_ROUTE)
+    samples = pd.DataFrame({"sample_id": np.arange(4)})
+    t, f = np.array([True, False, False, False]), np.array([False, True, False, False])
+    flags = {"att": {"invehicle_5g": t, "invehicle_4g": t | f, "stationary_5g": t, "stationary_4g": t | f | np.array([0, 0, 1, 0], bool)}}
+    monkeypatch.setattr(fcc_bdc, "coverage_flags", lambda *a, **k: flags)
+    p = fcc_bdc.fcc_prior(s, samples, None)["prior_score"].to_numpy()
+    assert p[0] > p[1] > p[2] > p[3] and set(fcc_bdc.fcc_prior(s, samples, None)["source"]) == {"fcc_bdc"}
+    assert live_coverage_share({"coverage_share": {"fcc_bdc": 0.95}}) >= LIVE_COVERAGE_MIN

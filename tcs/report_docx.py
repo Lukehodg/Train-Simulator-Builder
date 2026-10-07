@@ -856,7 +856,9 @@ class _Report:
         }.get(m.get("geometry_source"), "The railway centreline is an approximate line through the stations, a stand-in used because the "
                                          "OpenStreetMap track was not available for this build, so tunnel and cutting positions are approximate.")
         sites_prior = "opencellid_sites" in (m.get("coverage_sources") or [])
-        coverage = {"live": "an estimate of each network's coverage from how far the track is from its nearest OpenCellID sites "
+        fcc = "fcc_bdc" in (m.get("coverage_sources") or [])
+        coverage = {"live": "the operator's coverage filing with the FCC (National Broadband Map), in-vehicle coverage scoring above "
+                            "stationary-only" if fcc else "an estimate of each network's coverage from how far the track is from its nearest OpenCellID sites "
                             "(not an operator prediction, and not yet calibrated)" if sites_prior else "the operator's predicted coverage (Ofcom)",
                     "partly stand-in": "the operator's predicted coverage (Ofcom) where it was available and a neutral stand-in elsewhere",
                     }.get(status.get("Mobile coverage", ""), "a stand-in coverage estimate, as "

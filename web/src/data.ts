@@ -91,7 +91,7 @@ export const LIVE_COVERAGE_MIN = 0.9
 
 /** Live coverage prior sources, by prefix: Ofcom (API or Connected Nations) in GB, the OpenCellID site-distance
  *  estimate in the US (tcs/report.py LIVE_PRIOR_PREFIXES). */
-const LIVE_PRIOR_PREFIXES = ['ofcom', 'opencellid_sites']
+const LIVE_PRIOR_PREFIXES = ['ofcom', 'fcc_bdc', 'opencellid_sites']
 const livePrior = (s: string) => LIVE_PRIOR_PREFIXES.some(p => s.startsWith(p))
 
 /** Share of the route's coverage prior that comes from a live source. Bundles built before the share was recorded

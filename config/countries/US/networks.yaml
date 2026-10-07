@@ -6,6 +6,7 @@
 cellular:
   operators:
     - id: att
+      fcc_provider_id: 130077            # FCC Broadband Data Collection provider id
       name: AT&T
       mcc: 310
       mnc: [410]
@@ -14,6 +15,7 @@ cellular:
       aliases: [AT&T Mobility, ATT, FirstNet, Cingular]
       capacity_prior_mbps: {4G: 70, 5G: 180, blend: 110}    # p50 usable throughput at excellent signal, rooftop antenna
     - id: verizon
+      fcc_provider_id: 131425            # FCC Broadband Data Collection provider id
       name: Verizon
       mcc: 311
       mnc: [480]
@@ -24,6 +26,7 @@ cellular:
       aliases: [Verizon Wireless, VZW, Cellco]
       capacity_prior_mbps: {4G: 70, 5G: 220, blend: 130}
     - id: tmobile
+      fcc_provider_id: 130403            # FCC Broadband Data Collection provider id
       name: T-Mobile
       mcc: 310
       mnc: [260]
@@ -53,6 +56,13 @@ site_prior:
   density_radius_km: 5.0         # more sites within this radius: more capacity and fill-in
   density_lift_per_site: 0.01
   density_lift_max: 0.06
+
+# FCC National Broadband Map filings -> prior score (tcs/sources/fcc_bdc.py). A rooftop antenna on a moving train
+# sits between the FCC's two environments, so in-vehicle coverage scores highest. Assumptions until US measurements
+# calibrate them.
+fcc_bdc:
+  as_of: null                    # null = the latest filing round
+  scores: {invehicle_5g: 0.82, invehicle_4g: 0.72, stationary_5g: 0.58, stationary_4g: 0.50, none: 0.10}
 
 fitted_masts:
   file: null                     # masts placed from Network Rail's Global View logs: GB only

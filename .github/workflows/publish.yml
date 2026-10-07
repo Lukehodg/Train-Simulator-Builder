@@ -96,6 +96,8 @@ jobs:
         env:
           OFCOM_API_KEY: ${{ secrets.OFCOM_API_KEY }}
           OPENCELLID_TOKEN: ${{ secrets.OPENCELLID_TOKEN }}
+          FCC_BDC_USERNAME: ${{ secrets.FCC_BDC_USERNAME }}   # US routes: FCC National Broadband Map (optional)
+          FCC_BDC_TOKEN: ${{ secrets.FCC_BDC_TOKEN }}
         run: |
           if [ -n "$ROUTES" ]; then tcs build-all --only "$ROUTES"; else tcs build-all; fi
 
@@ -129,7 +131,7 @@ jobs:
           for path in sorted(glob.glob("web/public/data/*/meta.json")):
               m = json.load(open(path, encoding="utf-8"))
               share = live_coverage_share(m)
-              cov = f"{share:.0%} {'Ofcom' if is_gb(m) else 'OpenCellID sites'} ({', '.join(m.get('coverage_sources') or []) or '-'})"
+              cov = f"{share:.0%} {'Ofcom' if is_gb(m) else 'FCC / OpenCellID sites'} ({', '.join(m.get('coverage_sources') or []) or '-'})"
               legs = m.get("geometry_straight_legs") or []   # OSM legs with no rail path, drawn straight
               track = f"{m.get('geometry_source')}" + (f" (straight: {', '.join(legs)})" if legs else "")
               terrain = f"{m.get('terrain_source')}" + (f" + LiDAR {m['lidar_share']:.0%}" if m.get("lidar_share") else "")

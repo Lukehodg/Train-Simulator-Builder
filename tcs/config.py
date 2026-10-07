@@ -154,7 +154,7 @@ def load_settings(config_dir: Path | None = None, offline: bool = False, route_i
         networks=networks,
         starlink=_load_yaml(cfg / "starlink.yaml"),
         sim=sim,
-        env={k: v for k, v in os.environ.items() if k in {"OFCOM_API_KEY", "OPENCELLID_TOKEN", "OS_DATAHUB_KEY", "NROD_USERNAME", "NROD_PASSWORD", "OVERPASS_URL"}},
+        env={k: v for k, v in os.environ.items() if k in {"OFCOM_API_KEY", "OPENCELLID_TOKEN", "OS_DATAHUB_KEY", "NROD_USERNAME", "NROD_PASSWORD", "OVERPASS_URL", "FCC_BDC_USERNAME", "FCC_BDC_TOKEN"}},
         offline=offline,
         report=_load_yaml(cfg / "report.yaml").get("report", {}) if (cfg / "report.yaml").exists() else {},
         country_profile=prof,

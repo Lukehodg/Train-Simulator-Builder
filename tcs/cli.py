@@ -377,6 +377,16 @@ def report_all(only: str | None = typer.Option(None, help="Comma-separated route
         raise typer.Exit(code=1)
 
 
+@app.command("probe-fcc")
+def probe_fcc(provider_id: str = typer.Argument("130077", help="FCC provider id (AT&T 130077, Verizon 131425, T-Mobile 130403)"),
+              state: str = typer.Argument("NY")):
+    """Print what the FCC National Broadband Map API lists for one provider and state (needs FCC_BDC_USERNAME / FCC_BDC_TOKEN)."""
+    from .sources.fcc_bdc import probe
+
+    s = load_settings(route_id="nec_was_bos")
+    console.print_json(json.dumps(probe(s, s.paths()["raw"], provider_id, state), default=str))
+
+
 @app.command("probe-ofcom")
 def probe_ofcom(postcode: str = typer.Argument("N1C4TB")):
     """Print the raw Ofcom mobile coverage payload for a postcode (to confirm field names)."""

@@ -105,9 +105,10 @@ def kpis(rc: pd.DataFrame, samples: pd.DataFrame, spacing_m: float) -> dict:
 
 
 LIVE_COVERAGE_MIN = 0.9       # a route's coverage counts as live when at least this share of it comes from a live prior source
-# Live coverage prior sources, by prefix: Ofcom (API or Connected Nations) in GB; the OpenCellID site-distance estimate
+# Live coverage prior sources, by prefix: Ofcom (API or Connected Nations) in GB; the FCC filings in the US, and the
+# OpenCellID site-distance estimate
 # where a country profile uses it (the US), which is live data but not an operator prediction.
-LIVE_PRIOR_PREFIXES = ("ofcom", "opencellid_sites")
+LIVE_PRIOR_PREFIXES = ("ofcom", "fcc_bdc", "opencellid_sites")
 
 
 def live_coverage_share(meta: dict) -> float:
@@ -605,7 +606,11 @@ def write_xlsx(path: Path, ev, samples: pd.DataFrame, rc: pd.DataFrame, obs: pd.
 
 def _coverage_row(meta: dict) -> tuple[str, str, str]:
     share = live_coverage_share(meta)
-    if "opencellid_sites" in meta.get("coverage_sources", []):
+    srcs = meta.get("coverage_sources", [])
+    if "fcc_bdc" in srcs:
+        what = "Operators' coverage filings, FCC National Broadband Map (in-vehicle and stationary)" + (
+            "; distance to OpenCellID sites for networks without them" if "opencellid_sites" in srcs else "")
+    elif "opencellid_sites" in srcs:
         what = "Estimated from distance to each network's OpenCellID sites (uncalibrated)"
     else:
         what = "Ofcom operator coverage predictions" + (" (with Connected Nations open data)" if "ofcom_connected_nations" in meta.get("coverage_sources", []) else "")

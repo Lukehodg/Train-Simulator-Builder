@@ -1,14 +1,15 @@
 """Coverage prior per (sample, operator), with provenance.
 
 GB: Ofcom API -> Connected Nations -> synthetic. Countries whose profile sets `coverage_prior: opencellid_sites` (the
-US): distance to each network's OpenCellID sites (sources/cell_prior.py) -> synthetic."""
+US): the operators' FCC National Broadband Map filings (sources/fcc_bdc.py, with FCC_BDC_USERNAME / FCC_BDC_TOKEN) ->
+distance to each network's OpenCellID sites (sources/cell_prior.py) -> synthetic."""
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
 from ..config import Settings
-from ..sources import cell_prior, synthetic
+from ..sources import cell_prior, fcc_bdc, synthetic
 from ..sources.base import SourceUnavailable, console
 from ..sources.ofcom_coverage import corridor_postcodes, fetch_connected_nations, fetch_ofcom_api
 from .sample_route import RouteBundle, urban_from_point_density
@@ -80,6 +81,15 @@ def _site_prior(settings: Settings, bundle: RouteBundle, cells: pd.DataFrame | N
         if len(prior):
             console.log(f"coverage prior from OpenCellID site distance: {prior['provider_id'].nunique()} of {len(settings.operators)} networks "
                         "(uncalibrated estimate)")
+    if settings.country_profile.get("fcc_prior") and not settings.offline:
+        # The operators' own FCC filings, where they exist, replace the site-distance estimate network by network.
+        try:
+            fcc = fcc_bdc.fcc_prior(settings, samples, settings.paths()["raw"])
+            keep = prior[~prior["provider_id"].isin(set(fcc["provider_id"]))] if prior is not None and len(prior) else None
+            prior = pd.concat([fcc] + ([keep] if keep is not None and len(keep) else []), ignore_index=True)
+            console.log(f"coverage prior from the FCC National Broadband Map: {fcc['provider_id'].nunique()} of {len(settings.operators)} networks")
+        except SourceUnavailable as exc:
+            console.log(f"[yellow]FCC BDC: {exc}")
     if prior is None or prior.empty:
         console.log("[yellow]coverage prior: synthetic stand-in (flagged, confidence capped)")
         prior = synthetic.synthetic_prior(samples, settings.operators)
