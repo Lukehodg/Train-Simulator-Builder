@@ -283,3 +283,40 @@ def test_fcc_files_split_by_their_environment_column(tmp_path):
     assert _file_type_rank(raw) < _file_type_rank(hexa) < 9
     assert classify({"technology_code": "500", "file_name": "bdc_11_130077_5GNR_35_3_mobile_broadband_D25"})[0] is None
     assert classify({"technology_code": "500", "file_name": "bdc_11_130077_5GNR_7_1_mobile_broadband_D25"})[0] == "5G"
+
+
+def test_ookla_capacity_scale_follows_local_phone_speeds():
+    from tcs.sources import ookla
+
+    n = 400
+    samples = pd.DataFrame({"sample_id": np.arange(n), "distance_m": np.arange(n) * 50.0, "in_tunnel": np.arange(n) >= 380})
+    down = np.select([np.arange(n) < 130, np.arange(n) < 260], [400.0, 200.0], 100.0)   # city, suburbs, rural
+    o = pd.DataFrame({"sample_id": np.arange(n), "ookla_down_mbps": down, "ookla_tests": np.where(np.arange(n) % 50 < 45, 30, 2)})
+    sc = ookla.capacity_scale(samples, o)
+    assert sc[50] > 1.2 and sc[300] < 0.85 and sc.min() >= 0.6 and sc.max() <= 1.6
+    assert np.isfinite(sc).all()
+    assert np.allclose(ookla.capacity_scale(samples, o.assign(ookla_tests=0)), 1.0)   # too few tests anywhere: no change
+
+
+def test_capacity_scale_multiplies_cellular_capacity():
+    from tcs.model.simulate import simulate
+    from tcs.pipeline.join_cells import candidate_cells, corridor_cells, serving_cells
+    from tcs.pipeline.join_coverage import coverage_prior
+    from tcs.pipeline.movement import movement
+    from tcs.pipeline.obstruction import enrich_terrain
+    from tcs.pipeline.sample_route import build_route
+
+    s = load_settings(offline=True, route_id=US_ROUTE)
+    s.route["sample_spacing_m"] = 1000
+    b = build_route(s)
+    b.samples = enrich_terrain(s, b)
+    cells = corridor_cells(s, b, b.samples)
+    prior, b.samples = coverage_prior(s, b, cells=cells)
+    serving = serving_cells(s, b.samples, candidate_cells(s, b.samples, cells))
+    b.samples, _ = movement(s, b.samples, b.stations)
+    base, _ = simulate(s, b.samples, prior, serving)
+    b.samples["capacity_scale"] = np.float32(1.5)
+    scaled, _ = simulate(s, b.samples, prior, serving)
+    c0 = base[base["provider_type"] == "cellular"]["capacity_mbps"].to_numpy()
+    c1 = scaled[scaled["provider_type"] == "cellular"]["capacity_mbps"].to_numpy()
+    assert c0.max() > 0 and np.allclose(c1, 1.5 * c0, rtol=1e-4)

@@ -82,7 +82,7 @@ export function simulate(data: RouteData, sc: Scenario): SimResult {
         const usable = Math.pow(clamp((q - floor) / (1 - floor), 0, 1), expo)
         const speedF = 1 - 0.08 * clamp((data.speed[i] || 0) / 200, 0, 1)
         r.q[i] = q
-        r.cap[i] = prior * usable * speedF * (1 - (1 - h.capacity_factor) * hp) * unitsFactor
+        r.cap[i] = prior * usable * speedF * (1 - (1 - h.capacity_factor) * hp) * unitsFactor * (data.capScale ? data.capScale[i] : 1)
         r.lat[i] = cfg.latency_ms.base + cfg.latency_ms.at_zero_extra * (1 - q) + h.latency_spike_ms * hp
         r.loss[i] = lossTable(q, cfg.packet_loss_pct) + h.packet_loss_pct * hp
         r.avail[i] = q > floor ? 1 : 0

@@ -18,7 +18,7 @@ from .sample_route import RouteBundle
 
 SAMPLE_COLS = ["sample_id", "distance_m", "latitude", "longitude", "elevation_m", "terrain_m", "bearing_deg", "in_tunnel", "tunnel_name",
                "cutting_depth_m", "embankment_height_m", "on_bridge", "canopy_probability", "urban_density", "sky_visibility", "horizon_deg",
-               "lidar", "overhead_fraction", "speed_kph", "sim_seconds", "next_station", "time_to_next_station_s", "station_nearby"]
+               "lidar", "overhead_fraction", "capacity_scale", "speed_kph", "sim_seconds", "next_station", "time_to_next_station_s", "station_nearby"]
 PROVIDER_COLS = ["quality_score", "quality_base", "signal_primary", "signal_secondary", "capacity_mbps", "latency_ms", "packet_loss_pct",
                  "available", "confidence", "reason_code", "serving_cell", "serving_distance_m", "handover", "handover_penalty",
                  "radio_technology", "source_flags", "rsrp_slope", "rsrp_intercept", "measured_correction_db"]

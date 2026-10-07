@@ -99,18 +99,25 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     corr = corrections.for_build(s, b, interim)
     if corr is not None:
         console.log(f"measured corrections: {corr['sample_id'].nunique():,} of {len(b.samples):,} samples on at least one network")
-    obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, policy=policy, corrections=corr)
-    extra = {}
-    if s.country_profile.get("ookla_check"):                 # crowd-sourced phone speeds as a check on an uncalibrated model
+    extra, got = {}, None
+    ocfg = s.country_profile.get("ookla") or {}
+    if ocfg.get("check") or ocfg.get("capacity"):             # crowd-sourced phone speeds (US): a check, and optionally an input
         from .sources import ookla
 
         got = ookla.for_build(s, b.samples, s.paths()["raw"])
         if got is not None:
             b.samples = b.samples.merge(got[0], on="sample_id", how="left")
-            extra["ookla_check"] = ookla.check(b.samples, obs, got[0], got[1])
-            c = extra["ookla_check"]
-            console.log(f"Ookla check: median phone download {c['median_ookla_down_mbps']} Mbps vs model best network {c['median_model_best_mbps']} Mbps; "
-                        f"section rank correlation {c.get('section_rank_correlation')}, slowest-fifth overlap {c.get('slowest_fifth_overlap')}")
+            if ocfg.get("capacity"):
+                b.samples["capacity_scale"] = ookla.capacity_scale(b.samples, got[0], ocfg.get("capacity_scale")).astype("float32")
+                cs = b.samples["capacity_scale"]
+                console.log(f"Ookla capacity scale: {cs.quantile(0.1):.2f} / {cs.median():.2f} / {cs.quantile(0.9):.2f} (10th / median / 90th percentile)")
+            save_bundle(b, interim)                            # `tcs report` re-simulates from these samples
+    obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, policy=policy, corrections=corr)
+    if got is not None:
+        extra["ookla_check"] = ookla.check(b.samples, obs, got[0], got[1]) | {"used_as_input": bool(ocfg.get("capacity"))}
+        c = extra["ookla_check"]
+        console.log(f"Ookla check: median phone download {c['median_ookla_down_mbps']} Mbps vs model best network {c['median_model_best_mbps']} Mbps; "
+                    f"section rank correlation {c.get('section_rank_correlation')}, slowest-fifth overlap {c.get('slowest_fifth_overlap')}")
     written = export_all(s, b, b.samples, stations, cells, obs, rc, prior, extra_meta=extra)
     if copy_to_web:
         dest = ROOT / "web" / "public" / "data" / s.route_id

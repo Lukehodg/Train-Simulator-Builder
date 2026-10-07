@@ -66,6 +66,7 @@ export async function loadRoute(routeId = CONFIG.defaultRoute): Promise<RouteDat
     distance: f64(t, 'distance_m', n), lat: f64(t, 'latitude', n), lon: f64(t, 'longitude', n), elev: f32(t, 'elevation_m', n), terrain: f32(t, 'terrain_m', n),
     bearing: f32(t, 'bearing_deg', n), inTunnel: u8(t, 'in_tunnel', n), tunnelName: str(t, 'tunnel_name', n), cutting: f32(t, 'cutting_depth_m', n),
     canopy: f32(t, 'canopy_probability', n), urban: f32(t, 'urban_density', n), sky: f32(t, 'sky_visibility', n), speed: f32(t, 'speed_kph', n),
+    capScale: t.getChild('capacity_scale') ? f32(t, 'capacity_scale', n).map(x => (Number.isFinite(x) ? x : 1)) : null,
     lidar: u8(t, 'lidar', n), overhead: f32(t, 'overhead_fraction', n).map(x => Number.isNaN(x) ? 0 : x),
     t: f64(t, 'sim_seconds', n), nextStation: str(t, 'next_station', n), ttn: f32(t, 'time_to_next_station_s', n), stationNear: str(t, 'station_nearby', n),
     base: providers,

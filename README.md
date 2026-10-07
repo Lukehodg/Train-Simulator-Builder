@@ -99,8 +99,9 @@ the route list shows that region's routes, and `?region=us` opens the US directl
 | Stations | OSM `ref:crs` | Amtrak codes from the US DOT's NTAD Amtrak Stations layer (keyless) |
 | Track | OSM, routed station to station | OSM the same way; the NTAD Amtrak Routes line (`geometry.ntad_route`) when Overpass is unavailable, with tunnels from the route file's `tunnels` |
 | Networks | EE, O2, Vodafone, Three | AT&T, Verizon, T-Mobile, matched to OpenCellID by their US PLMNs (several MCCs each) |
-| Coverage prior | Ofcom API / Connected Nations by postcode | Distance to each network's OpenCellID sites (`tcs/sources/cell_prior.py`), uncalibrated |
+| Coverage prior | Ofcom API / Connected Nations by postcode | Operators' FCC National Broadband Map filings (in-vehicle / outdoor, 4G / 5G); distance to OpenCellID sites where a network has none, uncalibrated |
 | Terrain | OS Terrain 50 + open LiDAR | Copernicus GLO-30 |
+| Network speed | Calibrated to GB measurement trains | Each network's capacity scaled by local Ookla phone-test speeds (`ookla.capacity` in the US profile), damped and clamped |
 | Timetable | Route file calls | One real Acela from Amtrak's GTFS feed (`timetable.source: gtfs`, keyless, weekly); the route file's calls if the feed can't be read |
 | Calibration | Yellow Train national fit, Global View corrections and masts | None yet: the figures are uncalibrated until US measurements are fitted |
 

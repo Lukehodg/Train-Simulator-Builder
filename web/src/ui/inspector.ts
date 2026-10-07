@@ -230,7 +230,7 @@ function ooklaText(c: NonNullable<Meta['ookla_check']>): string {
   return `Speedtest by Ookla open data, ${esc(c.quarter)} (CC BY-NC-SA 4.0): phones on every network, mostly off the train, within ~600 m of ${pct(c.samples_with_tests)} of the route. `
     + `Median phone download ${c.median_ookla_down_mbps ?? '–'} Mbps; the model's best network here ${c.median_model_best_mbps ?? '–'} Mbps. `
     + (c.section_rank_correlation != null ? `Over ${c.sections} sections of ${c.section_km} km the two agree on which are slower with a rank correlation of ${c.section_rank_correlation.toFixed(2)}, and ${pct(c.slowest_fifth_overlap)} of the slowest fifth by phone tests is also in the model's slowest fifth. ` : '')
-    + 'A check only: it does not change the predictions.'
+    + (c.used_as_input ? 'They also set how fast each network is along the line: capacity is scaled by the local phone speed against the route median (damped, 0.6 to 1.6×), so this comparison is no longer independent.' : 'A check only: it does not change the predictions.')
 }
 
 function renderSources(store: Store) {
@@ -258,7 +258,7 @@ function renderSources(store: Store) {
     ['Calibration', !!m.calibration, calibrationText(m.calibration), m.calibration ? undefined : 'none'],
     ...(m.measured_corrections ? [['Measured corrections', true, correctionsText(m), 'measured'] as [string, boolean, string, string]] : []),
     ...(m.timetable?.train ? [['Timetable', true, `${esc(m.timetable.route ?? 'Train')} ${esc(m.timetable.train)} from the operator's GTFS feed${m.timetable.feed_version ? ` (version ${esc(m.timetable.feed_version)})` : ''}: real calling points and times; stations it doesn't call at are passed at line speed.`] as [string, boolean, string]] : []),
-    ...(m.ookla_check ? [['Phone speed tests (check)', true, ooklaText(m.ookla_check), 'check'] as [string, boolean, string, string]] : []),
+    ...(m.ookla_check ? [[m.ookla_check.used_as_input ? 'Phone speed tests' : 'Phone speed tests (check)', true, ooklaText(m.ookla_check), m.ookla_check.used_as_input ? 'live' : 'check'] as [string, boolean, string, string]] : []),
   ] as [string, boolean, string, string?][]
   let h = `<div class="src-list">`
   for (const [title, ok, text, alt] of items) h += `<div class="src"><h5>${title}${live(ok, title === 'Calibration' ? 'calibrated' : title === 'Measured corrections' ? 'measured' : title.endsWith('(check)') ? 'check' : 'live', alt ?? 'synthetic')}</h5><p>${text}</p></div>`

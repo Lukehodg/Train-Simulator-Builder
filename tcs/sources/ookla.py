@@ -2,9 +2,12 @@
 (registry.opendata.aws/speedtest-global-performance, CC BY-NC-SA 4.0).
 
 All networks are pooled and the tests are mostly handsets indoors or on foot, so this is not a per-network prior and
-not what a train sees. It is used as an independent check on an uncalibrated model: do the stretches where the model
-predicts weak mobile service line up with the tiles where people's phones measure slow? The comparison goes into
-meta.json (`ookla_check`); the model itself is not changed.
+not what a train sees. Two uses, set in the country profile (`ookla`):
+- check: do the stretches where the model predicts slow mobile service line up with the tiles where people's phones
+  measure slow? The comparison goes into meta.json (`ookla_check`).
+- capacity: every network's capacity is scaled by the local phone speed against the route median (damped, clamped):
+  FCC filings say where there is coverage, the phone tests say how fast it is there. Chosen (2026-10-07)
+  while the US model has no train measurements to calibrate it; the check is then no longer independent.
 
 The quarterly file (~185 MB, worldwide) is read once, cut to the route's bounding box, and only that cut is kept
 (data/raw/<route>/ookla/).
@@ -131,6 +134,26 @@ def check(samples: pd.DataFrame, obs: pd.DataFrame, ookla: pd.DataFrame, quarter
         slow_m = sec["model"] <= sec["model"].quantile(0.2)
         out["slowest_fifth_overlap"] = _r((slow_o & slow_m).sum() / max(int(slow_o.sum()), 1), 3)
     return out
+
+
+def capacity_scale(samples: pd.DataFrame, o: pd.DataFrame, cfg: dict | None = None) -> np.ndarray:
+    """Per-sample capacity multiplier from local phone speeds: (local / route median) ** exponent, smoothed along the
+    line and clamped. Damped (exponent < 1) because the tests pool every network and are mostly taken off the train;
+    1.0 where too few tests were taken nearby, and in tunnels (the tests above them are of the street)."""
+    c = {"exponent": 0.5, "min": 0.6, "max": 1.6, "min_tests": 10, "smooth_m": 1500.0, **(cfg or {})}
+    d = samples[["sample_id", "distance_m"] + (["in_tunnel"] if "in_tunnel" in samples else [])].merge(o, on="sample_id", how="left")
+    good = d["ookla_tests"].fillna(0).to_numpy() >= c["min_tests"]
+    if "in_tunnel" in d:
+        good &= ~d["in_tunnel"].fillna(False).to_numpy(bool)
+    down = d["ookla_down_mbps"].to_numpy(float)
+    if good.sum() < 10:
+        return np.ones(len(d))
+    ratio = np.where(good, down / np.nanmedian(down[good]), np.nan)
+    spacing = float(np.median(np.diff(d["distance_m"].to_numpy()))) or 50.0
+    win = max(1, int(round(c["smooth_m"] / spacing)))
+    logr = pd.Series(np.log(ratio)).rolling(win, center=True, min_periods=1).mean().to_numpy()   # NaN where no good tile in the window
+    s = np.exp(c["exponent"] * logr)
+    return np.clip(np.where(np.isfinite(s), s, 1.0), c["min"], c["max"])
 
 
 def _r(v, nd: int = 1):
