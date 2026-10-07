@@ -110,11 +110,14 @@ def along_route(samples: pd.DataFrame, tiles: pd.DataFrame) -> pd.DataFrame:
 
 
 def check(samples: pd.DataFrame, obs: pd.DataFrame, ookla: pd.DataFrame, quarter: str, section_m: float = 5000.0) -> dict:
-    """Model vs Ookla along the route, by section: how often the model's best mobile network and the phones' measured
-    speed agree on which sections are the slow ones (rank correlation), and the medians side by side."""
+    """Model vs Ookla along the route outside tunnels, by section: how often the model's best mobile network and the
+    phones' measured speed agree on which sections are the slow ones (rank correlation), and the medians side by side."""
     cell = obs[obs["provider_type"] == "cellular"] if "provider_type" in obs else obs
     best = cell.assign(c=np.where(cell["available"], cell["capacity_mbps"], 0.0)).groupby("sample_id")["c"].max()
-    df = samples[["sample_id", "distance_m"]].merge(ookla, on="sample_id", how="left")
+    cols = ["sample_id", "distance_m"] + (["in_tunnel"] if "in_tunnel" in samples else [])
+    df = samples[cols].merge(ookla.drop(columns=[c for c in ookla.columns if c in cols and c != "sample_id"]), on="sample_id", how="left")
+    if "in_tunnel" in df:                       # phones above a tunnel test the street, not the tunnel: leave tunnels out
+        df = df[~df["in_tunnel"].fillna(False).astype(bool)]
     df["model_best_mbps"] = df["sample_id"].map(best)
     df["section"] = (df["distance_m"] // section_m).astype(int)
     sec = df.dropna(subset=["ookla_down_mbps"]).groupby("section").agg(ookla=("ookla_down_mbps", "median"), model=("model_best_mbps", "median"),
