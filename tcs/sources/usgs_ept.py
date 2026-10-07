@@ -2,16 +2,22 @@
 near the track: trees, buildings and bridges, which the 3DEP bare-earth service does not have.
 
 Each project is an octree of LAZ tiles in Web Mercator. For a window we read every tile down to a depth whose voxel
-grid is ~1.3 m on the ground (enough for a 2 m surface, far less than the full density), keep the highest point per
-2 m cell (noise classes dropped), and hang the result on the 3DEP bare earth: heights above the project's own ground
-points are added to the 3DEP terrain, so the two vertical datums never have to agree. Tiles are cached on disk and
-shared by every window and route; projects are chosen per window, newest survey first.
+grid is at most ~2.8 m on the ground (enough for a 2 m surface, a small fraction of the full density), keep the highest
+point per 2 m cell (noise classes dropped), and hang the result on the 3DEP bare earth: heights above the project's own
+ground points are added to the 3DEP terrain, so the two vertical datums never have to agree. Projects are chosen per
+window, newest survey first.
+
+Tiles are decoded in memory and never written to disk (the Northeast Corridor alone is ~6 GB of them, more than a CI
+runner can spare); decoded tiles are kept compact (float32 offsets, ~13 bytes a point) in a memory budget, so the
+neighbouring windows that share them read them once. Only the small project and hierarchy files are cached on disk.
 """
 from __future__ import annotations
 
+import io
 import json
 import re
 import threading
+from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
@@ -22,7 +28,8 @@ from .base import USER_AGENT, SourceUnavailable
 
 INDEX = "https://raw.githubusercontent.com/hobuinc/usgs-lidar/master/boundaries/resources.geojson"
 GROUND, NOISE = 2, (7, 18)
-TARGET_RES_M = 1.4                      # deepest octree level read: voxel size on the ground (Web Mercator metres x cos(lat))
+TARGET_RES_M = 2.8                      # deepest octree level read: voxel size on the ground (Web Mercator metres x cos(lat))
+MEMO_BYTES = 600e6                      # decoded tiles kept for neighbouring windows
 
 
 def _year(name: str) -> int:
@@ -83,20 +90,17 @@ class _Project:
                 frontier += [f"{d + 1}-{2 * x + i}-{2 * y + j}-{2 * z + k}" for i in (0, 1) for j in (0, 1) for k in (0, 1)]
         return out
 
-    def points(self, key: str) -> np.ndarray:
-        """(n, 4) x, y, z, class for one tile (Web Mercator), cached on disk as LAZ."""
+    def points(self, key: str) -> tuple[np.ndarray, np.ndarray]:
+        """One tile, noise dropped: (n, 3) float32 x, y (Web Mercator, from the project's corner), z; and (n,) uint8 class."""
         import laspy
 
-        p = self.cache / "ept-data" / f"{key}.laz"
-        if not p.exists():
-            r = self.http.get(f"{self.base}/ept-data/{key}.laz", timeout=120)
-            r.raise_for_status()
-            p.parent.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_suffix(f".{threading.get_ident()}.part")     # two windows may fetch the same tile at once
-            tmp.write_bytes(r.content)
-            tmp.replace(p)
-        las = laspy.read(p)
-        return np.c_[np.asarray(las.x), np.asarray(las.y), np.asarray(las.z), np.asarray(las.classification)]
+        r = self.http.get(f"{self.base}/ept-data/{key}.laz", timeout=120)
+        r.raise_for_status()
+        las = laspy.read(io.BytesIO(r.content))
+        cls = np.asarray(las.classification, dtype=np.uint8)
+        keep = ~np.isin(cls, NOISE)
+        xyz = np.c_[np.asarray(las.x)[keep] - self.x0, np.asarray(las.y)[keep] - self.y0, np.asarray(las.z)[keep]].astype(np.float32)
+        return xyz, cls[keep]
 
 
 class Ept:
@@ -123,7 +127,8 @@ class Ept:
         self.from_wm = Transformer.from_crs(3857, epsg, always_xy=True)
         self.projects: dict[str, _Project | None] = {}
         self.lock = threading.Lock()
-        self.memo: dict[tuple[str, str], np.ndarray] = {}
+        self.memo: OrderedDict[tuple[str, str], tuple[np.ndarray, np.ndarray]] = OrderedDict()
+        self.memo_bytes = 0
 
     def _project(self, url: str) -> _Project | None:
         with self.lock:
@@ -137,16 +142,20 @@ class Ept:
             self.projects[url] = pr
         return pr
 
-    def _tile(self, pr: _Project, key: str) -> np.ndarray:
+    def _tile(self, pr: _Project, key: str) -> tuple[np.ndarray, np.ndarray]:
         k = (pr.name, key)
         with self.lock:
             if k in self.memo:
+                self.memo.move_to_end(k)
                 return self.memo[k]
         pts = pr.points(key)
         with self.lock:
-            if len(self.memo) > 150:                     # tiles are reused by neighbouring windows; keep the recent ones
-                self.memo.pop(next(iter(self.memo)))
-            self.memo[k] = pts
+            if k not in self.memo:                       # tiles are reused by neighbouring windows; keep the recent ones
+                self.memo[k] = pts
+                self.memo_bytes += pts[0].nbytes + pts[1].nbytes
+                while self.memo_bytes > MEMO_BYTES and len(self.memo) > 1:
+                    a, b = self.memo.popitem(last=False)[1]
+                    self.memo_bytes -= a.nbytes + b.nbytes
         return pts
 
     def heights(self, grid, dtm: np.ndarray) -> tuple[np.ndarray, str | None]:
@@ -171,18 +180,22 @@ class Ept:
                 continue
             res0 = pr.width / pr.span * np.cos(np.radians(np.mean(lat)))
             depth = max(0, int(np.ceil(np.log2(res0 / TARGET_RES_M))))
-            parts = [self._tile(pr, k) for k in pr.nodes(wbox, depth)]
-            if not parts:
+            lo = np.array([wbox[0] - pr.x0, wbox[1] - pr.y0], dtype=np.float32)
+            hi = np.array([wbox[2] - pr.x0, wbox[3] - pr.y0], dtype=np.float32)
+            xyz, cls = [], []
+            for k in pr.nodes(wbox, depth):              # cut each tile to the window before stacking: tiles are much bigger
+                t, tc = self._tile(pr, k)
+                m = np.all((t[:, :2] >= lo) & (t[:, :2] <= hi), axis=1)
+                xyz.append(t[m])
+                cls.append(tc[m])
+            if sum(len(a) for a in xyz) < 50:
                 continue
-            p = np.vstack(parts)
-            p = p[(p[:, 0] >= wbox[0]) & (p[:, 0] <= wbox[2]) & (p[:, 1] >= wbox[1]) & (p[:, 1] <= wbox[3]) & ~np.isin(p[:, 3], NOISE)]
-            if len(p) < 50:
-                continue
-            gx, gy = self.from_wm.transform(p[:, 0], p[:, 1])
+            p, cls = np.vstack(xyz), np.concatenate(cls)
+            gx, gy = self.from_wm.transform(p[:, 0].astype(np.float64) + pr.x0, p[:, 1].astype(np.float64) + pr.y0)
             c = np.floor((np.asarray(gx) - grid.x0) / grid.res).astype(np.int64)
             r = np.floor((grid.y1 - np.asarray(gy)) / grid.res).astype(np.int64)
             ok = (r >= 0) & (r < h) & (c >= 0) & (c < w)
-            c, r, z, cls = c[ok], r[ok], p[ok, 2], p[ok, 3]
+            c, r, z, cls = c[ok], r[ok], p[ok, 2].astype(np.float64), cls[ok]
             g = (cls == GROUND) & np.isfinite(dtm[r, c])
             if g.sum() < 20:                             # no ground to tie the cloud to the 3DEP terrain
                 continue
@@ -191,7 +204,24 @@ class Ept:
             np.maximum.at(top, r * w + c, z - offset)
             top = top.reshape(h, w).astype(np.float32)
             top[~np.isfinite(top)] = np.nan
+            top = _fill_gaps(top)
             fill = np.isnan(out) & np.isfinite(top)
             out[fill] = top[fill]
             used = used or pr.name
         return out, used
+
+
+def _fill_gaps(a: np.ndarray) -> np.ndarray:
+    """Cells the sparse read left empty (voxels up to ~2.8 m on a 2 m grid) take the mean of their filled neighbours,
+    so a tree crown is not peppered with bare-earth holes; cells with no filled neighbour stay empty."""
+    v = np.isfinite(a)
+    if v.all() or not v.any():
+        return a
+    s, n = np.pad(np.where(v, a, 0.0), 1), np.pad(v.astype(np.float32), 1)
+    h, w = a.shape
+    tot = sum(s[i:i + h, j:j + w] for i in range(3) for j in range(3))
+    cnt = sum(n[i:i + h, j:j + w] for i in range(3) for j in range(3))
+    out = a.copy()
+    gap = ~v & (cnt > 0)
+    out[gap] = (tot[gap] / cnt[gap]).astype(np.float32)
+    return out

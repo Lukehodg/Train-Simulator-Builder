@@ -154,8 +154,8 @@ def lidar_features(settings: Settings, bundle: RouteBundle) -> dict[str, np.ndar
         from ..sources.lidar import Lidar, Usgs3dep, corridor_features
 
         try:
-            # point-cloud tiles run to gigabytes along a long route: kept outside data/raw (which CI caches between runs);
-            # only the per-sample features are cached, like the GB surveys
+            # point-cloud tiles run to gigabytes along a long route: read in memory, never stored; their project indexes
+            # live outside data/raw (which CI caches between runs); only the per-sample features are cached, like GB
             surface = settings.paths()["raw"].parent.parent / "ept_cache" if us and lcfg.get("surface", True) else None
             lidar = Usgs3dep(bundle.proj.crs.to_epsg(), surface=surface) if us else Lidar(settings.paths()["raw"].parent / "shared" / "lidar_index")
         except Exception as exc:  # noqa: BLE001

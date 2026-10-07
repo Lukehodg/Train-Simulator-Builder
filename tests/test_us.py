@@ -341,19 +341,34 @@ def test_point_cloud_surface_sits_on_the_3dep_ground():
     tx, ty = to_wm.transform([500011.0], [4400031.0])
     tree = np.array([[tx[0], ty[0], 55.0, 5], [tx[0], ty[0], 140.0, 18]])           # a 15 m tree, and high noise
 
-    class FakeProject:
-        name, width, span = "fake_2020", 1e6, 256
-        def nodes(self, bbox, depth):
-            return ["0-0-0-0"]
-        def points(self, key):
-            return np.vstack([ground, tree])
+    import io
+
+    import laspy
+
+    pts = np.vstack([ground, tree])
+    hdr = laspy.LasHeader(point_format=6, version="1.4")
+    hdr.offsets, hdr.scales = pts[:, :3].min(axis=0), np.array([0.01, 0.01, 0.01])
+    las = laspy.LasData(hdr)
+    las.x, las.y, las.z, las.classification = pts[:, 0], pts[:, 1], pts[:, 2], pts[:, 3].astype(np.uint8)
+    buf = io.BytesIO()
+    las.write(buf, do_compress=True)                                                 # a real LAZ tile, served from memory
+
+    class Http:
+        def get(self, url, timeout=None):
+            assert url.endswith("/ept-data/0-0-0-0.laz")
+            return type("R", (), {"content": buf.getvalue(), "raise_for_status": lambda self: None})()
+
+    pr = object.__new__(usgs_ept._Project)
+    pr.name, pr.base, pr.http, pr.width, pr.span = "fake_2020", "https://x/fake_2020", Http(), 1e6, 256
+    pr.x0, pr.y0 = float(wx.min()) - 5e5, float(wy.min()) - 5e5                     # far corner: float32 offsets must hold
+    pr.nodes = lambda bbox, depth: ["0-0-0-0"]
 
     e = object.__new__(usgs_ept.Ept)
     lon, lat = Transformer.from_crs(epsg, 4326, always_xy=True).transform(500020.0, 4400020.0)
     e.meta, e.tree = [{"name": "fake_2020", "url": "u"}], STRtree([box(lon - 1, lat - 1, lon + 1, lat + 1)])
     e.to_ll, e.to_wm = Transformer.from_crs(epsg, 4326, always_xy=True), to_wm
     e.from_wm = Transformer.from_crs(3857, epsg, always_xy=True)
-    e.projects, e.memo = {"u": FakeProject()}, {}
+    e.projects, e.memo, e.memo_bytes = {"u": pr}, usgs_ept.OrderedDict(), 0
     import threading
     e.lock = threading.Lock()
     top, name = e.heights(g, dtm)
@@ -361,3 +376,15 @@ def test_point_cloud_surface_sits_on_the_3dep_ground():
     r, c = int((g.y1 - 4400031.0) // 2), int((500011.0 - g.x0) // 2)
     assert top[r, c] == pytest.approx(25.0, abs=0.01)                             # 10 m ground + 15 m tree; noise dropped
     assert np.nanmedian(top) == pytest.approx(10.0, abs=0.01)
+    assert len(e.memo) == 1 and e.memo_bytes == sum(x.nbytes for x in e.memo[("fake_2020", "0-0-0-0")])
+
+
+def test_point_cloud_gaps_take_their_neighbours():
+    from tcs.sources.usgs_ept import _fill_gaps
+
+    a = np.full((5, 5), np.nan, dtype=np.float32)
+    a[1:4, 1:4] = 20.0
+    a[2, 2] = np.nan                                  # a hole in a crown
+    out = _fill_gaps(a)
+    assert out[2, 2] == pytest.approx(20.0) and out[0, 0] == pytest.approx(20.0)
+    assert np.isnan(_fill_gaps(np.full((3, 3), np.nan, dtype=np.float32))).all()
