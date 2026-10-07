@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .config import ROOT, list_routes, load_settings
+from .config import ROOT, list_routes, load_settings, normalise_country
 
 app = typer.Typer(add_completion=False, help="Train Route 3D Connectivity Simulation pipeline")
 console = Console()
@@ -45,7 +45,7 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     from .model.simulate import simulate
     from .pipeline.export import export_all
     from .pipeline.join_cells import candidate_cells, corridor_cells, serving_cells
-    from .pipeline.join_coverage import coverage_prior
+    from .pipeline.join_coverage import coverage_prior, needs_cells
     from .pipeline.movement import movement
     from .pipeline.obstruction import enrich_terrain
     from .pipeline.sample_route import build_route, save_bundle
@@ -79,8 +79,12 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     for w in b.warnings:
         console.log(f"[yellow]{w}")
     b.samples = enrich_terrain(s, b)
-    prior, b.samples = coverage_prior(s, b, limit=limit_postcodes)
-    cells = corridor_cells(s, b, b.samples)
+    if needs_cells(s):                                         # prior read from the cell sites (US): cells first
+        cells = corridor_cells(s, b, b.samples)
+        prior, b.samples = coverage_prior(s, b, limit=limit_postcodes, cells=cells)
+    else:
+        prior, b.samples = coverage_prior(s, b, limit=limit_postcodes)
+        cells = corridor_cells(s, b, b.samples)
     cand = candidate_cells(s, b.samples, cells)
     serving = serving_cells(s, b.samples, cand)
     b.samples, stations = movement(s, b.samples, b.stations)
@@ -161,7 +165,7 @@ def write_index() -> Path:
         except json.JSONDecodeError:
             continue
         st = m.get("stations", [])
-        items.append({"id": m["route"]["id"], "name": m["route"].get("name"), "operator": m["route"].get("operator"), "origin": st[0]["name"] if st else None,
+        items.append({"id": m["route"]["id"], "name": m["route"].get("name"), "operator": m["route"].get("operator"), "country": normalise_country(m["route"].get("country")), "origin": st[0]["name"] if st else None,
                       "destination": st[-1]["name"] if st else None, "length_km": round(m.get("length_m", 0) / 1000, 1), "duration_min": round(m.get("duration_s", 0) / 60),
                       "geometry_source": m.get("geometry_source"), "terrain_source": m.get("terrain_source"), "n_samples": m.get("n_samples")})
     out = root / "index.json"
@@ -200,12 +204,12 @@ def package(out: Path | None = typer.Option(None, help="Output folder (default: 
 
 @app.command()
 def routes():
-    """List the route catalogue (config/routes) and which ones have a built bundle."""
+    """List the route catalogue (config/routes: GB, and the US through config/countries/US) and which are built."""
     built = {p.parent.name for p in (ROOT / "web" / "public" / "data").glob("*/meta.json")}
     t = Table(title="Routes")
-    t.add_column("id"), t.add_column("name"), t.add_column("from → to"), t.add_column("built")
+    t.add_column("id"), t.add_column("country"), t.add_column("name"), t.add_column("from → to"), t.add_column("built")
     for r in list_routes():
-        t.add_row(r["id"], r["name"] or "", f"{r['origin']} → {r['destination']}", "yes" if r["id"] in built else "-")
+        t.add_row(r["id"], r["country"], r["name"] or "", f"{r['origin']} → {r['destination']}", "yes" if r["id"] in built else "-")
     console.print(t)
 
 

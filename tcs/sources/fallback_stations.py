@@ -171,3 +171,30 @@ STATIONS: dict[str, tuple[float, float]] = {
     "WRP": (52.2860, -1.6123),  # Warwick Parkway
     "YRK": (53.9581, -1.0931),  # York (hand-entered)
 }
+
+# United States, keyed by Amtrak station code (routes with `country: US`). From the US DOT's NTAD Amtrak Stations
+# layer (public domain; tcs/sources/ntad_amtrak.py), rounded to 4 decimal places.
+US_STATIONS: dict[str, tuple[float, float]] = {
+    "BAL": (39.3073, -76.6157),  # Baltimore Penn Station, MD
+    "BBY": (42.3473, -71.0758),  # Boston Back Bay, MA
+    "BOS": (42.3523, -71.0553),  # Boston South Station, MA
+    "BWI": (39.1924, -76.6943),  # BWI Marshall Airport, MD
+    "MET": (40.5681, -74.3296),  # Metropark, NJ
+    "NHV": (41.2977, -72.9267),  # New Haven Union Station, CT
+    "NWK": (40.7347, -74.1648),  # Newark Penn Station, NJ
+    "NYP": (40.7510, -73.9963),  # New York Penn Station, NY
+    "PHL": (39.9556, -75.1810),  # Philadelphia 30th Street, PA
+    "PVD": (41.8295, -71.4135),  # Providence, RI
+    "RTE": (42.2102, -71.1479),  # Route 128, MA
+    "STM": (41.0471, -73.5422),  # Stamford, CT
+    "WAS": (38.8970, -77.0064),  # Washington Union Station, DC
+    "WIL": (39.7373, -75.5511),  # Wilmington, DE
+}
+
+BY_COUNTRY: dict[str, dict[str, tuple[float, float]]] = {"GB": STATIONS, "US": US_STATIONS}
+
+
+def for_country(country: str | None) -> dict[str, tuple[float, float]]:
+    """The offline coordinate table for a route's country (GB when unset, as before)."""
+    c = (country or "GB").upper()
+    return BY_COUNTRY.get("GB" if c == "UK" else c, STATIONS)

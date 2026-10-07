@@ -18,11 +18,19 @@ from .base import Provenance, SourceUnavailable, console, http_get, now_iso
 COLUMNS = ["radio", "mcc", "net", "area", "cell", "unit", "lon", "lat", "range", "samples", "changeable", "created", "updated", "averageSignal"]
 
 
+def plmns(op: dict) -> list[tuple[int, int]]:
+    """The (mcc, mnc) pairs a network's cells carry: its `plmn` list ("mcc-mnc") where a network spans several MCCs
+    (the US), else its `mcc` with each of its `mnc` codes."""
+    if op.get("plmn"):
+        return [(int(a), int(b)) for a, b in (str(p).split("-") for p in op["plmn"])]
+    return [(int(op["mcc"]), int(mnc)) for mnc in op.get("mnc", [])]
+
+
 def _mnc_map(operators: list[dict]) -> dict[tuple[int, int], str]:
     out = {}
     for op in operators:
-        for mnc in op.get("mnc", []):
-            out[(int(op["mcc"]), int(mnc))] = op["id"]
+        for key in plmns(op):
+            out[key] = op["id"]
     return out
 
 
@@ -31,7 +39,7 @@ def fetch_cells_bulk(settings, proj: Projector, samples: pd.DataFrame, raw_dir: 
     if not token:
         raise SourceUnavailable("OPENCELLID_TOKEN not set")
     ocfg = settings.networks["opencellid"]
-    mccs = sorted({int(op["mcc"]) for op in settings.operators})
+    mccs = sorted({mcc for op in settings.operators for mcc, _ in plmns(op)})
     frames = []
     shared = raw_dir.parent / "shared"          # one national download serves every route (OpenCellID allows 2 per file per day)
     for mcc in mccs:

@@ -111,8 +111,10 @@ def _segment(p0: tuple[float, float], p1: tuple[float, float], tags: dict, way_i
 
 
 def fetch_route(crs_codes: list[str], country: str, raw_dir: Path, *, corridor_m: float = 8000, overpass_url: str | None = None,
-                offline: bool = False, timeout: int = 180) -> RouteGeometry:
-    stations = fetch_stations(crs_codes, country, raw_dir, overpass_url=overpass_url, offline=offline, timeout=timeout)
+                offline: bool = False, timeout: int = 180, stations: pd.DataFrame | None = None) -> RouteGeometry:
+    """stations: already resolved (crs, name, lat, lon), e.g. from NTAD for a US route; None = look them up in OSM by ref:crs."""
+    if stations is None:
+        stations = fetch_stations(crs_codes, country, raw_dir, overpass_url=overpass_url, offline=offline, timeout=timeout)
     proj = Projector(local_crs(stations["lon"].mean(), stations["lat"].mean(), country))
     coords, seg_rows, straight = _route_in_corridor(stations, proj, corridor_m, raw_dir, overpass_url, offline, timeout)
     warnings: list[str] = []

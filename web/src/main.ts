@@ -2,7 +2,7 @@ import './styles.css'
 import type { PickingInfo } from '@deck.gl/core'
 import { CONFIG } from './config'
 import { esc } from './html'
-import { indexAtTime, linkFitted, LIVE_COVERAGE_MIN, liveCoverageShare, loadRoute } from './data'
+import { COUNTRY_NAMES, indexAtTime, isGB, linkFitted, LIVE_COVERAGE_MIN, liveCoverageShare, loadRoute } from './data'
 import { createMap } from './map/map'
 import { buildRuns, cellLayers, labelFontReady, ribbonLayers, stationLayers, trainLayers, type Run } from './map/layers'
 import { setBuildings, trackLayers, treeLayer } from './map/environment'
@@ -59,7 +59,11 @@ async function main() {
   fetch(`${CONFIG.dataRoot}/index.json`).then(r => (r.ok ? r.json() : null)).then((idx: any) => {
     const sel = $('routePick') as HTMLSelectElement
     const routes: any[] = idx?.routes?.length ? idx.routes : [{ id: routeId, name: meta.route.name, origin: meta.stations[0]?.name, destination: meta.stations[meta.stations.length - 1]?.name, length_km: meta.length_m / 1000 }]
-    sel.innerHTML = routes.map(r => `<option value="${esc(r.id)}">${esc(r.name ?? r.id)} · ${esc(r.origin)} → ${esc(r.destination)} (${Math.round(r.length_km)} km)</option>`).join('')
+    const option = (r: any) => `<option value="${esc(r.id)}">${esc(r.name ?? r.id)} · ${esc(r.origin)} → ${esc(r.destination)} (${Math.round(r.length_km)} km)</option>`
+    const countries = [...new Set(routes.map(r => r.country ?? 'GB'))]
+    // One group per country once there is more than one; a single-country catalogue stays a plain list.
+    sel.innerHTML = countries.length < 2 ? routes.map(option).join('')
+      : countries.map(c => `<optgroup label="${esc(COUNTRY_NAMES[c] ?? c)}">${routes.filter(r => (r.country ?? 'GB') === c).map(option).join('')}</optgroup>`).join('')
     sel.value = routeId
     sel.addEventListener('change', () => { const u = new URL(location.href); u.searchParams.set('route', sel.value); location.href = u.toString() })
   }).catch(() => {})
@@ -236,7 +240,7 @@ async function main() {
   $('btnTheme').addEventListener('click', () => { const t = store.state.theme === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = t; try { localStorage.setItem('tls-theme', t) } catch {} store.set({ theme: t }) })
   const help = $('help') as HTMLElement
   let helpReturn: HTMLElement | null = null
-  const openHelp = () => { renderHelp(); helpReturn = document.activeElement as HTMLElement | null; help.hidden = false; ($('helpClose') as HTMLElement).focus() }
+  const openHelp = () => { renderHelp(meta); helpReturn = document.activeElement as HTMLElement | null; help.hidden = false; ($('helpClose') as HTMLElement).focus() }
   const closeHelp = () => { if (help.hidden) return; help.hidden = true; helpReturn?.focus() }
   help.addEventListener('keydown', trapTab(help.querySelector('.modal-card') as HTMLElement))
   $('btnHelp').addEventListener('click', openHelp)
@@ -422,7 +426,7 @@ function renderKpis(store: Store, baseline?: SimResult) {
   $('kpis').innerHTML = $('kpisPanel').innerHTML = kp.join('')   // dock strip + the Live-tab copy used on narrower screens
 }
 
-function renderHelp() {
+function renderHelp(meta: Meta) {
   $('helpBody').innerHTML = `
     <p>A time-aware simulation of onboard connectivity for one train service: every 50 m along the real railway the model estimates each cellular operator and the satcom link, runs the onboard link manager, and predicts the passenger Wi-Fi experience.</p>
     <ul>
@@ -434,7 +438,7 @@ function renderHelp() {
       <li><b>Confidence</b>: switch the colouring to Confidence to see how much of the route rests on measured, predicted or synthetic inputs.</li>
       <li><b>Keys</b>: <kbd>Space</kbd> play / pause · <kbd>←</kbd> <kbd>→</kbd> ±1 min (<kbd>Shift</kbd> ±10 min) · <kbd>[</kbd> <kbd>]</kbd> playback rate · <kbd>Home</kbd> <kbd>End</kbd> start / end · <kbd>I</kbd> inspector · <kbd>S</kbd> inspect the sample at the train · <kbd>C</kbd> camera view · <kbd>?</kbd> this help · <kbd>Esc</kbd> close. Drag the map to take the camera.</li>
     </ul>
-    <p>Predictions, not measurements. Ofcom coverage is operator-predicted; OpenCellID is community data; Starlink has no public route-level telemetry. See the Sources tab for what is live in this bundle.</p>`
+    <p>Predictions, not measurements. ${isGB(meta) ? 'Ofcom coverage is operator-predicted' : 'Coverage is estimated from distance to each network\'s OpenCellID sites, uncalibrated'}; OpenCellID is community data; Starlink has no public route-level telemetry. See the Sources tab for what is live in this bundle.</p>`
 }
 
 main()

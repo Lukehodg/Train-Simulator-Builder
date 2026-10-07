@@ -86,15 +86,25 @@ export function indexAtDistance(d: Float64Array, dist: number): number {
   return lo
 }
 
-/** A route's coverage counts as live when at least this share of it comes from Ofcom (same rule as tcs/report.py). */
+/** A route's coverage counts as live when at least this share of it comes from a live source (same rule as tcs/report.py). */
 export const LIVE_COVERAGE_MIN = 0.9
 
-/** Share of the route's coverage prior that comes from Ofcom (API or Connected Nations). Bundles built before the
- *  share was recorded count as fully live when any Ofcom source is listed, as they used to. */
+/** Live coverage prior sources, by prefix: Ofcom (API or Connected Nations) in GB, the OpenCellID site-distance
+ *  estimate in the US (tcs/report.py LIVE_PRIOR_PREFIXES). */
+const LIVE_PRIOR_PREFIXES = ['ofcom', 'opencellid_sites']
+const livePrior = (s: string) => LIVE_PRIOR_PREFIXES.some(p => s.startsWith(p))
+
+/** Share of the route's coverage prior that comes from a live source. Bundles built before the share was recorded
+ *  count as fully live when any such source is listed, as they used to. */
 export function liveCoverageShare(m: Meta): number {
-  if (m.coverage_share) return Object.entries(m.coverage_share).filter(([k]) => k.startsWith('ofcom')).reduce((a, [, v]) => a + v, 0)
-  return m.coverage_sources.some(s => s.startsWith('ofcom')) ? 1 : 0
+  if (m.coverage_share) return Object.entries(m.coverage_share).filter(([k]) => livePrior(k)).reduce((a, [, v]) => a + v, 0)
+  return m.coverage_sources.some(livePrior) ? 1 : 0
 }
+
+/** Whether a bundle is a Great Britain route (bundles without a country are). */
+export const isGB = (m: Meta) => ['GB', 'UK'].includes((m.route.country || 'GB').toUpperCase())
+
+export const COUNTRY_NAMES: Record<string, string> = { GB: 'United Kingdom', US: 'United States' }
 
 /** Whether the train has this link: a fitted mobile network (sim.cellular.fitted_networks, null = all of them) or a
  *  satellite terminal that is switched on. The same rule as fitted_links() in simulate.py and the satcom model. */

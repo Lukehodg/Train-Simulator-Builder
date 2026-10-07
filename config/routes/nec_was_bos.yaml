@@ -1,0 +1,61 @@
+# Northeast Corridor, Acela, Washington -> Boston. A US route: `country: US` selects config/countries/US/ (AT&T /
+# Verizon / T-Mobile, Copernicus terrain, Amtrak station codes from NTAD, the OpenCellID site-distance coverage prior,
+# no GB calibration). Station codes are Amtrak's, in the field GB routes use for CRS codes.
+route:
+  id: nec_was_bos
+  name: Northeast Corridor (Acela)
+  country: US
+  operator: Amtrak
+  direction: northbound
+  origin_crs: WAS
+  destination_crs: BOS
+  geometry:
+    source: osm                 # stations from NTAD, track routed through OpenStreetMap
+    ntad_route: Acela           # NTAD Amtrak Routes line used when Overpass is unavailable
+  stations:
+  - {crs: WAS, name: Washington Union Station, stop: true, trainshed: true}
+  - {crs: BWI, name: BWI Marshall Airport, stop: true, trainshed: false}
+  - {crs: BAL, name: Baltimore Penn Station, stop: true, trainshed: false}
+  - {crs: WIL, name: Wilmington, stop: true, trainshed: false}
+  - {crs: PHL, name: Philadelphia 30th Street, stop: true, trainshed: true}
+  - {crs: MET, name: Metropark, stop: true, trainshed: false}
+  - {crs: NWK, name: Newark Penn Station, stop: true, trainshed: false}
+  - {crs: NYP, name: New York Penn Station, stop: true, trainshed: true}
+  - {crs: STM, name: Stamford, stop: true, trainshed: false}
+  - {crs: NHV, name: New Haven Union Station, stop: true, trainshed: false}
+  - {crs: PVD, name: Providence, stop: true, trainshed: false}
+  - {crs: RTE, name: Route 128, stop: true, trainshed: false}
+  - {crs: BBY, name: Boston Back Bay, stop: true, trainshed: true}
+  - {crs: BOS, name: Boston South Station, stop: true, trainshed: false}
+  # Tunnels for geometry without OSM tags (the NTAD fallback, offline): approximate portal positions [lat, lon]. When the
+  # track comes from OpenStreetMap its own tunnel tags are used instead.
+  tunnels:
+  - {name: B&P Tunnel, from: [39.3005, -76.6440], to: [39.3053, -76.6278]}
+  - {name: Union Tunnel, from: [39.3093, -76.6125], to: [39.3101, -76.5980]}
+  - {name: North River Tunnels, from: [40.7612, -74.0400], to: [40.7520, -73.9985]}
+  - {name: New York Penn Station, from: [40.7520, -73.9985], to: [40.7495, -73.9925]}
+  - {name: East River Tunnels, from: [40.7495, -73.9925], to: [40.7440, -73.9380]}
+  # In-station coverage at New York Penn (a distributed antenna system on the platforms); none assumed in the river tunnels.
+  das_tunnels: [New York Penn Station]
+  timetable:
+    source: yaml
+    departure: 06:00
+    calls:                      # approximate weekday Acela timings
+      WAS: 06:00
+      BWI: 06:20
+      BAL: 06:32
+      WIL: 07:15
+      PHL: 07:37
+      MET: 08:27
+      NWK: 08:40
+      NYP: 08:55
+      STM: 09:42
+      NHV: '10:30'
+      PVD: '12:02'
+      RTE: '12:20'
+      BBY: '12:37'
+      BOS: '12:44'
+    dwell_s: 90
+  line_speed_kph:
+    default: 200                # 125 mph; up to 150-160 mph on parts of NJ, RI and MA (OSM maxspeed tags carry these)
+    restrictions: []

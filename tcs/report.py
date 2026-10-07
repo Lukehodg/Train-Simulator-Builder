@@ -104,16 +104,24 @@ def kpis(rc: pd.DataFrame, samples: pd.DataFrame, spacing_m: float) -> dict:
     }
 
 
-LIVE_COVERAGE_MIN = 0.9       # a route's coverage counts as live when at least this share of it comes from Ofcom
+LIVE_COVERAGE_MIN = 0.9       # a route's coverage counts as live when at least this share of it comes from a live prior source
+# Live coverage prior sources, by prefix: Ofcom (API or Connected Nations) in GB; the OpenCellID site-distance estimate
+# where a country profile uses it (the US), which is live data but not an operator prediction.
+LIVE_PRIOR_PREFIXES = ("ofcom", "opencellid_sites")
 
 
 def live_coverage_share(meta: dict) -> float:
-    """Share of sample-operator pairs whose coverage prior comes from Ofcom (API or Connected Nations). Bundles built
-    before the share was recorded count as fully live when any Ofcom source is listed, as they used to."""
+    """Share of sample-operator pairs whose coverage prior comes from a live source (LIVE_PRIOR_PREFIXES). Bundles built
+    before the share was recorded count as fully live when any such source is listed, as they used to."""
     share = meta.get("coverage_share")
     if share:
-        return float(sum(v for k, v in share.items() if str(k).startswith("ofcom")))
-    return 1.0 if any(str(c).startswith("ofcom") for c in meta.get("coverage_sources", [])) else 0.0
+        return float(sum(v for k, v in share.items() if str(k).startswith(LIVE_PRIOR_PREFIXES)))
+    return 1.0 if any(str(c).startswith(LIVE_PRIOR_PREFIXES) for c in meta.get("coverage_sources", [])) else 0.0
+
+
+def is_gb(meta: dict) -> bool:
+    """Whether a bundle is a Great Britain route (bundles without a country are)."""
+    return str((meta.get("route") or {}).get("country") or "GB").upper() in ("GB", "UK")
 
 
 def rsrp_band(dbm: np.ndarray) -> np.ndarray:
@@ -597,7 +605,10 @@ def write_xlsx(path: Path, ev, samples: pd.DataFrame, rc: pd.DataFrame, obs: pd.
 
 def _coverage_row(meta: dict) -> tuple[str, str, str]:
     share = live_coverage_share(meta)
-    what = "Ofcom operator coverage predictions" + (" (with Connected Nations open data)" if "ofcom_connected_nations" in meta.get("coverage_sources", []) else "")
+    if "opencellid_sites" in meta.get("coverage_sources", []):
+        what = "Estimated from distance to each network's OpenCellID sites (uncalibrated)"
+    else:
+        what = "Ofcom operator coverage predictions" + (" (with Connected Nations open data)" if "ofcom_connected_nations" in meta.get("coverage_sources", []) else "")
     if share >= LIVE_COVERAGE_MIN:
         return ("Mobile coverage", what, "live")
     if share > 0:

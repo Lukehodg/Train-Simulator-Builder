@@ -188,6 +188,24 @@ An optional orbital layer from CelesTrak TLEs is visualisation only and never cl
 real schedules use `timetable.from_cif(path, train_uid, corpus_json)` (Network Rail Open Data SCHEDULE feed + the
 CORPUS TIPLOC reference, free registration) or `from_gtfs()`.
 
+## 8. United States (`config/countries/US`)
+
+Routes with `country: US` swap four feeds; everything else (OpenCellID, Copernicus, Starlink, the models) is shared.
+
+- **Stations: NTAD Amtrak Stations** (US DOT Bureau of Transportation Statistics, public domain), queried by Amtrak code
+  through its ArcGIS service (`tcs/sources/ntad_amtrak.py`, cached 90 days). The track is still routed through OSM.
+- **Track fallback: NTAD Amtrak Routes**, one generalised polyline per named service. Used only when Overpass fails; it
+  has no tunnel, cutting or speed tags, so the route file's `tunnels` (portal positions) mark the tunnels, and the
+  viewer shows the geometry as partly live.
+- **Coverage prior: OpenCellID site distance** (`tcs/sources/cell_prior.py`). There is no keyless US counterpart of
+  Ofcom's per-location predictions: the FCC's National Broadband Map publishes per-operator mobile coverage, including
+  in-vehicle, but its download API needs a registered account. Until then each network's prior is read from the
+  distance to its nearest OpenCellID site (knots in `networks.yaml` `site_prior`), with small lifts for nearby 5G
+  sites and dense sites. Confidence is held at 0.40. A network with no site in the corridor gets no record, never a
+  guess. Without `OPENCELLID_TOKEN` the prior and the sites both fall back to the synthetic stand-ins.
+- **Networks:** AT&T, Verizon and T-Mobile (UScellular's network included under T-Mobile), each with the PLMNs it uses
+  across MCCs 310-316. The OpenCellID bulk files for those MCCs are downloaded once and shared by every US route.
+
 ## Licences and attribution
 
 OSM (ODbL), Copernicus DEM (free, attribution), OS OpenData (OGL), Environment Agency, Welsh Government and Scottish public sector LiDAR (OGL), Ofcom data (OGL/terms of the API portal),

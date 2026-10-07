@@ -10,7 +10,7 @@ from shapely.geometry import LineString
 
 from ..geo import Projector, local_crs
 from .base import Provenance, now_iso
-from .fallback_stations import STATIONS as FALLBACK_STATIONS
+from .fallback_stations import for_country as fallback_stations_for
 
 # Tunnels on offline geometry, by route id: km from origin, length km, name, dedicated in-tunnel coverage (assumption).
 # Only the reference route has a list; other offline routes get no tunnels rather than ECML's at the same distances.
@@ -56,11 +56,12 @@ def _catmull_rom(pts: np.ndarray, per_segment: int = 40) -> np.ndarray:
 def synthetic_route(stations_cfg: list[dict], country: str):
     """Spline through station coordinates with gentle lateral wobble. Returns (line WGS84, stations df, provenance)."""
     rows = []
+    table = fallback_stations_for(country)
     for s in stations_cfg:
-        if s["crs"] not in FALLBACK_STATIONS:
+        if s["crs"] not in table:
             raise KeyError(f"offline mode has no coordinates for {s['crs']}: add it to tcs/sources/fallback_stations.py, "
                            "or run online (OSM) / supply a route file")
-        lat, lon = FALLBACK_STATIONS[s["crs"]]
+        lat, lon = table[s["crs"]]
         rows.append({"crs": s["crs"], "name": s["name"], "lat": lat, "lon": lon})
     st = pd.DataFrame(rows)
     proj = Projector(local_crs(st["lon"].mean(), st["lat"].mean(), country))

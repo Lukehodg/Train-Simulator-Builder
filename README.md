@@ -88,6 +88,24 @@ list (CRS codes), calling times and flags; everything else — centreline, tunne
 fetched by the pipeline. Add a route by copying one file. Stations are matched to any track within 90 m, so
 multi-track stations route correctly (mileages come out within ~1 % of the published figures).
 
+### United States
+
+A route file with `country: US` (first: `nec_was_bos`, the Acela on the Northeast Corridor, Washington → Boston) runs
+on the US country profile in `config/countries/US/` instead of the GB defaults; GB routes are unaffected. What changes:
+
+| Input | GB | US |
+|---|---|---|
+| Stations | OSM `ref:crs` | Amtrak codes from the US DOT's NTAD Amtrak Stations layer (keyless) |
+| Track | OSM, routed station to station | OSM the same way; the NTAD Amtrak Routes line (`geometry.ntad_route`) when Overpass is unavailable, with tunnels from the route file's `tunnels` |
+| Networks | EE, O2, Vodafone, Three | AT&T, Verizon, T-Mobile, matched to OpenCellID by their US PLMNs (several MCCs each) |
+| Coverage prior | Ofcom API / Connected Nations by postcode | Distance to each network's OpenCellID sites (`tcs/sources/cell_prior.py`), uncalibrated |
+| Terrain | OS Terrain 50 + open LiDAR | Copernicus GLO-30 |
+| Calibration | Yellow Train national fit, Global View corrections and masts | None yet: the figures are uncalibrated until US measurements are fitted |
+
+The viewer's route picker groups routes by country, the evidence packs drop the Ofcom and Network Rail wording for US
+routes, and the publish workflow's live-Ofcom check applies to GB routes only. Add another country by adding
+`config/countries/<CC>/profile.yaml` (and its networks file) and route files with that `country`.
+
 ## Evidence pack (`tcs report`)
 
 A Word report laid out for a tender submission, and an Excel data appendix, per route and scenario:

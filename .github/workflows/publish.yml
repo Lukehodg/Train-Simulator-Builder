@@ -10,7 +10,9 @@ name: publish
 #   CLOUDFLARE_ACCOUNT_ID                 from the Cloudflare dashboard
 #
 # Nothing is published, and the previous version stays live, if: the Ofcom API refuses a test call up front (its
-# call quota is used up), any route fails to build, or less than 90 % of any route's coverage is live Ofcom data.
+# call quota is used up), any route fails to build, or less than 90 % of any GB route's coverage is live Ofcom data.
+# US routes (config/countries/US) take no Ofcom data: their coverage comes from OpenCellID, and a US route built on
+# stand-ins is reported in the run summary without holding back the publish.
 # A full rebuild makes about 18,000 Ofcom calls (one per postcode near the track), so run it at most once per quota
 # period: this key's quota was used up on 26 Sep 2026 and resets around the 16th, hence the 17th below.
 #
@@ -122,12 +124,12 @@ jobs:
         shell: python
         run: |
           import glob, json, os
-          from tcs.report import LIVE_COVERAGE_MIN, live_coverage_share
+          from tcs.report import LIVE_COVERAGE_MIN, is_gb, live_coverage_share
           rows, degraded, no_coverage = [], [], []
           for path in sorted(glob.glob("web/public/data/*/meta.json")):
               m = json.load(open(path, encoding="utf-8"))
               share = live_coverage_share(m)
-              cov = f"{share:.0%} Ofcom ({', '.join(m.get('coverage_sources') or []) or '-'})"
+              cov = f"{share:.0%} {'Ofcom' if is_gb(m) else 'OpenCellID sites'} ({', '.join(m.get('coverage_sources') or []) or '-'})"
               legs = m.get("geometry_straight_legs") or []   # OSM legs with no rail path, drawn straight
               track = f"{m.get('geometry_source')}" + (f" (straight: {', '.join(legs)})" if legs else "")
               terrain = f"{m.get('terrain_source')}" + (f" + LiDAR {m['lidar_share']:.0%}" if m.get("lidar_share") else "")
@@ -137,7 +139,7 @@ jobs:
               rows.append("| " + " | ".join([m["route"]["id"], *map(str, cells)]) + " |")
               if any("synthetic" in str(c) for c in cells) or share < LIVE_COVERAGE_MIN or legs:
                   degraded.append(m["route"]["id"])
-              if share < LIVE_COVERAGE_MIN:   # also catches a quota that ran out part-way through a route
+              if share < LIVE_COVERAGE_MIN and is_gb(m):   # also catches a quota that ran out part-way through a route
                   no_coverage.append(m["route"]["id"])
           out = ["## Feeds used per route", "", "| route | track | terrain | coverage | cell sites |", "|---|---|---|---|---|", *rows]
           if degraded:

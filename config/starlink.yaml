@@ -5,7 +5,7 @@ satcom:
       enabled: true
       terminal: performance          # performance | standard | flat_high_performance | mini (EDGE Mini integrates a Starlink Mini)
       service_area:
-        countries: [GB]              # Land Mobility availability is a country/region eligibility, not RF telemetry
+        countries: [GB, US]          # Land Mobility availability is a country/region eligibility, not RF telemetry
       mode: predictive_obstruction   # predictive_obstruction | telemetry_calibrated
       # Terminal field of view drives the horizon mask: sky below this elevation angle does not count.
       min_elevation_deg: {performance: 20, standard: 25, flat_high_performance: 20, mini: 35}   # Mini has a ~110° field of view

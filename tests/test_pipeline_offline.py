@@ -355,5 +355,5 @@ def test_offline_geometry_for_every_route(route_id):
     assert list(st["crs"]) == [x["crs"] for x in s.route["stations"]]
     assert st["distance_m"].is_monotonic_increasing and st["distance_m"].iloc[0] < 1500
     assert st["distance_m"].iloc[-1] > b.samples["distance_m"].max() - 1500
-    # Synthetic tunnels belong to the reference route only.
-    assert b.samples["in_tunnel"].any() == bool(synthetic.FALLBACK_TUNNELS_KM.get(route_id))
+    # Synthetic tunnels belong to the reference route, and to routes that list their own by portal position (the US).
+    assert b.samples["in_tunnel"].any() == bool(synthetic.FALLBACK_TUNNELS_KM.get(route_id) or s.route.get("tunnels"))

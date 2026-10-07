@@ -23,6 +23,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
+from .report import is_gb as _is_gb
 from .report import lidar_text, period_text
 
 # Palette: navy text and table heads, one teal accent (the viewer's light-theme accent), cool neutrals.
@@ -44,6 +45,10 @@ SERVICE_CLASSES = [("EXCELLENT", "80–100", "HD video streaming and video calls
 CONFIDENCE_SCALE = [("0.90–1.00", "Directly measured or well validated"), ("0.70–0.89", "Strong source coverage and a calibrated model"),
                     ("0.40–0.69", "Prediction with partial infrastructure support"), ("0.10–0.39", "Sparse data or synthetic estimate"),
                     ("0.00", "Unknown")]
+GB_ONLY_TERMS = {"Ofcom coverage prediction", "Mast positions"}
+SITES_TERM = "Site-distance coverage estimate"         # the prior outside GB
+
+
 GLOSSARY = [
     ("Availability", "Share of the route over which a link is in service and good enough for the link manager to use."),
     ("Band", "One of five levels (Excellent to Very poor) used by the route heat maps; each metric's band edges are in its legend."),
@@ -58,6 +63,8 @@ GLOSSARY = [
     ("Median (P50)", "The value exceeded over half of the route."),
     ("Ofcom coverage prediction", "Mobile operators' predicted outdoor coverage by postcode, published through the Ofcom API."),
     ("OpenCellID", "Community-collected database of cell-site locations, used for serving-cell distance and handovers."),
+    (SITES_TERM, "Outside Great Britain: each network's coverage estimated from how far the track is from its nearest "
+                                        "OpenCellID sites, an uncalibrated stand-in for operator coverage predictions."),
     ("P10", "The value exceeded over 90 % of the route: a measure of the weak stretches rather than the average."),
     ("pp", "Percentage points: the difference between two percentages (96 % to 98 % is +2 pp)."),
     ("Packet bonding", "Aggregating several links at once so the train's capacity is close to their sum."),
@@ -843,11 +850,17 @@ class _Report:
             "osm": "The railway centreline, stations, tunnels and cuttings come from OpenStreetMap, routed station to station"
                    + (f", except {', '.join(legs)}, drawn as a straight line where no rail path was found" if legs else "") + ".",
             "file": "The railway centreline comes from a route file supplied for this assessment; stations are placed from OpenStreetMap.",
+            "ntad": "The railway centreline is the US DOT's National Transportation Atlas Database line for this Amtrak service, used because "
+                    "the OpenStreetMap track was not available for this build: it is generalised and carries no tunnel or cutting tags, so tunnel "
+                    "positions come from the route file and are approximate.",
         }.get(m.get("geometry_source"), "The railway centreline is an approximate line through the stations, a stand-in used because the "
                                          "OpenStreetMap track was not available for this build, so tunnel and cutting positions are approximate.")
-        coverage = {"live": "the operator's predicted coverage (Ofcom)",
+        sites_prior = "opencellid_sites" in (m.get("coverage_sources") or [])
+        coverage = {"live": "an estimate of each network's coverage from how far the track is from its nearest OpenCellID sites "
+                            "(not an operator prediction, and not yet calibrated)" if sites_prior else "the operator's predicted coverage (Ofcom)",
                     "partly stand-in": "the operator's predicted coverage (Ofcom) where it was available and a neutral stand-in elsewhere",
-                    }.get(status.get("Mobile coverage", ""), "a stand-in coverage estimate, as Ofcom's predictions were not available for this build")
+                    }.get(status.get("Mobile coverage", ""), "a stand-in coverage estimate, as "
+                          + ("Ofcom's predictions were" if _is_gb(m) else "cell-site data was") + " not available for this build")
         cells = "sites from OpenCellID" if status.get("Cell sites and handovers") == "live" else "a stand-in site layout"
         if status.get("Cell sites and handovers") == "live" and (m.get("fitted_masts") or {}).get("masts"):
             cells += (f", with {m['fitted_masts']['masts']} masts placed from Network Rail's Global View 4G logs in place of "
@@ -897,7 +910,8 @@ class _Report:
         if stand_ins:
             self.para("Stand-in data was used for: " + "; ".join(stand_ins).lower() + ". Estimates that rest on it carry a lower confidence.",
                       color=MUTED, size=9)
-        self.para("Ofcom coverage is operator-predicted, not measured. OpenCellID is community-contributed, so a missing site does not mean "
+        self.para(("Ofcom coverage is operator-predicted, not measured." if _is_gb(ev.meta) else
+                   "The coverage estimate is derived from cell-site distances: neither measured nor predicted by the operators.") + " OpenCellID is community-contributed, so a missing site does not mean "
                   "there is no service. There is no public route-level satellite telemetry, so the satellite model is predictive until "
                   "terminal logs are attached.", keep=True)
         self.table([("Confidence", 3.0, "l"), ("Meaning", 13.6, "l")], [list(r) for r in CONFIDENCE_SCALE], "How to read confidence values", bold_first=True)
@@ -925,8 +939,9 @@ class _Report:
             self.para("The mobile signal predictions are calibrated against field measurements attached to this route.")
         elif not self.cal:
             self.para("No field measurements have yet been attached to this route, so the figures in this document are unvalidated "
-                      "predictions. The calibration and validation tools accept Ofcom drive-test data, the Ofcom Connectivity on Trains study, "
-                      "network survey logs and onboard modem logs. Once supplied, this section reports signal error, outage detection, "
+                      "predictions. The calibration and validation tools accept "
+                      + ("Ofcom drive-test data, the Ofcom Connectivity on Trains study, " if _is_gb(ev.meta) else "drive-test data, ")
+                      + "network survey logs and onboard modem logs. Once supplied, this section reports signal error, outage detection, "
                       "service-class accuracy and handover position error by section, and the confidence values rise accordingly.")
 
     def calibration_section(self) -> None:
@@ -1102,7 +1117,10 @@ class _Report:
         sec = self.doc.add_section(WD_SECTION.NEW_PAGE)
         self._page(sec, landscape=False)
         self.h1("Glossary", number="Appendix B")
-        self.table([("Term", 4.4, "l"), ("Meaning", 12.2, "l")], [list(g) for g in GLOSSARY], "Terms used in this document", size=8.5, bold_first=True)
+        # Terms for inputs only one country uses are left out elsewhere: Ofcom and the Global View masts are GB-only.
+        gb = _is_gb(self.ev.meta)
+        terms = [g for g in GLOSSARY if (gb or g[0] not in GB_ONLY_TERMS) and (not gb or g[0] != SITES_TERM)]
+        self.table([("Term", 4.4, "l"), ("Meaning", 12.2, "l")], [list(g) for g in terms], "Terms used in this document", size=8.5, bold_first=True)
 
     def build(self, path: Path) -> None:
         first = self.doc.sections[0]
