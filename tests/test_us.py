@@ -320,3 +320,44 @@ def test_capacity_scale_multiplies_cellular_capacity():
     c0 = base[base["provider_type"] == "cellular"]["capacity_mbps"].to_numpy()
     c1 = scaled[scaled["provider_type"] == "cellular"]["capacity_mbps"].to_numpy()
     assert c0.max() > 0 and np.allclose(c1, 1.5 * c0, rtol=1e-4)
+
+
+def test_point_cloud_surface_sits_on_the_3dep_ground():
+    """Heights above the cloud's own ground are hung on the 3DEP terrain, whatever the cloud's vertical datum."""
+    from pyproj import Transformer
+    from shapely.geometry import box
+    from shapely.strtree import STRtree
+
+    from tcs.sources import usgs_ept
+    from tcs.sources.lidar import Grid
+
+    epsg = 32618
+    g = Grid.blank((500000.0, 4400000.0, 500040.0, 4400040.0))            # 20 x 20 cells of 2 m
+    dtm = np.full(g.arr.shape, 10.0, dtype=np.float32)
+    to_wm = Transformer.from_crs(epsg, 3857, always_xy=True)
+    xs, ys = np.meshgrid(np.arange(500001.0, 500040.0, 2.0), np.arange(4400001.0, 4400040.0, 2.0))
+    wx, wy = to_wm.transform(xs.ravel(), ys.ravel())
+    ground = np.c_[wx, wy, np.full(wx.size, 40.0), np.full(wx.size, 2)]         # the cloud's ground is 30 m off (datum)
+    tx, ty = to_wm.transform([500011.0], [4400031.0])
+    tree = np.array([[tx[0], ty[0], 55.0, 5], [tx[0], ty[0], 140.0, 18]])           # a 15 m tree, and high noise
+
+    class FakeProject:
+        name, width, span = "fake_2020", 1e6, 256
+        def nodes(self, bbox, depth):
+            return ["0-0-0-0"]
+        def points(self, key):
+            return np.vstack([ground, tree])
+
+    e = object.__new__(usgs_ept.Ept)
+    lon, lat = Transformer.from_crs(epsg, 4326, always_xy=True).transform(500020.0, 4400020.0)
+    e.meta, e.tree = [{"name": "fake_2020", "url": "u"}], STRtree([box(lon - 1, lat - 1, lon + 1, lat + 1)])
+    e.to_ll, e.to_wm = Transformer.from_crs(epsg, 4326, always_xy=True), to_wm
+    e.from_wm = Transformer.from_crs(3857, epsg, always_xy=True)
+    e.projects, e.memo = {"u": FakeProject()}, {}
+    import threading
+    e.lock = threading.Lock()
+    top, name = e.heights(g, dtm)
+    assert name == "fake_2020"
+    r, c = int((g.y1 - 4400031.0) // 2), int((500011.0 - g.x0) // 2)
+    assert top[r, c] == pytest.approx(25.0, abs=0.01)                             # 10 m ground + 15 m tree; noise dropped
+    assert np.nanmedian(top) == pytest.approx(10.0, abs=0.01)

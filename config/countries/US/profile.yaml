@@ -29,10 +29,10 @@ ookla:
 
 terrain:
   source: copernicus_glo30       # OS Terrain 50 is GB-only
-  # Near the track: USGS 3DEP bare earth at 2 m (lidar-derived, keyless) in place of the GB surveys. It has no
-  # first-return surface, so cutting walls, embankments and the ground skyline come from it but trees and buildings
-  # do not (the canopy model still covers trees).
-  lidar: {enabled: true, source: usgs_3dep, workers: 4}
+  # Near the track: USGS 3DEP bare earth at 2 m (lidar-derived, keyless) in place of the GB surveys, and with
+  # `surface`, trees, buildings and bridges from the 3DEP lidar point clouds on AWS (sources/usgs_ept.py), read at
+  # ~1.4 m and tied to that bare earth. The tiles are kept in data/ept_cache/, not in the CI download cache.
+  lidar: {enabled: true, source: usgs_3dep, surface: true, workers: 4}
 
 simulation:
   cellular:

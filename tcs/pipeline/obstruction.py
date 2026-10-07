@@ -146,7 +146,7 @@ def lidar_features(settings: Settings, bundle: RouteBundle) -> dict[str, np.ndar
     on_bridge = s["on_bridge"].fillna(False).to_numpy(dtype=bool) if "on_bridge" in s else np.zeros(len(s), dtype=bool)
     roofed = s["canopy_probability"].fillna(0).to_numpy() > 0.3 if "canopy_probability" in s else np.zeros(len(s), dtype=bool)
     key = hashlib.sha1(np.round(np.c_[s["x"].values, s["y"].values, s["bearing_deg"].values], 1).tobytes() + on_bridge.tobytes() + roofed.tobytes()
-                       + f"{LIDAR_VERSION}|{corridor}|{azimuths}|{lcfg.get('source', 'gb')}".encode()).hexdigest()[:16]
+                       + f"{LIDAR_VERSION}|{corridor}|{azimuths}|{lcfg.get('source', 'gb')}|{lcfg.get('surface', True)}".encode()).hexdigest()[:16]
     cache = settings.paths()["raw"] / "lidar" / f"features_{key}.parquet"
     if cache.exists():
         df = pd.read_parquet(cache)
@@ -154,7 +154,10 @@ def lidar_features(settings: Settings, bundle: RouteBundle) -> dict[str, np.ndar
         from ..sources.lidar import Lidar, Usgs3dep, corridor_features
 
         try:
-            lidar = Usgs3dep(bundle.proj.crs.to_epsg()) if us else Lidar(settings.paths()["raw"].parent / "shared" / "lidar_index")
+            # point-cloud tiles run to gigabytes along a long route: kept outside data/raw (which CI caches between runs);
+            # only the per-sample features are cached, like the GB surveys
+            surface = settings.paths()["raw"].parent.parent / "ept_cache" if us and lcfg.get("surface", True) else None
+            lidar = Usgs3dep(bundle.proj.crs.to_epsg(), surface=surface) if us else Lidar(settings.paths()["raw"].parent / "shared" / "lidar_index")
         except Exception as exc:  # noqa: BLE001
             console.log(f"[yellow]LiDAR unavailable ({exc}); using the 30 m terrain model")
             return None
@@ -162,8 +165,11 @@ def lidar_features(settings: Settings, bundle: RouteBundle) -> dict[str, np.ndar
                     + ("(USGS 3DEP bare earth)" if us else "(England, Wales, Scotland open surveys)"))
         f = corridor_features(s["x"].values, s["y"].values, s["bearing_deg"].values, on_bridge, roofed, lidar, corridor_m=corridor,
                               azimuths=azimuths, workers=int(lcfg.get("workers", 8)))
-        if us:                                            # bare earth only: nothing is known about trees or buildings
+        if us and getattr(lidar, "ept", None) is None:   # bare earth only: nothing is known about trees or buildings
             f["obstruction_share"][:] = np.nan
+        elif us:
+            got, seen = lidar.surface_cells
+            console.log(f"LiDAR: point-cloud surface (trees, buildings) on {got / max(seen, 1):.0%} of the cells read")
         df = pd.DataFrame({k: v for k, v in f.items() if k not in ("horizon_near_deg", "lidar_failed")})
         for k in range(azimuths):
             df[f"hz_{k:02d}"] = f["horizon_near_deg"][:, k]
