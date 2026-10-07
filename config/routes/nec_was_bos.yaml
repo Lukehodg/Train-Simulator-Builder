@@ -24,6 +24,13 @@ route:
   - {crs: NYP, name: New York Penn Station, stop: true, trainshed: true}
   - {crs: STM, name: Stamford, stop: true, trainshed: false}
   - {crs: NHV, name: New Haven Union Station, stop: true, trainshed: false}
+  # Passing points on the Shore Line: it follows the coast, up to ~25 km from a straight New Haven - Providence line,
+  # so without them the OSM search corridor misses the track there.
+  - {crs: OSB, name: Old Saybrook, stop: false, trainshed: false}
+  - {crs: NLC, name: New London, stop: false, trainshed: false}
+  - {crs: MYS, name: Mystic, stop: false, trainshed: false}
+  - {crs: WLY, name: Westerly, stop: false, trainshed: false}
+  - {crs: KIN, name: Kingston, stop: false, trainshed: false}
   - {crs: PVD, name: Providence, stop: true, trainshed: false}
   - {crs: RTE, name: Route 128, stop: true, trainshed: false}
   - {crs: BBY, name: Boston Back Bay, stop: true, trainshed: true}

@@ -179,16 +179,21 @@ US_STATIONS: dict[str, tuple[float, float]] = {
     "BBY": (42.3473, -71.0758),  # Boston Back Bay, MA
     "BOS": (42.3523, -71.0553),  # Boston South Station, MA
     "BWI": (39.1924, -76.6943),  # BWI Marshall Airport, MD
+    "KIN": (41.4840, -71.5606),  # Kingston, RI
     "MET": (40.5681, -74.3296),  # Metropark, NJ
+    "MYS": (41.3509, -71.9631),  # Mystic, CT
     "NHV": (41.2977, -72.9267),  # New Haven Union Station, CT
+    "NLC": (41.3543, -72.0932),  # New London, CT
     "NWK": (40.7347, -74.1648),  # Newark Penn Station, NJ
     "NYP": (40.7510, -73.9963),  # New York Penn Station, NY
+    "OSB": (41.3004, -72.3768),  # Old Saybrook, CT
     "PHL": (39.9556, -75.1810),  # Philadelphia 30th Street, PA
     "PVD": (41.8295, -71.4135),  # Providence, RI
     "RTE": (42.2102, -71.1479),  # Route 128, MA
     "STM": (41.0471, -73.5422),  # Stamford, CT
     "WAS": (38.8970, -77.0064),  # Washington Union Station, DC
     "WIL": (39.7373, -75.5511),  # Wilmington, DE
+    "WLY": (41.3811, -71.8298),  # Westerly, RI
 }
 
 BY_COUNTRY: dict[str, dict[str, tuple[float, float]]] = {"GB": STATIONS, "US": US_STATIONS}

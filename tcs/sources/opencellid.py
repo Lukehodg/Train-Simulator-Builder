@@ -44,7 +44,13 @@ def fetch_cells_bulk(settings, proj: Projector, samples: pd.DataFrame, raw_dir: 
     shared = raw_dir.parent / "shared"          # one national download serves every route (OpenCellID allows 2 per file per day)
     for mcc in mccs:
         url = ocfg["bulk_url"].format(token=token, mcc=mcc)
-        gz = http_get(url, raw_dir=shared, name="opencellid_bulk", ext="csv.gz", offline=settings.offline, ttl_days=30)
+        try:
+            gz = http_get(url, raw_dir=shared, name="opencellid_bulk", ext="csv.gz", offline=settings.offline, ttl_days=30)
+        except SourceUnavailable as exc:
+            if len(mccs) > 1 and "HTTP 404" in str(exc):     # OpenCellID has no file for an MCC with no cells: the others still count
+                console.log(f"[yellow]OpenCellID has no file for MCC {mcc}; skipped")
+                continue
+            raise
         with open(gz, "rb") as fh:
             magic = fh.read(2)
         if magic != bytes([0x1F, 0x8B]):

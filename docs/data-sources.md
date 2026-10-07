@@ -197,9 +197,14 @@ Routes with `country: US` swap four feeds; everything else (OpenCellID, Copernic
 - **Track fallback: NTAD Amtrak Routes**, one generalised polyline per named service. Used only when Overpass fails; it
   has no tunnel, cutting or speed tags, so the route file's `tunnels` (portal positions) mark the tunnels, and the
   viewer shows the geometry as partly live.
-- **Coverage prior: OpenCellID site distance** (`tcs/sources/cell_prior.py`). There is no keyless US counterpart of
-  Ofcom's per-location predictions: the FCC's National Broadband Map publishes per-operator mobile coverage, including
-  in-vehicle, but its download API needs a registered account. Until then each network's prior is read from the
+- **Coverage prior: FCC National Broadband Map** (`tcs/sources/fcc_bdc.py`), the US counterpart of Ofcom: each
+  operator's filed 4G LTE and 5G-NR coverage per state, outdoor stationary and in-vehicle. Needs a free
+  broadbandmap.fcc.gov account: `FCC_BDC_USERNAME` (login email) and `FCC_BDC_TOKEN` (Manage API Access). Each file is
+  clipped to the corridor once and only the clip kept; the route file's `fcc_states` names the states to fetch.
+  In-vehicle coverage scores highest, stationary-only lower (`fcc_bdc.scores` in `networks.yaml`). `tcs probe-fcc`
+  shows what the API lists. Confidence 0.55, as Ofcom's.
+- **Fallback prior: OpenCellID site distance** (`tcs/sources/cell_prior.py`), for networks without FCC filings or
+  when the FCC account is not set. Each network's prior is read from the
   distance to its nearest OpenCellID site (knots in `networks.yaml` `site_prior`), with small lifts for nearby 5G
   sites and dense sites. Confidence is held at 0.40. A network with no site in the corridor gets no record, never a
   guess. Without `OPENCELLID_TOKEN` the prior and the sites both fall back to the synthetic stand-ins.
