@@ -106,6 +106,42 @@ def _guide_polys(guide: np.ndarray, proj: Projector, buffer_m: float, chunk_m: f
             for a, b in zip(edges[:-1], edges[1:])]
 
 
+def _stitch_guide(guide: np.ndarray, stations: pd.DataFrame, proj: Projector, max_off_m: float = 15_000) -> np.ndarray:
+    """The guide line made to pass through every station, in order: each leg follows the guide between the two stations'
+    places on it, and is a straight station-to-station line where the guide misses a station (a shape borrowed from a
+    shorter train, a stop off the generalised line) or runs backwards. A guide drawn the other way round is turned first. So the search band always holds every station,
+    whatever the guide covers. Places are found in order along the guide, so a line that doubles back on itself (the
+    Floridian into Tampa and out again) keeps both passes."""
+    from shapely.geometry import Point
+    from shapely.ops import substring
+
+    gx, gy = proj.to_xy(guide[:, 0], guide[:, 1])
+    line = LineString(np.column_stack([gx, gy]))
+    sx, sy = proj.to_xy(stations["lon"].to_numpy(dtype=float), stations["lat"].to_numpy(dtype=float))
+    if line.project(Point(sx[0], sy[0])) > line.project(Point(sx[-1], sy[-1])):   # a shape borrowed from the other direction
+        line = LineString(line.coords[::-1])
+    pos: list[float | None] = []
+    at = 0.0
+    for x, y in zip(sx, sy):
+        rest = substring(line, at, line.length) if at < line.length else None
+        p = Point(x, y)
+        if rest is not None and rest.length > 0 and rest.distance(p) <= max_off_m:
+            at += rest.project(p)
+            pos.append(at)
+        else:
+            pos.append(None)
+    out = [(sx[0], sy[0])]
+    for i in range(len(sx) - 1):
+        a, b = pos[i], pos[i + 1]
+        if a is not None and b is not None and b > a:
+            piece = substring(line, a, b)
+            out += list(piece.coords) if piece.geom_type == "LineString" else []
+        out.append((sx[i + 1], sy[i + 1]))
+    xy = np.array(out, dtype=float)
+    lon, lat = proj.to_lonlat(xy[:, 0], xy[:, 1])
+    return np.column_stack([lon, lat])
+
+
 def _parse_maxspeed(v: str | None) -> float | None:
     if not v:
         return None
@@ -167,7 +203,7 @@ def _route_in_corridor(stations: pd.DataFrame, proj: Projector, corridor_m: floa
                        timeout: int, guide: np.ndarray | None = None) -> tuple[list[tuple[float, float]], list[dict], list[str]]:
     """Route station to station through the rail network inside a band of `corridor_m` around the station chain (or the
     guide line). Returns the line's coordinates, one segment row per piece of it, and the legs that had to be drawn straight."""
-    polys = [_corridor_poly(stations, proj, corridor_m)] if guide is None else _guide_polys(guide, proj, corridor_m)
+    polys = [_corridor_poly(stations, proj, corridor_m)] if guide is None else _guide_polys(_stitch_guide(guide, stations, proj), proj, corridor_m)
     nodes: dict[int, tuple[float, float]] = {}
     found: dict[int, dict] = {}
     for poly in polys:

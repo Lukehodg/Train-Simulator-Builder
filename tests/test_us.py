@@ -408,8 +408,9 @@ def test_gtfs_shape_guides_the_track_search(tmp_path):
             z.writestr(n, body)
     assert trip_shape(feed, "Acela", "WAS", "BOS").shape == (3, 2)            # most detailed shape by default
     assert trip_shape(feed, "Acela", "WAS", "BOS", train="2150").shape == (2, 2)
+    assert trip_shape(feed, "Acela", "BOS", "WAS").shape == (3, 2)            # trip d has no shape: borrow the service's best
     with pytest.raises(SourceUnavailable):
-        trip_shape(feed, "Acela", "BOS", "WAS")                                # trip d has no shape
+        trip_shape(feed, "Northeast Regional", "WAS", "BOS")                   # no trip of the service has one
     guide = trip_shape(feed, "Acela", "WAS", "BOS")
     proj = Projector(local_crs(-74.0, 40.6, "US"))
     polys = _guide_polys(guide, proj, 8000)
@@ -447,3 +448,26 @@ def test_generated_amtrak_routes_are_complete():
         assert set(route["timetable"]["calls"]) == set(codes) and route["fcc_states"], r["id"]
         assert route["origin_crs"] == codes[0] and route["destination_crs"] == codes[-1], r["id"]
         assert 50 <= route.get("sample_spacing_m", 50) <= 300, r["id"]
+
+
+def test_guide_is_stitched_through_every_station():
+    from shapely.geometry import LineString, Point
+
+    from tcs.sources.osm_route import _stitch_guide
+
+    proj = Projector(local_crs(-97.0, 34.0, "US"))
+    # a shape for Oklahoma City -> Fort Worth only, with a bend at Norman; the train now runs on to Dallas
+    shape = np.array([[-97.51, 35.47], [-97.40, 35.22], [-97.33, 32.75]])
+    st = pd.DataFrame({"crs": ["OKC", "NOR", "FTW", "DAL"], "lon": [-97.51, -97.44, -97.33, -96.81], "lat": [35.47, 35.22, 32.75, 32.78]})
+    g = _stitch_guide(shape, st, proj)
+    line = LineString(np.column_stack(proj.to_xy(g[:, 0], g[:, 1])))
+    for _, s in st.iterrows():
+        assert line.distance(Point(*proj.to_xy(s.lon, s.lat))) < 1.0           # passes through every station, Dallas too
+    assert any(np.allclose(p, [-97.40, 35.22]) for p in g)                     # and follows the shape between them
+    back = _stitch_guide(shape[::-1].copy(), st, proj)                         # a shape of the return train is turned round
+    assert np.allclose(back, g, atol=1e-6)
+    # Lakeland -> Tampa -> Lakeland: places are found in order, so the second Lakeland call follows the way back
+    there_and_back = np.array([[-81.95, 28.05], [-82.45, 27.95], [-81.95, 28.06], [-81.70, 28.20]])
+    st2 = pd.DataFrame({"crs": ["LKL", "TPA", "LAK", "WPK"], "lon": [-81.95, -82.45, -81.95, -81.70], "lat": [28.05, 27.95, 28.06, 28.20]})
+    g2 = _stitch_guide(there_and_back, st2, proj)
+    assert len(g2) >= 7 and np.allclose(g2[-1], [-81.70, 28.20])
