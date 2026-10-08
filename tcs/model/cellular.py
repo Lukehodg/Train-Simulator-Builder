@@ -159,7 +159,12 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
     rsrp = rsrp_slope * q + rsrp_intercept
     sinr = cfg["sinr_db"]["at_zero"] + (cfg["sinr_db"]["at_one"] - cfg["sinr_db"]["at_zero"]) * q
     tech = df["radio_technology"].fillna("4G").astype(str).values
-    cap_prior = np.array([ops[p]["capacity_prior_mbps"].get(t, ops[p]["capacity_prior_mbps"]["4G"]) for p, t in zip(df["provider_id"], tech)], dtype=np.float32)
+    # one lookup per (network, technology) pair rather than per row: this list comprehension was most of a call, and
+    # the national calibration calls this thousands of times
+    pairs = pd.MultiIndex.from_arrays([df["provider_id"].to_numpy(), tech])
+    uniq = pairs.unique()
+    caps = {(p, t): ops[p]["capacity_prior_mbps"].get(t, ops[p]["capacity_prior_mbps"]["4G"]) for p, t in uniq}
+    cap_prior = np.asarray([caps[k] for k in uniq], dtype=np.float32)[uniq.get_indexer(pairs)]
     floor = cfg["throughput"]["score_floor"]
     usable = np.clip((q - floor) / (1 - floor), 0, 1) ** cfg["throughput"]["curve_exponent"]
     # Mild speed effect (Doppler / scheduler) and multi-cell variance from the serving distance.
