@@ -159,6 +159,22 @@ class _Http:
         return s
 
 
+def _read_index(f: Path):
+    """A cached tile index, or None when it is missing or unreadable (an empty file left by a run that was cut off
+    mid-write, which on 8 Oct failed North Wales Coast in the publish), so the caller asks the service again."""
+    try:
+        return json.loads(f.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _write_index(f: Path, data) -> None:
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_suffix(f".tmp{threading.get_ident()}")
+    tmp.write_text(json.dumps(data))
+    tmp.replace(f)                                          # whole or not at all
+
+
 def _read_tiff(content: bytes) -> tuple[np.ndarray, float, float, float] | None:
     from rasterio.io import MemoryFile
 
@@ -268,9 +284,8 @@ class WalesTiles(_TileSource):
             if ref10 in self._index:
                 return self._index[ref10]
         f = self.cache / f"wales_{ref10}.json"
-        if f.exists():
-            feats = json.loads(f.read_text())
-        else:
+        feats = _read_index(f)
+        if feats is None:
             params = {"service": "WFS", "version": "2.0.0", "request": "GetFeature", "typeNames": WALES_LAYER, "outputFormat": "application/json",
                       "bbox": f"{sx0},{sy0},{sx0 + 10000},{sy0 + 10000},urn:ogc:def:crs:EPSG::27700", "count": "500"}
             try:
@@ -280,8 +295,7 @@ class WalesTiles(_TileSource):
                          for p in (ft.get("properties") or {} for ft in r.json().get("features", []))]
             except (requests.RequestException, ValueError):
                 return None                                 # not cached: try again next time
-            f.parent.mkdir(parents=True, exist_ok=True)
-            f.write_text(json.dumps(feats))
+            _write_index(f, feats)
         with self._lock:
             self._index[ref10] = feats
         return feats
@@ -333,9 +347,8 @@ class ScotlandTiles(_TileSource):
             if key in self._index:
                 return self._index[key]
         f = self.cache / f"scotland_{layer}_{ref10}.json"
-        if f.exists():
-            found = json.loads(f.read_text())
-        else:
+        found = _read_index(f)
+        if found is None:
             found = []
             try:
                 for src in SCOT_SOURCES:
@@ -349,8 +362,7 @@ class ScotlandTiles(_TileSource):
                             found.append([SCOT_BUCKET + k, list(b), SCOT_SOURCES.index(src)])
             except requests.RequestException:
                 return None                                 # not cached: try again next time
-            f.parent.mkdir(parents=True, exist_ok=True)
-            f.write_text(json.dumps(found))
+            _write_index(f, found)
         found = sorted(found, key=lambda t: (t[2], t[1][2] - t[1][0]))      # newest source first, then finer tiles
         with self._lock:
             self._index[key] = found
