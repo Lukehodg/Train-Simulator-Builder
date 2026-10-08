@@ -177,7 +177,9 @@ def _guess(cols: list[str], preset: str, mapping: dict[str, str] | None) -> dict
 
 def _best_server(m: pd.DataFrame) -> pd.DataFrame:
     m = m[m["provider_id"].notna() & m["rsrp_dbm"].notna()]
-    return m.sort_values("rsrp_dbm", ascending=False).drop_duplicates(["timestamp", "device", "provider_id"]).sort_index()
+    timed = m["timestamp"].notna()                        # NaT compare equal here: readings with no time are each their own moment
+    best = m[timed].sort_values("rsrp_dbm", ascending=False).drop_duplicates(["timestamp", "device", "provider_id"])
+    return pd.concat([best, m[~timed]]).sort_index()
 
 
 def _canonical(df: pd.DataFrame, guess: dict[str, str | None], preset: str, operators: list[dict], path: Path) -> pd.DataFrame:

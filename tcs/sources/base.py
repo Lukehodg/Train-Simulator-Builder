@@ -54,9 +54,13 @@ def cache_path(raw_dir: Path, name: str, key: str, ext: str) -> Path:
 
 
 def http_get(url: str, *, raw_dir: Path, name: str, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None,
-             data: str | dict | None = None, ext: str = "bin", timeout: int = 120, retries: int = 3, offline: bool = False, ttl_days: float = 30) -> Path:
-    """GET/POST with on-disk cache under data/raw/<route>/<name>/. Returns the cached file path."""
-    key = json.dumps({"url": url, "params": params, "data": data}, sort_keys=True)
+             data: str | dict | None = None, ext: str = "bin", timeout: int = 120, retries: int = 3, offline: bool = False, ttl_days: float = 30,
+             cache_key: str | None = None, stale_ok: bool = False) -> Path:
+    """GET/POST with on-disk cache under data/raw/<route>/<name>/. Returns the cached file path.
+
+    cache_key: what the answer is cached under, when it does not depend on the URL (the same query to any mirror).
+    stale_ok: when the service cannot be reached, an expired cached copy beats none (logged)."""
+    key = cache_key if cache_key is not None else json.dumps({"url": url, "params": params, "data": data}, sort_keys=True)
     path = cache_path(raw_dir, name, key, ext)
     if path.exists() and (offline or (time.time() - path.stat().st_mtime) < ttl_days * 86400):
         return path
@@ -97,4 +101,8 @@ def http_get(url: str, *, raw_dir: Path, name: str, params: dict[str, Any] | Non
                 r.close()
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
+    if stale_ok and path.exists():
+        age = (time.time() - path.stat().st_mtime) / 86400
+        console.log(f"[yellow]{name}: {redact(last_err)}; using the copy from {age:.0f} days ago")
+        return path
     raise SourceUnavailable(f"{name}: {redact(last_err)}")

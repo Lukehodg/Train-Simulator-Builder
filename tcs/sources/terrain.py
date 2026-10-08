@@ -77,6 +77,10 @@ class CopernicusDEM:
         import rasterio
 
         if name not in self._ds:
+            import os
+
+            os.environ.setdefault("GDAL_HTTP_MAX_RETRY", "3")          # a busy S3 moment is not a reason for synthetic terrain
+            os.environ.setdefault("GDAL_HTTP_RETRY_DELAY", "2")
             url = f"/vsicurl/{COPERNICUS_BASE}/{name}/{name}.tif"
             self._ds[name] = rasterio.open(url)
         return self._ds[name]
@@ -94,9 +98,13 @@ class CopernicusDEM:
                 key = f"{_tile_name(lat, lon)}_{w:.4f}_{s:.4f}_{e:.4f}_{n:.4f}.npz"
                 cache = self.raw_dir / key
                 if cache.exists():
-                    z = np.load(cache)
-                    self.windows.append(_Window(float(z["w"]), float(z["s"]), float(z["e"]), float(z["n"]), z["data"], float(z["rx"]), float(z["ry"])))
-                    continue
+                    try:
+                        with np.load(cache) as z:
+                            self.windows.append(_Window(float(z["w"]), float(z["s"]), float(z["e"]), float(z["n"]), z["data"], float(z["rx"]),
+                                                        float(z["ry"])))
+                        continue
+                    except Exception:  # noqa: BLE001 - cut off mid-write by an earlier run: fetch it again
+                        cache.unlink(missing_ok=True)
                 if self.offline:
                     raise RuntimeError("offline: DEM window not cached")
                 ds = self._open(_tile_name(lat, lon))
@@ -105,7 +113,10 @@ class CopernicusDEM:
                 data[data == ds.nodata] = 0.0
                 bounds = ds.window_bounds(win)
                 rx, ry = ds.res
-                np.savez_compressed(cache, w=bounds[0], s=bounds[1], e=bounds[2], n=bounds[3], data=data, rx=rx, ry=ry)
+                tmp = cache.with_suffix(".tmp")
+                with open(tmp, "wb") as fh:
+                    np.savez_compressed(fh, w=bounds[0], s=bounds[1], e=bounds[2], n=bounds[3], data=data, rx=rx, ry=ry)
+                tmp.replace(cache)                                   # whole or not at all
                 self.windows.append(_Window(bounds[0], bounds[1], bounds[2], bounds[3], data, rx, ry))
 
     def sample(self, lon: np.ndarray, lat: np.ndarray) -> np.ndarray:
