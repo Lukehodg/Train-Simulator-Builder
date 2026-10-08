@@ -21,7 +21,8 @@ name: publish
 # cache. Building every US route costs about 2,500 runner minutes, more than a private repository's monthly allowance,
 # so each US bundle built on main is also kept as an asset of the `us-bundles` release and reused by later publishes
 # until its route file or the US settings change, or it is six months old (tcs/bundle_store.py). Tick "rebuild_us"
-# to rebuild them all after a code change that should reach every US route.
+# to rebuild them all after a code change that should reach every US route. "skip_us" leaves the listed US routes out
+# of one publish (say, to publish sooner than the longest routes take to build); the next publish adds them back.
 #
 # "Run workflow" also takes a list of route ids (e.g. tpe_man_ncl) to rebuild just those. Such a run does not publish,
 # since the runner holds only those routes and publishing would drop the rest: it uploads their bundles, evidence packs
@@ -40,6 +41,10 @@ on:
         description: "Rebuild every US route instead of reusing the bundles kept from earlier publishes."
         type: boolean
         default: false
+      skip_us:
+        description: "US route ids to leave out of this publish, comma-separated (e.g. texas_eagle_lax_chi). They are added back by the next publish."
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -58,6 +63,7 @@ jobs:
     env:
       ROUTES: ${{ inputs.routes || '' }}
       FORCE_US: ${{ inputs.rebuild_us && 'true' || '' }}
+      SKIP_US: ${{ inputs.skip_us || '' }}
       GH_TOKEN: ${{ github.token }}
       ON_MAIN: ${{ github.ref == 'refs/heads/main' && 'true' || '' }}
     outputs:
@@ -89,7 +95,11 @@ jobs:
           unknown = sorted(wanted - {r["id"] for r in routes})
           if unknown:
               raise SystemExit(f"::error::Unknown route id(s): {', '.join(unknown)}")
-          us = [r["id"] for r in routes if r["country"] == "US"]
+          skip = {x.strip() for x in os.environ["SKIP_US"].split(",") if x.strip()}
+          unknown = sorted(skip - {r["id"] for r in routes if r["country"] == "US"})
+          if unknown:
+              raise SystemExit(f"::error::Not US route id(s): {', '.join(unknown)}")
+          us = [r["id"] for r in routes if r["country"] == "US" and r["id"] not in skip]
           gb = [r["id"] for r in routes if r["country"] != "US"]
           reuse = []
           if not wanted:              # a publish: reuse the US bundles kept from earlier publishes where still current
@@ -101,7 +111,7 @@ jobs:
               fh.write(f"us={json.dumps(us)}\n")
               fh.write(f"us_reuse={' '.join(reuse)}\n")
               fh.write(f"gb={','.join(gb)}\n")
-          print(f"US: {len(us)} route(s) to build, {len(reuse)} kept from earlier publishes; GB: {len(gb)} route(s)")
+          print(f"US: {len(us)} route(s) to build, {len(reuse)} kept from earlier publishes, {len(skip)} left out; GB: {len(gb)} route(s)")
 
   us:
     name: Build ${{ matrix.route }}
