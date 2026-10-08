@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_DIR = ROOT / "config"
 ROUTES_DIR = CONFIG_DIR / "routes"
+COUNTRIES_DIR = CONFIG_DIR / "countries"
+BASE_COUNTRY = "GB"           # config/*.yaml describe Great Britain; other countries override them (config/countries/<CC>/)
 DATA_DIR = ROOT / "data"
 RAW = DATA_DIR / "raw"
 INTERIM = DATA_DIR / "interim"
@@ -35,8 +37,17 @@ class Settings:
     sim_defaults: dict[str, Any] = field(default_factory=dict)     # pristine copy of simulation.yaml (before presets / train designs)
     starlink_defaults: dict[str, Any] = field(default_factory=dict)
     report: dict[str, Any] = field(default_factory=dict)          # config/report.yaml: cover-page and header details
+    country_profile: dict[str, Any] = field(default_factory=dict)  # config/countries/<CC>/profile.yaml; empty for GB
 
     # ---- convenience accessors -------------------------------------------------
+    @property
+    def country(self) -> str:
+        return normalise_country(self.route.get("country"))
+
+    @property
+    def is_gb(self) -> bool:
+        return self.country == BASE_COUNTRY
+
     @property
     def route_id(self) -> str:
         return self.route["id"]
@@ -67,6 +78,31 @@ class Settings:
         }
 
 
+def normalise_country(code: str | None) -> str:
+    c = (code or BASE_COUNTRY).strip().upper()
+    return "GB" if c == "UK" else c
+
+
+def _deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
+    """`over` laid on top of `base`, dict by dict; any other value (lists included) replaces the base's."""
+    out = dict(base)
+    for k, v in over.items():
+        out[k] = _deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+def country_profile(country: str | None, config_dir: Path | None = None) -> dict[str, Any]:
+    """config/countries/<CC>/profile.yaml for a route outside Great Britain, with `dir` set; {} for GB or a country
+    without a profile (which then runs on the GB defaults, as before)."""
+    cc = normalise_country(country)
+    if cc == BASE_COUNTRY:
+        return {}
+    d = (config_dir or CONFIG_DIR) / "countries" / cc
+    if not (d / "profile.yaml").exists():
+        return {}
+    return dict(_load_yaml(d / "profile.yaml"), dir=d, code=cc)
+
+
 def list_routes(config_dir: Path | None = None) -> list[dict[str, Any]]:
     """Every route in config/routes/*.yaml plus the default in config/route.yaml (id, name, origin, destination)."""
     cfg = config_dir or CONFIG_DIR
@@ -76,7 +112,7 @@ def list_routes(config_dir: Path | None = None) -> list[dict[str, Any]]:
         r = _load_yaml(f).get("route", {})
         if r.get("id") and r["id"] not in seen:
             seen.add(r["id"])
-            out.append({"id": r["id"], "name": r.get("name"), "operator": r.get("operator"), "origin": r["stations"][0]["name"], "destination": r["stations"][-1]["name"], "file": str(f)})
+            out.append({"id": r["id"], "name": r.get("name"), "operator": r.get("operator"), "country": normalise_country(r.get("country")), "origin": r["stations"][0]["name"], "destination": r["stations"][-1]["name"], "file": str(f)})
     return out
 
 
@@ -101,15 +137,27 @@ def load_settings(config_dir: Path | None = None, offline: bool = False, route_i
     cfg = config_dir or CONFIG_DIR
     load_dotenv(ROOT / ".env")
     route_doc = _load_yaml(cfg / "route.yaml")
+    route = _route_config(cfg, route_id)
+    prof = country_profile(route.get("country"), cfg)
+    terrain = route_doc.get("terrain", {})
+    networks = _load_yaml(cfg / "networks.yaml")
+    sim = _load_yaml(cfg / "simulation.yaml")
+    if prof:
+        # A country profile swaps in its own networks file and lays its overrides over the GB defaults.
+        if prof.get("networks"):
+            networks = _load_yaml(prof["dir"] / prof["networks"])
+        terrain = _deep_merge(terrain, prof.get("terrain") or {})
+        sim = _deep_merge(sim, prof.get("simulation") or {})
     s = Settings(
-        route=_route_config(cfg, route_id),
-        terrain=route_doc.get("terrain", {}),
-        networks=_load_yaml(cfg / "networks.yaml"),
+        route=route,
+        terrain=terrain,
+        networks=networks,
         starlink=_load_yaml(cfg / "starlink.yaml"),
-        sim=_load_yaml(cfg / "simulation.yaml"),
-        env={k: v for k, v in os.environ.items() if k in {"OFCOM_API_KEY", "OPENCELLID_TOKEN", "OS_DATAHUB_KEY", "NROD_USERNAME", "NROD_PASSWORD", "OVERPASS_URL"}},
+        sim=sim,
+        env={k: v for k, v in os.environ.items() if k in {"OFCOM_API_KEY", "OPENCELLID_TOKEN", "OS_DATAHUB_KEY", "NROD_USERNAME", "NROD_PASSWORD", "OVERPASS_URL", "FCC_BDC_USERNAME", "FCC_BDC_TOKEN"}},
         offline=offline,
         report=_load_yaml(cfg / "report.yaml").get("report", {}) if (cfg / "report.yaml").exists() else {},
+        country_profile=prof,
     )
     import copy
 

@@ -86,7 +86,8 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
     das = set(cfg["tunnels"].get("das_tunnels", []))
 
     df = prior.merge(serving, on=["sample_id", "provider_id"], how="left")
-    df = df.merge(samples[["sample_id", "distance_m", "cutting_depth_m", "in_tunnel", "tunnel_name", "urban_density", "speed_kph"]], on="sample_id", how="left")
+    df = df.merge(samples[["sample_id", "distance_m", "cutting_depth_m", "in_tunnel", "tunnel_name", "urban_density", "speed_kph"]
+                          + (["capacity_scale"] if "capacity_scale" in samples else [])], on="sample_id", how="left")
     s = df["prior_score"].astype(float).values
     has_prior = ~np.isnan(s)
     s = np.where(has_prior, s, 0.45)                       # no record: neutral prior, low confidence (see confidence.py)
@@ -164,7 +165,9 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
     # Mild speed effect (Doppler / scheduler) and multi-cell variance from the serving distance.
     speed_f = 1 - 0.08 * np.clip(df["speed_kph"].fillna(0).values / 200, 0, 1)
     vcap = float(vprof.get("capacity_factor", 1.0) or 1.0)             # antenna/MIMO class (EDGE Rail 4x4 vs passive 2x2)
-    cap = cap_prior * usable * speed_f * (1 - (1 - hcfg["capacity_factor"]) * hp) * vcap
+    # US: capacity follows local phone-test speeds (Ookla) where the build applied them (sources/ookla.capacity_scale)
+    scale = df["capacity_scale"].fillna(1.0).to_numpy(float) if "capacity_scale" in df else 1.0
+    cap = cap_prior * usable * speed_f * (1 - (1 - hcfg["capacity_factor"]) * hp) * vcap * scale
     lat = cfg["latency_ms"]["base"] + cfg["latency_ms"]["at_zero_extra"] * (1 - q) + hcfg["latency_spike_ms"] * hp
     loss = _interp_loss(q, cfg["packet_loss_pct"]) + hcfg["packet_loss_pct"] * hp
     avail = q > floor

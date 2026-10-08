@@ -2,7 +2,7 @@ import { fmtHM, type Store } from '../state'
 import { CLASS_NAMES, CLASS_VARS, WIFI_CLASSES, classOf, cssVar, qClass } from '../sim/classify'
 import { dasAt } from '../sim/model'
 import { arrowNav } from './a11y'
-import { LIVE_COVERAGE_MIN, liveCoverageShare } from '../data'
+import { isGB, LIVE_COVERAGE_MIN, liveCoverageShare } from '../data'
 import { esc } from '../html'
 import type { CalibrationMeta, Meta } from '../types'
 
@@ -225,6 +225,14 @@ function correctionsText(m: Meta): string {
     + 'Signal at a spot repeats from trip to trip, so earlier passes are the best guide to later ones; on later trips this cut the average error from 9.7 to 8.3 dB.'
 }
 
+function ooklaText(c: NonNullable<Meta['ookla_check']>): string {
+  const pct = (v: number | null | undefined) => (v == null ? '–' : `${Math.round(v * 100)} %`)
+  return `Speedtest by Ookla open data, ${esc(c.quarter)} (CC BY-NC-SA 4.0): phones on every network, mostly off the train, within ~600 m of ${pct(c.samples_with_tests)} of the route. `
+    + `Median phone download ${c.median_ookla_down_mbps ?? '–'} Mbps; the model's best network here ${c.median_model_best_mbps ?? '–'} Mbps. `
+    + (c.section_rank_correlation != null ? `Over ${c.sections} sections of ${c.section_km} km the two agree on which are slower with a rank correlation of ${c.section_rank_correlation.toFixed(2)}, and ${pct(c.slowest_fifth_overlap)} of the slowest fifth by phone tests is also in the model's slowest fifth. ` : '')
+    + (c.used_as_input ? 'They also set how fast each network is along the line: capacity is scaled by the local phone speed against the route median (damped, 0.6 to 1.6×), so this comparison is no longer independent.' : 'A check only: it does not change the predictions.')
+}
+
 function renderSources(store: Store) {
   const m = store.state.data.meta
   const live = (flag: boolean, liveLabel = 'live', synthLabel = 'synthetic') => `<em class="${flag ? 'live' : 'synth'}">${flag ? liveLabel : synthLabel}</em>`
@@ -232,21 +240,28 @@ function renderSources(store: Store) {
   const straight = m.geometry_source === 'osm' ? m.geometry_straight_legs ?? [] : []   // legs with no rail path, drawn straight
   const terrLive = m.terrain_source !== 'synthetic_terrain'
   const covShare = liveCoverageShare(m), covLive = covShare >= LIVE_COVERAGE_MIN
+  const fccPrior = m.coverage_sources.includes('fcc_bdc')               // the US operators' FCC filings
+  const sitesPrior = !fccPrior && m.coverage_sources.includes('opencellid_sites')   // the US fallback: an estimate, not an operator prediction
   const cellLive = m.cell_source === 'opencellid'
   const items = [
-    ['Route geometry', geomLive && !straight.length, m.geometry_source === 'osm' ? 'OpenStreetMap rail network, routed station-to-station (ODbL). Tunnel / cutting / embankment / bridge / maxspeed tags carried per 50 m sample.'
-      + (straight.length ? ` No rail path was found for ${esc(straight.map(s => s.replace('-', '–')).join(', '))}: drawn as a straight line there, without tunnels, cuttings or line speeds.` : '') : m.geometry_source === 'file' ? 'Infrastructure-manager / curated centreline file.' : 'Spline through approximate station coordinates. Run <code>tcs run</code> without <code>--offline</code> to fetch the OSM centreline.', straight.length ? 'partly live' : undefined],
+    ['Route geometry', geomLive && !straight.length, m.geometry_source === 'ntad' ? 'US DOT National Transportation Atlas Database line for this Amtrak service, used because the OpenStreetMap track was unavailable for this build: generalised, with no tunnel, cutting or line-speed tags (tunnels are placed from the route file, approximately).' : m.geometry_source === 'osm' ? 'OpenStreetMap rail network, routed station-to-station (ODbL). Tunnel / cutting / embankment / bridge / maxspeed tags carried per 50 m sample.'
+      + (straight.length ? ` No rail path was found for ${esc(straight.map(s => s.replace('-', '–')).join(', '))}: drawn as a straight line there, without tunnels, cuttings or line speeds.` : '') : m.geometry_source === 'file' ? 'Infrastructure-manager / curated centreline file.' : 'Spline through approximate station coordinates. Run <code>tcs run</code> without <code>--offline</code> to fetch the OSM centreline.', straight.length || m.geometry_source === 'ntad' ? 'partly live' : undefined],
     ['Terrain & sky visibility', terrLive, terrLive ? `${esc(m.terrain_source)}: 30 m DEM, 16-ray horizon per sample, solid-angle sky fraction above the terminal's minimum elevation.${lidarText(m)}` : 'Procedural terrain. 3D terrain rendering is disabled until real elevation is available.'],
-    ['Cellular coverage prior', covLive, covLive ? `${esc(m.coverage_sources.join(', '))} — operator predictions on Ofcom's 50 m grid mapped to a model score; never presented as measured RSRP.`
+    ['Cellular coverage prior', covLive && !sitesPrior, fccPrior && covLive ? 'Operators\' own coverage filings on the FCC National Broadband Map, 4G LTE and 5G-NR, in-vehicle scored above stationary-only, mapped to a model score; never presented as measured RSRP.' + (m.coverage_sources.includes('opencellid_sites') ? ' Networks without filings use the distance to their OpenCellID sites.' : '')
+      : sitesPrior && covLive ? 'Estimated from how far the track is from each network\'s nearest OpenCellID sites (with a lift for nearby 5G sites and for dense sites). There is no operator coverage prediction behind it and no US measurements have calibrated it yet, so treat it as indicative; confidence is held at 0.40.'
+      : covLive ? `${esc(m.coverage_sources.join(', '))} — operator predictions on Ofcom's 50 m grid mapped to a model score; never presented as measured RSRP.`
       : covShare > 0 ? `Only ${Math.round(covShare * 100)} % of the route has Ofcom predictions (usually the Ofcom call quota ran out part-way); the rest is a neutral stand-in. Rebuild the route once the quota resets.`
-      : 'Synthetic prior (noise field). Set <code>OFCOM_API_KEY</code>, or enable Connected Nations open data, to replace it.', covShare > 0 && !covLive ? 'partly live' : undefined],
+      : isGB(m) ? 'Synthetic prior (noise field). Set <code>OFCOM_API_KEY</code>, or enable Connected Nations open data, to replace it.'
+      : 'Synthetic prior (noise field). Set <code>OPENCELLID_TOKEN</code> so the prior can be estimated from the networks\' cell sites.', sitesPrior && covLive ? 'estimate' : covShare > 0 && !covLive ? 'partly live' : undefined],
     ['Cell sites', cellLive, cellLive ? 'OpenCellID corridor extract (CC BY-SA 4.0). Logical cells; top-5 candidates per sample; serving cell with hysteresis.' + mastsText(m) : 'Synthetic site layout. Set <code>OPENCELLID_TOKEN</code> to use the community database.'],
     ['Satcom', false, `Predictive obstruction model (${esc(m.providers.find(p => p.type === 'satcom')?.terminal ?? 'performance')} terminal). No public route-level Starlink RF telemetry exists; confidence capped at 0.35 until terminal telemetry is ingested.`, 'predictive'],
     ['Calibration', !!m.calibration, calibrationText(m.calibration), m.calibration ? undefined : 'none'],
     ...(m.measured_corrections ? [['Measured corrections', true, correctionsText(m), 'measured'] as [string, boolean, string, string]] : []),
+    ...(m.timetable?.train ? [['Timetable', true, `${esc(m.timetable.route ?? 'Train')} ${esc(m.timetable.train)} from the operator's GTFS feed${m.timetable.feed_version ? ` (version ${esc(m.timetable.feed_version)})` : ''}: real calling points and times; stations it doesn't call at are passed at line speed.`] as [string, boolean, string]] : []),
+    ...(m.ookla_check ? [[m.ookla_check.used_as_input ? 'Phone speed tests' : 'Phone speed tests (check)', true, ooklaText(m.ookla_check), m.ookla_check.used_as_input ? 'live' : 'check'] as [string, boolean, string, string]] : []),
   ] as [string, boolean, string, string?][]
   let h = `<div class="src-list">`
-  for (const [title, ok, text, alt] of items) h += `<div class="src"><h5>${title}${live(ok, title === 'Calibration' ? 'calibrated' : title === 'Measured corrections' ? 'measured' : 'live', alt ?? 'synthetic')}</h5><p>${text}</p></div>`
+  for (const [title, ok, text, alt] of items) h += `<div class="src"><h5>${title}${live(ok, title === 'Calibration' ? 'calibrated' : title === 'Measured corrections' ? 'measured' : title.endsWith('(check)') ? 'check' : 'live', alt ?? 'synthetic')}</h5><p>${text}</p></div>`
   h += `<div class="src"><h5>Model ${esc(m.model_version)}</h5><p>${m.n_samples.toLocaleString()} samples at ${m.route.sample_spacing_m} m · ${(m.length_m / 1000).toFixed(1)} km · scenario switching runs the same link-manager and Wi-Fi model in the browser.</p></div>`
   if (m.warnings?.length) h += `<div class="src"><h5>Warnings</h5><p>${m.warnings.map(esc).join('<br>')}</p></div>`
   h += `</div>`

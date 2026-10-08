@@ -18,6 +18,11 @@ def cellular_confidence(settings: Settings, obs: pd.DataFrame, measured_sample_i
     ofcom = obs["_prior_source"].astype(str).str.startswith("ofcom").values
     conf = np.where(ofcom & ~has_cells, c["ofcom_prior"], conf)
     conf = np.where(ofcom & has_cells, c["ofcom_prior_with_cells"], conf)
+    if c.get("fcc_prior") is not None:         # the US operators' FCC filings: published predictions, like Ofcom's
+        conf = np.where((obs["_prior_source"].astype(str) == "fcc_bdc").values, np.where(has_cells, c["fcc_prior"] + 0.10, c["fcc_prior"]), conf)
+    if c.get("site_prior") is not None:        # prior from cell-site distance (the US): a prediction with infrastructure support
+        sites = (obs["_prior_source"].astype(str) == "opencellid_sites").values
+        conf = np.where(sites, c["site_prior"], conf)
     conf = np.where(~obs["_has_prior"].values, 0.15, conf)
     calibration_mask = obs["_calibrated"].to_numpy(dtype=bool) if "_calibrated" in obs else np.zeros(len(obs), dtype=bool)
     conf = np.where(ofcom & calibration_mask, conf + c["calibrated_bonus"], conf)

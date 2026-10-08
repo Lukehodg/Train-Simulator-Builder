@@ -1,0 +1,50 @@
+# Country profile for routes with `country: US`. config/*.yaml describe Great Britain; this file says what changes
+# for the United States. Anything not named here keeps the GB default (tcs/config.py: load_settings).
+label: United States
+
+# Mobile networks and their US network codes (replaces config/networks.yaml for US routes).
+networks: networks.yaml
+
+# Stations: Amtrak station codes (the `crs` field of a route file), resolved from the US DOT's National Transportation
+# Atlas Database (NTAD) Amtrak Stations layer. The track is still routed through OpenStreetMap; when Overpass is
+# unavailable, the NTAD Amtrak Routes line named in the route file (geometry.ntad_route) stands in for it.
+stations: ntad_amtrak
+
+# Coverage prior. There is no keyless US counterpart of Ofcom's per-postcode predictions, so each network's prior is
+# estimated from how close its OpenCellID sites are to the track (tcs/sources/cell_prior.py). Uncalibrated: no US
+# field measurements have been fitted yet.
+coverage_prior: opencellid_sites
+# The operators' own coverage filings with the FCC (National Broadband Map), when FCC_BDC_USERNAME and FCC_BDC_TOKEN
+# are set: they replace the site-distance estimate for every network that has them (tcs/sources/fcc_bdc.py).
+fcc_prior: true
+
+# Ookla Open Data (keyless, quarterly): crowd-sourced phone speed tests per ~600 m tile, all networks pooled.
+# check: compare the model with them (meta.json `ookla_check`).
+# capacity: scale every network's capacity by the local phone speed relative to the route median, damped and clamped
+#   (sources/ookla.capacity_scale). FCC filings still decide where there is coverage; this decides how fast it is.
+ookla:
+  check: true
+  capacity: true
+  capacity_scale: {exponent: 0.5, min: 0.6, max: 1.6, min_tests: 10, smooth_m: 1500}
+
+terrain:
+  source: copernicus_glo30       # OS Terrain 50 is GB-only
+  # Near the track: USGS 3DEP bare earth at 2 m (lidar-derived, keyless) in place of the GB surveys, and with
+  # `surface`, trees, buildings and bridges from the 3DEP lidar point clouds on AWS (sources/usgs_ept.py), read at
+  # ~2.8 m and tied to that bare earth. The tiles are decoded in memory, never stored (only the small project indexes,
+  # in data/ept_cache/); reading them is mostly waiting on downloads, hence the extra workers.
+  lidar: {enabled: true, source: usgs_3dep, surface: true, workers: 8}
+
+simulation:
+  cellular:
+    national_calibration: null   # config/calibration.yaml is fitted to Network Rail's measurement trains (GB)
+    measured_corrections: null   # config/route_corrections.parquet: GB scanner-train corrections
+  confidence:
+    fcc_prior: 0.55              # operators' FCC filings, as GB's Ofcom prior (+0.10 with cells, as Ofcom)
+    site_prior: 0.40             # cell-site-distance prior, uncalibrated: the bottom of the "prediction with partial
+                                 # infrastructure support" band (GB's Ofcom prior is 0.55, 0.65 with cells)
+  presets:
+    edge_rail_fleet_connect:
+      fitted_networks: [att, verizon, tmobile]   # three EDGE Rail antennas, one on each US network
+  train:
+    edge_rail_networks: [att, verizon, tmobile]

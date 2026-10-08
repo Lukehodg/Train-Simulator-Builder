@@ -25,6 +25,8 @@ dependencies = [
   "openpyxl>=3.1",
   "python-docx>=1.1",
   "matplotlib>=3.8",
+  "h3>=4.0",                   # FCC mobile coverage hexagon files (US)
+  "laspy[lazrs]>=2.5",         # USGS 3DEP lidar point clouds (US surface model)
 ]
 
 [project.optional-dependencies]

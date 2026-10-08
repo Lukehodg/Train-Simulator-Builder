@@ -18,11 +18,19 @@ from .base import Provenance, SourceUnavailable, console, http_get, now_iso
 COLUMNS = ["radio", "mcc", "net", "area", "cell", "unit", "lon", "lat", "range", "samples", "changeable", "created", "updated", "averageSignal"]
 
 
+def plmns(op: dict) -> list[tuple[int, int]]:
+    """The (mcc, mnc) pairs a network's cells carry: its `plmn` list ("mcc-mnc") where a network spans several MCCs
+    (the US), else its `mcc` with each of its `mnc` codes."""
+    if op.get("plmn"):
+        return [(int(a), int(b)) for a, b in (str(p).split("-") for p in op["plmn"])]
+    return [(int(op["mcc"]), int(mnc)) for mnc in op.get("mnc", [])]
+
+
 def _mnc_map(operators: list[dict]) -> dict[tuple[int, int], str]:
     out = {}
     for op in operators:
-        for mnc in op.get("mnc", []):
-            out[(int(op["mcc"]), int(mnc))] = op["id"]
+        for key in plmns(op):
+            out[key] = op["id"]
     return out
 
 
@@ -31,12 +39,18 @@ def fetch_cells_bulk(settings, proj: Projector, samples: pd.DataFrame, raw_dir: 
     if not token:
         raise SourceUnavailable("OPENCELLID_TOKEN not set")
     ocfg = settings.networks["opencellid"]
-    mccs = sorted({int(op["mcc"]) for op in settings.operators})
+    mccs = sorted({mcc for op in settings.operators for mcc, _ in plmns(op)})
     frames = []
     shared = raw_dir.parent / "shared"          # one national download serves every route (OpenCellID allows 2 per file per day)
     for mcc in mccs:
         url = ocfg["bulk_url"].format(token=token, mcc=mcc)
-        gz = http_get(url, raw_dir=shared, name="opencellid_bulk", ext="csv.gz", offline=settings.offline, ttl_days=30)
+        try:
+            gz = http_get(url, raw_dir=shared, name="opencellid_bulk", ext="csv.gz", offline=settings.offline, ttl_days=30)
+        except SourceUnavailable as exc:
+            if len(mccs) > 1 and "HTTP 404" in str(exc):     # OpenCellID has no file for an MCC with no cells: the others still count
+                console.log(f"[yellow]OpenCellID has no file for MCC {mcc}; skipped")
+                continue
+            raise
         with open(gz, "rb") as fh:
             magic = fh.read(2)
         if magic != bytes([0x1F, 0x8B]):

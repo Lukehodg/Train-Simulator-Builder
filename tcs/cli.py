@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .config import ROOT, list_routes, load_settings
+from .config import ROOT, list_routes, load_settings, normalise_country
 
 app = typer.Typer(add_completion=False, help="Train Route 3D Connectivity Simulation pipeline")
 console = Console()
@@ -45,10 +45,11 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     from .model.simulate import simulate
     from .pipeline.export import export_all
     from .pipeline.join_cells import candidate_cells, corridor_cells, serving_cells
-    from .pipeline.join_coverage import coverage_prior
+    from .pipeline.join_coverage import coverage_prior, needs_cells
     from .pipeline.movement import movement
     from .pipeline.obstruction import enrich_terrain
     from .pipeline.sample_route import build_route, save_bundle
+    from .sources import gtfs_feed
 
     s = load_settings(offline=offline, route_id=route)
     interim = _interim(s)
@@ -79,10 +80,15 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     for w in b.warnings:
         console.log(f"[yellow]{w}")
     b.samples = enrich_terrain(s, b)
-    prior, b.samples = coverage_prior(s, b, limit=limit_postcodes)
-    cells = corridor_cells(s, b, b.samples)
+    if needs_cells(s):                                         # prior read from the cell sites (US): cells first
+        cells = corridor_cells(s, b, b.samples)
+        prior, b.samples = coverage_prior(s, b, limit=limit_postcodes, cells=cells)
+    else:
+        prior, b.samples = coverage_prior(s, b, limit=limit_postcodes)
+        cells = corridor_cells(s, b, b.samples)
     cand = candidate_cells(s, b.samples, cells)
     serving = serving_cells(s, b.samples, cand)
+    gtfs_feed.apply(s)                                         # timetable.source: gtfs -> one real train's calls
     b.samples, stations = movement(s, b.samples, b.stations)
     b.stations = stations
     save_bundle(b, interim)
@@ -93,8 +99,26 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     corr = corrections.for_build(s, b, interim)
     if corr is not None:
         console.log(f"measured corrections: {corr['sample_id'].nunique():,} of {len(b.samples):,} samples on at least one network")
+    extra, got = {}, None
+    ocfg = s.country_profile.get("ookla") or {}
+    if ocfg.get("check") or ocfg.get("capacity"):             # crowd-sourced phone speeds (US): a check, and optionally an input
+        from .sources import ookla
+
+        got = ookla.for_build(s, b.samples, s.paths()["raw"])
+        if got is not None:
+            b.samples = b.samples.merge(got[0], on="sample_id", how="left")
+            if ocfg.get("capacity"):
+                b.samples["capacity_scale"] = ookla.capacity_scale(b.samples, got[0], ocfg.get("capacity_scale")).astype("float32")
+                cs = b.samples["capacity_scale"]
+                console.log(f"Ookla capacity scale: {cs.quantile(0.1):.2f} / {cs.median():.2f} / {cs.quantile(0.9):.2f} (10th / median / 90th percentile)")
+            save_bundle(b, interim)                            # `tcs report` re-simulates from these samples
     obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, policy=policy, corrections=corr)
-    written = export_all(s, b, b.samples, stations, cells, obs, rc, prior)
+    if got is not None:
+        extra["ookla_check"] = ookla.check(b.samples, obs, got[0], got[1]) | {"used_as_input": bool(ocfg.get("capacity"))}
+        c = extra["ookla_check"]
+        console.log(f"Ookla check: median phone download {c['median_ookla_down_mbps']} Mbps vs model best network {c['median_model_best_mbps']} Mbps; "
+                    f"section rank correlation {c.get('section_rank_correlation')}, slowest-fifth overlap {c.get('slowest_fifth_overlap')}")
+    written = export_all(s, b, b.samples, stations, cells, obs, rc, prior, extra_meta=extra)
     if copy_to_web:
         dest = ROOT / "web" / "public" / "data" / s.route_id
         dest.mkdir(parents=True, exist_ok=True)
@@ -161,7 +185,7 @@ def write_index() -> Path:
         except json.JSONDecodeError:
             continue
         st = m.get("stations", [])
-        items.append({"id": m["route"]["id"], "name": m["route"].get("name"), "operator": m["route"].get("operator"), "origin": st[0]["name"] if st else None,
+        items.append({"id": m["route"]["id"], "name": m["route"].get("name"), "operator": m["route"].get("operator"), "country": normalise_country(m["route"].get("country")), "origin": st[0]["name"] if st else None,
                       "destination": st[-1]["name"] if st else None, "length_km": round(m.get("length_m", 0) / 1000, 1), "duration_min": round(m.get("duration_s", 0) / 60),
                       "geometry_source": m.get("geometry_source"), "terrain_source": m.get("terrain_source"), "n_samples": m.get("n_samples")})
     out = root / "index.json"
@@ -200,12 +224,12 @@ def package(out: Path | None = typer.Option(None, help="Output folder (default: 
 
 @app.command()
 def routes():
-    """List the route catalogue (config/routes) and which ones have a built bundle."""
+    """List the route catalogue (config/routes: GB, and the US through config/countries/US) and which are built."""
     built = {p.parent.name for p in (ROOT / "web" / "public" / "data").glob("*/meta.json")}
     t = Table(title="Routes")
-    t.add_column("id"), t.add_column("name"), t.add_column("from → to"), t.add_column("built")
+    t.add_column("id"), t.add_column("country"), t.add_column("name"), t.add_column("from → to"), t.add_column("built")
     for r in list_routes():
-        t.add_row(r["id"], r["name"] or "", f"{r['origin']} → {r['destination']}", "yes" if r["id"] in built else "-")
+        t.add_row(r["id"], r["country"], r["name"] or "", f"{r['origin']} → {r['destination']}", "yes" if r["id"] in built else "-")
     console.print(t)
 
 
@@ -371,6 +395,16 @@ def report_all(only: str | None = typer.Option(None, help="Comma-separated route
     console.log(f"{len(ids) * len(wanted) - len(failures)}/{len(ids) * len(wanted)} reports built" + (f"; failed: {', '.join(failures)}" if failures else ""))
     if failures:
         raise typer.Exit(code=1)
+
+
+@app.command("probe-fcc")
+def probe_fcc(provider_id: str = typer.Argument("130077", help="FCC provider id (AT&T 130077, Verizon 131425, T-Mobile 130403)"),
+              state: str = typer.Argument("NY")):
+    """Print what the FCC National Broadband Map API lists for one provider and state (needs FCC_BDC_USERNAME / FCC_BDC_TOKEN)."""
+    from .sources.fcc_bdc import probe
+
+    s = load_settings(route_id="nec_was_bos")
+    console.print_json(json.dumps(probe(s, s.paths()["raw"], provider_id, state), default=str))
 
 
 @app.command("probe-ofcom")

@@ -136,30 +136,40 @@ def lidar_features(settings: Settings, bundle: RouteBundle) -> dict[str, np.ndar
     import hashlib
 
     lcfg = settings.terrain.get("lidar") or {}
-    if settings.offline or not lcfg.get("enabled", True) or str(settings.route.get("country", "")).upper() not in {"GB", "UK"}:
+    us = lcfg.get("source") == "usgs_3dep"                # US: 3DEP bare earth (no tree / building surface)
+    if settings.offline or not lcfg.get("enabled", True):
         return None
-    if bundle.proj.crs.to_epsg() != 27700:
+    if not us and (str(settings.route.get("country", "")).upper() not in {"GB", "UK"} or bundle.proj.crs.to_epsg() != 27700):
         return None
     s = bundle.samples
     corridor, azimuths = float(lcfg.get("corridor_m", 60)), int(settings.terrain.get("horizon_azimuths", 16))
     on_bridge = s["on_bridge"].fillna(False).to_numpy(dtype=bool) if "on_bridge" in s else np.zeros(len(s), dtype=bool)
     roofed = s["canopy_probability"].fillna(0).to_numpy() > 0.3 if "canopy_probability" in s else np.zeros(len(s), dtype=bool)
     key = hashlib.sha1(np.round(np.c_[s["x"].values, s["y"].values, s["bearing_deg"].values], 1).tobytes() + on_bridge.tobytes() + roofed.tobytes()
-                       + f"{LIDAR_VERSION}|{corridor}|{azimuths}".encode()).hexdigest()[:16]
+                       + f"{LIDAR_VERSION}|{corridor}|{azimuths}|{lcfg.get('source', 'gb')}|{lcfg.get('surface', True)}".encode()).hexdigest()[:16]
     cache = settings.paths()["raw"] / "lidar" / f"features_{key}.parquet"
     if cache.exists():
         df = pd.read_parquet(cache)
     else:
-        from ..sources.lidar import Lidar, corridor_features
+        from ..sources.lidar import Lidar, Usgs3dep, corridor_features
 
         try:
-            lidar = Lidar(settings.paths()["raw"].parent / "shared" / "lidar_index")
+            # point-cloud tiles run to gigabytes along a long route: read in memory, never stored; their project indexes
+            # live outside data/raw (which CI caches between runs); only the per-sample features are cached, like GB
+            surface = settings.paths()["raw"].parent.parent / "ept_cache" if us and lcfg.get("surface", True) else None
+            lidar = Usgs3dep(bundle.proj.crs.to_epsg(), surface=surface) if us else Lidar(settings.paths()["raw"].parent / "shared" / "lidar_index")
         except Exception as exc:  # noqa: BLE001
             console.log(f"[yellow]LiDAR unavailable ({exc}); using the 30 m terrain model")
             return None
-        console.log(f"LiDAR: reading a {corridor:.0f} m corridor either side of {len(s):,} samples (England, Wales, Scotland open surveys)")
+        console.log(f"LiDAR: reading a {corridor:.0f} m corridor either side of {len(s):,} samples "
+                    + ("(USGS 3DEP bare earth)" if us else "(England, Wales, Scotland open surveys)"))
         f = corridor_features(s["x"].values, s["y"].values, s["bearing_deg"].values, on_bridge, roofed, lidar, corridor_m=corridor,
                               azimuths=azimuths, workers=int(lcfg.get("workers", 8)))
+        if us and getattr(lidar, "ept", None) is None:   # bare earth only: nothing is known about trees or buildings
+            f["obstruction_share"][:] = np.nan
+        elif us:
+            got, seen = lidar.surface_cells
+            console.log(f"LiDAR: point-cloud surface (trees, buildings) on {got / max(seen, 1):.0%} of the cells read")
         df = pd.DataFrame({k: v for k, v in f.items() if k not in ("horizon_near_deg", "lidar_failed")})
         for k in range(azimuths):
             df[f"hz_{k:02d}"] = f["horizon_near_deg"][:, k]

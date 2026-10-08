@@ -104,16 +104,25 @@ def kpis(rc: pd.DataFrame, samples: pd.DataFrame, spacing_m: float) -> dict:
     }
 
 
-LIVE_COVERAGE_MIN = 0.9       # a route's coverage counts as live when at least this share of it comes from Ofcom
+LIVE_COVERAGE_MIN = 0.9       # a route's coverage counts as live when at least this share of it comes from a live prior source
+# Live coverage prior sources, by prefix: Ofcom (API or Connected Nations) in GB; the FCC filings in the US, and the
+# OpenCellID site-distance estimate
+# where a country profile uses it (the US), which is live data but not an operator prediction.
+LIVE_PRIOR_PREFIXES = ("ofcom", "fcc_bdc", "opencellid_sites")
 
 
 def live_coverage_share(meta: dict) -> float:
-    """Share of sample-operator pairs whose coverage prior comes from Ofcom (API or Connected Nations). Bundles built
-    before the share was recorded count as fully live when any Ofcom source is listed, as they used to."""
+    """Share of sample-operator pairs whose coverage prior comes from a live source (LIVE_PRIOR_PREFIXES). Bundles built
+    before the share was recorded count as fully live when any such source is listed, as they used to."""
     share = meta.get("coverage_share")
     if share:
-        return float(sum(v for k, v in share.items() if str(k).startswith("ofcom")))
-    return 1.0 if any(str(c).startswith("ofcom") for c in meta.get("coverage_sources", [])) else 0.0
+        return float(sum(v for k, v in share.items() if str(k).startswith(LIVE_PRIOR_PREFIXES)))
+    return 1.0 if any(str(c).startswith(LIVE_PRIOR_PREFIXES) for c in meta.get("coverage_sources", [])) else 0.0
+
+
+def is_gb(meta: dict) -> bool:
+    """Whether a bundle is a Great Britain route (bundles without a country are)."""
+    return str((meta.get("route") or {}).get("country") or "GB").upper() in ("GB", "UK")
 
 
 def rsrp_band(dbm: np.ndarray) -> np.ndarray:
@@ -451,7 +460,7 @@ def _das_plain(entries: list[str]) -> str:
     return ", ".join(f"km {e[3:].replace('-', '–')}" if e.startswith("km:") else e for e in entries)
 
 
-def _assumptions(settings: Settings) -> list[tuple[str, str]]:
+def _assumptions(settings: Settings, meta: dict | None = None) -> list[tuple[str, str]]:
     from .report_docx import POLICIES, VEHICLES
 
     sim = settings.sim
@@ -483,7 +492,10 @@ def _assumptions(settings: Settings) -> list[tuple[str, str]]:
         ("Passenger demand", f"{pw['passengers']} seats, load factor {lo}–{hi} along the route, {pw['active_share'] * 100:.0f} % online, "
                              f"{pw['per_user_demand_mbps']} Mbps each; access points {pw['ap_capacity_mbps']} Mbps in total"),
         ("Service-class thresholds (score out of 100)", ", ".join(f"{c} ≥ {v}" for c, v in pw["classes"].items())),
-        ("Timetable", f"departure {settings.route.get('timetable', {}).get('departure')}, {settings.route.get('timetable', {}).get('dwell_s')} s dwell at each stop"),
+        ("Timetable", (f"{(meta or {}).get('timetable', {}).get('route', 'train')} {meta['timetable']['train']} from the operator's GTFS feed, "
+                       if ((meta or {}).get("timetable") or {}).get("train") else "")
+                      + f"departure {(meta or {}).get('departure') or settings.route.get('timetable', {}).get('departure')}, "
+                        f"{settings.route.get('timetable', {}).get('dwell_s')} s dwell at each stop"),
         ("Model version", str(sim.get("model_version", ""))),
     ]
     return rows
@@ -597,7 +609,14 @@ def write_xlsx(path: Path, ev, samples: pd.DataFrame, rc: pd.DataFrame, obs: pd.
 
 def _coverage_row(meta: dict) -> tuple[str, str, str]:
     share = live_coverage_share(meta)
-    what = "Ofcom operator coverage predictions" + (" (with Connected Nations open data)" if "ofcom_connected_nations" in meta.get("coverage_sources", []) else "")
+    srcs = meta.get("coverage_sources", [])
+    if "fcc_bdc" in srcs:
+        what = "Operators' coverage filings, FCC National Broadband Map (in-vehicle and stationary)" + (
+            "; distance to OpenCellID sites for networks without them" if "opencellid_sites" in srcs else "")
+    elif "opencellid_sites" in srcs:
+        what = "Estimated from distance to each network's OpenCellID sites (uncalibrated)"
+    else:
+        what = "Ofcom operator coverage predictions" + (" (with Connected Nations open data)" if "ofcom_connected_nations" in meta.get("coverage_sources", []) else "")
     if share >= LIVE_COVERAGE_MIN:
         return ("Mobile coverage", what, "live")
     if share > 0:
@@ -726,7 +745,8 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
         _coverage_row(meta),
         ("Cell sites and handovers", cells_text(meta), live(meta.get("cell_source") == "opencellid")),
         ("Satellite", "Predictive sky-visibility model" + (" with terminal telemetry" if any("telemetry" in str(x) for x in obs["source_flags"].unique()) else ""), "predictive"),
-        ("Timetable", "Route configuration" if settings.route.get("timetable", {}).get("source", "yaml") == "yaml" else str(settings.route["timetable"]["source"]), "configured"),
+        ("Timetable", f"Operator GTFS feed (feed {meta['timetable'].get('feed_version')}, train {meta['timetable']['train']})" if (meta.get("timetable") or {}).get("train")
+         else "Route configuration", "live" if (meta.get("timetable") or {}).get("train") else "configured"),
         _calibration_row(meta.get("calibration")),
         *_check_rows(meta.get("calibration")),
         *_corrections_rows(meta),
@@ -759,7 +779,7 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
     ev = Evidence(
         meta=meta, route_name=meta["route"]["name"], origin=meta["stations"][0]["name"], destination=meta["stations"][-1]["name"],
         k=k, sec=sec, links=links, outages=outage_stretches(samples, rc, stations), shares=shares, charts=charts,
-        assumptions=_assumptions(settings), sources=sources, validation=validation, scenario_title=title, scenario_detail=detail,
+        assumptions=_assumptions(settings, meta), sources=sources, validation=validation, scenario_title=title, scenario_detail=detail,
         vehicle=VEHICLES.get(vname, vname), policy=POLICIES.get(policy, policy),
         satcom=(" and ".join(sat) if sat and sim.get("satcom_enabled", True) else "no satellite link"),
         passengers=f"{pw['passengers']} seats; {pw['active_share'] * 100:.0f} % of passengers online, {pw['per_user_demand_mbps']} Mbps demand each",

@@ -526,3 +526,71 @@ def corridor_features(x: np.ndarray, y: np.ndarray, bearing_deg: np.ndarray, on_
         bad = ok & np.isfinite(med) & (np.abs(rl - med) > 3.0) & ~on_bridge
         out["lidar_ok"][bad] = False
     return out
+
+
+# ---------------------------------------------------------------- United States
+USGS_3DEP = "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage"
+
+
+class Usgs3dep:
+    """US elevation from the USGS 3D Elevation Program (keyless). 'dtm': the national best-available bare-earth
+    mosaic, lidar-derived at 1 m wherever 3DEP lidar has been flown (all of the Northeast Corridor), read at 2 m in the
+    route's own grid. 'dsm': with `surface` (a cache folder), trees, buildings and bridges from the 3DEP lidar point
+    clouds (sources/usgs_ept.py) on top of that bare earth; without it, or where no point cloud covers a cell, the bare
+    earth again (cutting walls, embankments and the ground skyline only). Same interface as Lidar."""
+
+    name = "usgs_3dep"
+
+    def __init__(self, epsg: int, offline: bool = False, surface: Path | None = None):
+        if offline:
+            raise SourceUnavailable("3DEP needs the network")
+        self.epsg = epsg
+        self.ept = None
+        if surface is not None:
+            from .usgs_ept import Ept
+
+            try:
+                self.ept = Ept(epsg, surface)
+            except (requests.RequestException, OSError, ValueError) as exc:
+                console.log(f"[yellow]USGS point clouds unavailable ({exc}); bare earth only")
+        self.surface_cells = [0, 0]                      # cells with a point-cloud surface, cells read
+        self.http = _Http()
+        self._last: dict[int, tuple[tuple, Grid]] = {}
+        self._lock = threading.Lock()
+
+    def read(self, bbox: tuple[float, float, float, float], layer: str) -> tuple[Grid, str | None]:
+        tid = threading.get_ident()
+        with self._lock:
+            hit = self._last.get(tid)
+        if hit is not None and hit[0] == bbox:              # 'dsm' right after 'dtm' for the same window: one request
+            g = hit[1]
+            arr = g.arr.copy()
+            if layer == "dsm" and self.ept is not None and not g.failed and g.missing() < 1.0:
+                try:
+                    top, _ = self.ept.heights(g, g.arr)
+                except (requests.RequestException, OSError, ValueError) as exc:
+                    console.log(f"[yellow]USGS point cloud read failed ({exc}); bare earth for this window")
+                    top = np.full_like(arr, np.nan)
+                with self._lock:
+                    self.surface_cells[0] += int(np.isfinite(top).sum())
+                    self.surface_cells[1] += int(np.isfinite(arr).sum())
+                arr = np.fmax(arr, top)                  # never below the ground; bare earth where the cloud is silent
+            return Grid(g.x0, g.y1, arr, g.res, g.failed), (self.name if g.missing() < 1.0 else None)
+        g = Grid.blank(bbox)
+        h, w = g.arr.shape
+        params = {"bbox": ",".join(f"{v:.1f}" for v in bbox), "bboxSR": self.epsg, "imageSR": self.epsg, "size": f"{w},{h}", "format": "tiff",
+                  "pixelType": "F32", "noDataInterpretation": "esriNoDataMatchAny", "interpolation": "RSP_BilinearInterpolation", "f": "image"}
+        try:
+            r = self.http.session.get(USGS_3DEP, params=params, timeout=120)
+            got = _read_tiff(r.content) if r.ok else None
+        except requests.RequestException:
+            got = None
+        if got is None:
+            g.failed = True
+        else:
+            a, left, top, _ = got
+            if a.shape == g.arr.shape:
+                g.place(a, left, top)
+        with self._lock:
+            self._last[tid] = (bbox, g)
+        return Grid(g.x0, g.y1, g.arr.copy(), g.res, g.failed), (self.name if g.missing() < 1.0 else None)

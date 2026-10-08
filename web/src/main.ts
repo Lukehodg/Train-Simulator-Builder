@@ -2,7 +2,7 @@ import './styles.css'
 import type { PickingInfo } from '@deck.gl/core'
 import { CONFIG } from './config'
 import { esc } from './html'
-import { indexAtTime, linkFitted, LIVE_COVERAGE_MIN, liveCoverageShare, loadRoute } from './data'
+import { indexAtTime, isGB, linkFitted, LIVE_COVERAGE_MIN, liveCoverageShare, loadRoute } from './data'
 import { createMap } from './map/map'
 import { buildRuns, cellLayers, labelFontReady, ribbonLayers, stationLayers, trainLayers, type Run } from './map/layers'
 import { setBuildings, trackLayers, treeLayer } from './map/environment'
@@ -10,6 +10,7 @@ import { parityReport, simulate } from './sim/model'
 import { Store, fmtClock, type State } from './state'
 import { initInspector, showTab } from './ui/inspector'
 import { initRail } from './ui/rail'
+import { normaliseRegion, regionOf, rememberRoute, renderRegionSwitch, routeForRegion, routeUrl, type CatalogueRoute } from './ui/region'
 import { initReports } from './ui/reports'
 import { trapTab } from './ui/a11y'
 import { setSimState } from './ui/status'
@@ -20,7 +21,13 @@ import type { CameraMode, Meta, Policy, RouteData, SimResult, Vehicle } from './
 const $ = (id: string) => document.getElementById(id)!
 
 async function main() {
-  const routeId = new URLSearchParams(location.search).get('route') ?? CONFIG.defaultRoute
+  const params = new URLSearchParams(location.search)
+  // The route catalogue drives the region switch and the route list; ?region=US with no ?route opens that region's route.
+  const indexP: Promise<{ routes?: CatalogueRoute[] } | null> = fetch(`${CONFIG.dataRoot}/index.json`).then(r => (r.ok ? r.json() : null)).catch(() => null)
+  let routeId = params.get('route')
+  const askedRegion = normaliseRegion(params.get('region'))
+  if (!routeId && askedRegion && askedRegion !== 'GB') routeId = routeForRegion((await indexP)?.routes ?? [], askedRegion)
+  routeId ??= CONFIG.defaultRoute
   let theme: 'light' | 'dark' = 'dark'   // pit-wall default; an explicit choice (theme button) is remembered
   try { const saved = localStorage.getItem('tls-theme'); if (saved === 'light' || saved === 'dark') theme = saved } catch {}
   document.documentElement.dataset.theme = theme
@@ -56,13 +63,20 @@ async function main() {
 
   // ---- header ----------------------------------------------------------------------------------
   $('routeTitle').textContent = `${(meta.length_m / 1000).toFixed(0)} km · ${Math.round(meta.duration_s / 60)} min · ${meta.route.sample_spacing_m} m samples`
-  fetch(`${CONFIG.dataRoot}/index.json`).then(r => (r.ok ? r.json() : null)).then((idx: any) => {
+  const region = regionOf(meta.route)
+  rememberRoute(region, routeId)
+  indexP.then(idx => {
     const sel = $('routePick') as HTMLSelectElement
-    const routes: any[] = idx?.routes?.length ? idx.routes : [{ id: routeId, name: meta.route.name, origin: meta.stations[0]?.name, destination: meta.stations[meta.stations.length - 1]?.name, length_km: meta.length_m / 1000 }]
+    const here = { id: routeId!, name: meta.route.name, country: region, origin: meta.stations[0]?.name, destination: meta.stations[meta.stations.length - 1]?.name, length_km: meta.length_m / 1000 }
+    const all: any[] = idx?.routes?.length ? idx.routes : [here]
+    if (!all.some(r => r.id === routeId)) all.push(here)
+    // The route list holds the current region's routes; the switch beside it changes region.
+    const routes = all.filter(r => regionOf(r) === region)
     sel.innerHTML = routes.map(r => `<option value="${esc(r.id)}">${esc(r.name ?? r.id)} · ${esc(r.origin)} → ${esc(r.destination)} (${Math.round(r.length_km)} km)</option>`).join('')
-    sel.value = routeId
-    sel.addEventListener('change', () => { const u = new URL(location.href); u.searchParams.set('route', sel.value); location.href = u.toString() })
-  }).catch(() => {})
+    sel.value = routeId!
+    sel.addEventListener('change', () => { location.href = routeUrl(sel.value) })
+    renderRegionSwitch($('regionPick'), all, region, r => { const id = routeForRegion(all, r); if (id) location.href = routeUrl(id) })
+  })
   $('btnExport').addEventListener('click', () => exportScenario(store))
   const liveFlags = [meta.geometry_source === 'osm' || meta.geometry_source === 'file', realTerrain, liveCoverageShare(meta) >= LIVE_COVERAGE_MIN, meta.cell_source === 'opencellid']
   const liveCount = liveFlags.filter(Boolean).length
@@ -236,7 +250,7 @@ async function main() {
   $('btnTheme').addEventListener('click', () => { const t = store.state.theme === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = t; try { localStorage.setItem('tls-theme', t) } catch {} store.set({ theme: t }) })
   const help = $('help') as HTMLElement
   let helpReturn: HTMLElement | null = null
-  const openHelp = () => { renderHelp(); helpReturn = document.activeElement as HTMLElement | null; help.hidden = false; ($('helpClose') as HTMLElement).focus() }
+  const openHelp = () => { renderHelp(meta); helpReturn = document.activeElement as HTMLElement | null; help.hidden = false; ($('helpClose') as HTMLElement).focus() }
   const closeHelp = () => { if (help.hidden) return; help.hidden = true; helpReturn?.focus() }
   help.addEventListener('keydown', trapTab(help.querySelector('.modal-card') as HTMLElement))
   $('btnHelp').addEventListener('click', openHelp)
@@ -422,7 +436,7 @@ function renderKpis(store: Store, baseline?: SimResult) {
   $('kpis').innerHTML = $('kpisPanel').innerHTML = kp.join('')   // dock strip + the Live-tab copy used on narrower screens
 }
 
-function renderHelp() {
+function renderHelp(meta: Meta) {
   $('helpBody').innerHTML = `
     <p>A time-aware simulation of onboard connectivity for one train service: every 50 m along the real railway the model estimates each cellular operator and the satcom link, runs the onboard link manager, and predicts the passenger Wi-Fi experience.</p>
     <ul>
@@ -434,7 +448,7 @@ function renderHelp() {
       <li><b>Confidence</b>: switch the colouring to Confidence to see how much of the route rests on measured, predicted or synthetic inputs.</li>
       <li><b>Keys</b>: <kbd>Space</kbd> play / pause · <kbd>←</kbd> <kbd>→</kbd> ±1 min (<kbd>Shift</kbd> ±10 min) · <kbd>[</kbd> <kbd>]</kbd> playback rate · <kbd>Home</kbd> <kbd>End</kbd> start / end · <kbd>I</kbd> inspector · <kbd>S</kbd> inspect the sample at the train · <kbd>C</kbd> camera view · <kbd>?</kbd> this help · <kbd>Esc</kbd> close. Drag the map to take the camera.</li>
     </ul>
-    <p>Predictions, not measurements. Ofcom coverage is operator-predicted; OpenCellID is community data; Starlink has no public route-level telemetry. See the Sources tab for what is live in this bundle.</p>`
+    <p>Predictions, not measurements. ${isGB(meta) ? 'Ofcom coverage is operator-predicted' : 'Coverage is estimated from distance to each network\'s OpenCellID sites, uncalibrated'}; OpenCellID is community data; Starlink has no public route-level telemetry. See the Sources tab for what is live in this bundle.</p>`
 }
 
 main()

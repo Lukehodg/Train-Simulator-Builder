@@ -54,6 +54,9 @@ export interface Meta {
   length_m: number
   duration_s: number
   departure: string
+  timetable?: { source: string; route?: string; train?: string; feed_version?: string | null }   // a GTFS train (US) names itself
+  ookla_check?: { quarter: string; samples_with_tests: number; median_ookla_down_mbps: number | null; median_model_best_mbps: number | null
+    sections: number; section_km: number; section_rank_correlation?: number | null; slowest_fifth_overlap?: number | null; used_as_input?: boolean }
   n_samples: number
   providers: ProviderMeta[]
   stations: StationMeta[]
@@ -93,6 +96,7 @@ export interface RouteData {
   /** share of the antenna's sky roofed by bridges over the line, from LiDAR (0 where none) */
   overhead: Float32Array
   speed: Float32Array
+  capScale: Float32Array | null              // US: local phone-test speed relative to the route (Ookla); null = 1 everywhere
   t: Float64Array
   nextStation: (string | null)[]
   ttn: Float32Array
