@@ -23,8 +23,11 @@ from .base import Provenance, SourceUnavailable, console, http_get, now_iso
 
 DEFAULT_OVERPASS = "https://overpass-api.de/api/interpreter"
 WIDER_CORRIDOR = 2.5          # second try, as a multiple of the corridor, when a leg has no rail path
-OVERPASS_WAITS_S = (20, 40, 60, 90, 120, 180)   # pauses after a 429 before asking again (plus up to half again at random)
-GUIDE_CHUNK_M = 200_000       # a guide line is searched in pieces of this length (one Overpass query each)
+OVERPASS_ENDPOINTS = (DEFAULT_OVERPASS, "https://overpass.private.coffee/api/interpreter")   # tried in turn while busy
+OVERPASS_WAITS_S = (20, 40, 60, 90, 120, 180)   # pauses after a busy answer before asking again (plus up to half again at random)
+BUSY = re.compile(r"\b(429|502|503|504)\b|timed? ?out|Gateway|Connection", re.I)
+GUIDE_CHUNK_M = 120_000       # a guide line is searched in pieces of this length (one Overpass query each; 200 km pieces
+                              # through cities were slow enough to draw 504s)
 
 
 @dataclass
@@ -39,18 +42,20 @@ class RouteGeometry:
 
 
 def _overpass(query: str, raw_dir: Path, name: str, url: str | None, offline: bool, timeout: int) -> dict:
-    # overpass-api.de hands out a few query slots per address. US routes are built twenty at a time from GitHub's runners,
-    # and a long route asks twenty-odd queries, so a 429 is a queue, not a refusal: wait for a slot (up to ~10 minutes)
-    # rather than fall back to the generalised NTAD line for 3,000 km.
-    for wait in [*OVERPASS_WAITS_S, None]:
+    # overpass-api.de hands out a few query slots per address and answers 504 when it is loaded. US routes are built
+    # twenty at a time from GitHub's runners, and a long route asks a dozen queries or more, so a 429 or a 504 means
+    # "busy", not "no": wait (up to ~10 minutes in all), alternating with a second public instance, rather than fall
+    # back to the generalised NTAD line for 3,000 km. Half of the first all-Amtrak build did (8 Oct 2026).
+    endpoints = [url] if url else list(OVERPASS_ENDPOINTS)
+    for k, wait in enumerate([*OVERPASS_WAITS_S, None]):
         try:
-            path = http_get(url or DEFAULT_OVERPASS, raw_dir=raw_dir, name=name, data={"data": query}, ext="json", timeout=timeout + 30,
-                            offline=offline)
+            path = http_get(endpoints[k % len(endpoints)], raw_dir=raw_dir, name=name, data={"data": query}, ext="json",
+                            timeout=timeout + 30, offline=offline)
             break
         except SourceUnavailable as exc:
-            if wait is None or "429" not in str(exc):
+            if wait is None or offline or not BUSY.search(str(exc)):
                 raise
-            console.log(f"[yellow]Overpass is busy (HTTP 429); asking again in {wait:.0f} s")
+            console.log(f"[yellow]Overpass is busy ({str(exc)[:80]}); asking again in {wait:.0f} s")
             time.sleep(wait + random.uniform(0, wait / 2))
     # A busy Overpass server answers 200 with an HTML error page, or with JSON whose `remark` says the query timed out
     # and whose elements are cut short. Neither is the railway: drop it from the cache so the next run asks again.

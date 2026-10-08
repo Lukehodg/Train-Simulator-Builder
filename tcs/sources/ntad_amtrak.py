@@ -25,6 +25,8 @@ STATIONS_URL = f"{NTAD}/NTAD_Amtrak_Stations/FeatureServer/0/query"
 ROUTES_URL = f"{NTAD}/NTAD_Amtrak_Routes/FeatureServer/0/query"
 JOIN_M = 150.0        # route-line parts whose ends lie this close are joined (the layer is drawn in separate pieces)
 SNAP_M = 400.0        # a station joins the line within this distance (the line is generalised, not surveyed)
+STATION_MAX_M = 10_000.0   # further than this from every vertex of the line, the station is not on it (New Orleans and
+                           # Philadelphia sit 2.3-2.4 km from the nearest vertex of the generalised line)
 
 
 def _query(url: str, params: dict, raw_dir: Path, name: str, offline: bool) -> dict:
@@ -107,7 +109,7 @@ def fetch_route(stations: pd.DataFrame, route_name: str, proj: Projector, raw_di
     for _, s in stations.iterrows():
         sx, sy = proj.to_xy(s["lon"], s["lat"])
         d = np.hypot(allx - sx, ally - sy)
-        if d.min() > SNAP_M * 5:
+        if d.min() > STATION_MAX_M:
             raise SourceUnavailable(f"station {s['crs']} is {d.min() / 1000:.1f} km from the NTAD {route_name!r} line")
         vid = f"station:{s['crs']}"
         for j in np.flatnonzero(d <= max(SNAP_M, float(d.min()) + 1)):

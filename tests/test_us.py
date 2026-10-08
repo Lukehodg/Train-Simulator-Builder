@@ -413,7 +413,7 @@ def test_gtfs_shape_guides_the_track_search(tmp_path):
         trip_shape(feed, "Northeast Regional", "WAS", "BOS")                   # no trip of the service has one
     guide = trip_shape(feed, "Acela", "WAS", "BOS")
     proj = Projector(local_crs(-74.0, 40.6, "US"))
-    polys = _guide_polys(guide, proj, 8000)
+    polys = _guide_polys(guide, proj, 8000, chunk_m=200_000)
     assert len(polys) == 3                                                     # ~630 km: 200 + 200 + 230 (a short tail joins)
     from shapely.geometry import Point, Polygon
 
@@ -502,9 +502,11 @@ def test_overpass_waits_out_a_rate_limit(tmp_path, monkeypatch):
     calls = []
 
     def fake_get(url, **kw):
-        calls.append(1)
-        if len(calls) < 3:
+        calls.append(url)
+        if len(calls) == 1:
             raise SourceUnavailable("osm_rail: HTTP 429 rate limit")
+        if len(calls) == 2:
+            raise SourceUnavailable("osm_rail: 504 Server Error: Gateway Timeout for url: https://overpass-api.de/api/interpreter")
         p = tmp_path / "a.json"
         p.write_text('{"elements": []}')
         return p
@@ -512,8 +514,12 @@ def test_overpass_waits_out_a_rate_limit(tmp_path, monkeypatch):
     monkeypatch.setattr(osm_route, "http_get", fake_get)
     monkeypatch.setattr(osm_route.time, "sleep", lambda s: None)
     assert osm_route._overpass("q", tmp_path, "osm_rail", None, False, 10) == {"elements": []}
-    assert len(calls) == 3
+    assert calls == [osm_route.DEFAULT_OVERPASS, osm_route.OVERPASS_ENDPOINTS[1], osm_route.DEFAULT_OVERPASS]   # busy: the other one
     calls.clear()
+    monkeypatch.setattr(osm_route, "http_get", lambda url, **kw: (_ for _ in ()).throw(SourceUnavailable("osm_rail: HTTP 400 for x")))
+    with pytest.raises(SourceUnavailable):                     # a bad query is not "busy": no waiting
+        osm_route._overpass("q", tmp_path, "osm_rail", None, False, 10)
+    monkeypatch.setattr(osm_route, "http_get", fake_get)
     monkeypatch.setattr(osm_route, "OVERPASS_WAITS_S", ())
     with pytest.raises(SourceUnavailable):                     # out of patience: the caller falls back as before
         osm_route._overpass("q", tmp_path, "osm_rail", None, False, 10)
