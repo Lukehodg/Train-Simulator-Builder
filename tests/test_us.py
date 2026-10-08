@@ -514,7 +514,7 @@ def test_overpass_waits_out_a_rate_limit(tmp_path, monkeypatch):
     monkeypatch.setattr(osm_route, "http_get", fake_get)
     monkeypatch.setattr(osm_route.time, "sleep", lambda s: None)
     assert osm_route._overpass("q", tmp_path, "osm_rail", None, False, 10) == {"elements": []}
-    assert calls == [osm_route.DEFAULT_OVERPASS, osm_route.OVERPASS_ENDPOINTS[1], osm_route.DEFAULT_OVERPASS]   # busy: the other one
+    assert calls == list(osm_route.OVERPASS_ENDPOINTS)                 # busy: the next instance in turn
     assert osm_route.BUSY.search("osm_rail: 500 Server Error: Internal Server Error for url: https://overpass.private.coffee/api/interpreter")
     calls.clear()
     monkeypatch.setattr(osm_route, "http_get", lambda url, **kw: (_ for _ in ()).throw(SourceUnavailable("osm_rail: HTTP 400 for x")))
