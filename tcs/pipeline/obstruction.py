@@ -132,7 +132,11 @@ LIDAR_VERSION = "lidar-v2"                                # bump when the featur
 
 
 def lidar_features(settings: Settings, bundle: RouteBundle) -> dict[str, np.ndarray] | None:
-    """Per-sample LiDAR features for a GB route (sources.lidar), cached by route geometry; None where it does not apply."""
+    """Per-sample LiDAR features for a GB route (sources.lidar); None where it does not apply.
+
+    Every sample read is kept (data/raw/<route>/lidar), keyed by its position, heading and flags, so a later build
+    reads only the samples that are new or that an earlier build could not read (a busy service). Before, one failed
+    stretch kept the whole route out of the cache and every publish read every route's LiDAR again."""
     import hashlib
 
     lcfg = settings.terrain.get("lidar") or {}
@@ -145,12 +149,20 @@ def lidar_features(settings: Settings, bundle: RouteBundle) -> dict[str, np.ndar
     corridor, azimuths = float(lcfg.get("corridor_m", 60)), int(settings.terrain.get("horizon_azimuths", 16))
     on_bridge = s["on_bridge"].fillna(False).to_numpy(dtype=bool) if "on_bridge" in s else np.zeros(len(s), dtype=bool)
     roofed = s["canopy_probability"].fillna(0).to_numpy() > 0.3 if "canopy_probability" in s else np.zeros(len(s), dtype=bool)
-    key = hashlib.sha1(np.round(np.c_[s["x"].values, s["y"].values, s["bearing_deg"].values], 1).tobytes() + on_bridge.tobytes() + roofed.tobytes()
-                       + f"{LIDAR_VERSION}|{corridor}|{azimuths}|{lcfg.get('source', 'gb')}|{lcfg.get('surface', True)}".encode()).hexdigest()[:16]
-    cache = settings.paths()["raw"] / "lidar" / f"features_{key}.parquet"
-    if cache.exists():
-        df = pd.read_parquet(cache)
-    else:
+    key = hashlib.sha1(f"{LIDAR_VERSION}|{corridor}|{azimuths}|{lcfg.get('source', 'gb')}|{lcfg.get('surface', True)}".encode()).hexdigest()[:16]
+    cache = settings.paths()["raw"] / "lidar" / f"samples_{key}.parquet"
+    keys = pd.DataFrame({"kx": np.round(s["x"].to_numpy(float) * 10).astype(np.int64), "ky": np.round(s["y"].to_numpy(float) * 10).astype(np.int64),
+                         "kb": np.round(s["bearing_deg"].to_numpy(float) * 10).astype(np.int64), "on_bridge": on_bridge, "roofed": roofed})
+    kcols = list(keys.columns)
+    df = keys
+    try:
+        if cache.exists():
+            df = keys.merge(pd.read_parquet(cache).drop_duplicates(kcols), on=kcols, how="left", validate="many_to_one")
+    except Exception as exc:  # noqa: BLE001 - an unreadable cache (a run cut off mid-write) is read again, not a failed build
+        console.log(f"[yellow]LiDAR: ignoring an unreadable cache ({exc})")
+    todo = df["lidar_ok"].isna().to_numpy() if "lidar_ok" in df else np.ones(len(s), dtype=bool)
+    failed = np.zeros(len(s), dtype=bool)
+    if todo.any():
         from ..sources.lidar import Lidar, Usgs3dep, corridor_features
 
         try:
@@ -160,29 +172,50 @@ def lidar_features(settings: Settings, bundle: RouteBundle) -> dict[str, np.ndar
             lidar = Usgs3dep(bundle.proj.crs.to_epsg(), surface=surface) if us else Lidar(settings.paths()["raw"].parent / "shared" / "lidar_index")
         except Exception as exc:  # noqa: BLE001
             console.log(f"[yellow]LiDAR unavailable ({exc}); using the 30 m terrain model")
-            return None
-        console.log(f"LiDAR: reading a {corridor:.0f} m corridor either side of {len(s):,} samples "
-                    + ("(USGS 3DEP bare earth)" if us else "(England, Wales, Scotland open surveys)"))
-        f = corridor_features(s["x"].values, s["y"].values, s["bearing_deg"].values, on_bridge, roofed, lidar, corridor_m=corridor,
-                              azimuths=azimuths, workers=int(lcfg.get("workers", 8)))
-        if us and getattr(lidar, "ept", None) is None:   # bare earth only: nothing is known about trees or buildings
-            f["obstruction_share"][:] = np.nan
-        elif us:
-            got, seen = lidar.surface_cells
-            console.log(f"LiDAR: point-cloud surface (trees, buildings) on {got / max(seen, 1):.0%} of the cells read")
-        df = pd.DataFrame({k: v for k, v in f.items() if k not in ("horizon_near_deg", "lidar_failed")})
-        for k in range(azimuths):
-            df[f"hz_{k:02d}"] = f["horizon_near_deg"][:, k]
-        df["lidar_source"] = df["lidar_source"].astype(str)
-        if f["lidar_failed"].any():                       # not cached: the next build asks the services again
-            console.log(f"[yellow]LiDAR: {int(f['lidar_failed'].sum()):,} samples could not be read (service errors); they use the 30 m "
-                        "terrain model in this build")
-        else:
+            if todo.all():
+                return None
+            lidar = None
+        if lidar is not None:
+            kept = len(s) - int(todo.sum())
+            console.log(f"LiDAR: reading a {corridor:.0f} m corridor either side of {int(todo.sum()):,} samples "
+                        + ("(USGS 3DEP bare earth)" if us else "(England, Wales, Scotland open surveys)")
+                        + (f"; {kept:,} kept from earlier builds" if kept else ""))
+            f = corridor_features(s["x"].values, s["y"].values, s["bearing_deg"].values, on_bridge, roofed, lidar, corridor_m=corridor,
+                                  azimuths=azimuths, workers=int(lcfg.get("workers", 8)), todo=todo, outliers=False)
+            if us and getattr(lidar, "ept", None) is None:   # bare earth only: nothing is known about trees or buildings
+                f["obstruction_share"][:] = np.nan
+            elif us:
+                got, seen = lidar.surface_cells
+                console.log(f"LiDAR: point-cloud surface (trees, buildings) on {got / max(seen, 1):.0%} of the cells read")
+            new = pd.DataFrame({k: v for k, v in f.items() if k not in ("horizon_near_deg", "lidar_failed")})
+            for k in range(azimuths):
+                new[f"hz_{k:02d}"] = f["horizon_near_deg"][:, k]
+            new["lidar_source"] = new["lidar_source"].astype(str)
+            df = df.copy()
+            for c in new.columns:
+                df[c] = new[c].to_numpy() if c not in df else np.where(todo, new[c].to_numpy(), df[c].to_numpy())
+            failed = f["lidar_failed"]
+            if failed.any():                              # not kept: the next build asks the services again
+                console.log(f"[yellow]LiDAR: {int(failed.sum()):,} samples could not be read (service errors); they use the 30 m "
+                            "terrain model in this build")
+            keep = df[~failed & ~df["lidar_ok"].isna().to_numpy()]
             cache.parent.mkdir(parents=True, exist_ok=True)
-            df.to_parquet(cache, index=False)
+            tmp = cache.with_suffix(".tmp")
+            keep.to_parquet(tmp, index=False)
+            tmp.replace(cache)                            # whole or not at all
+    df = df.copy()
+    df["lidar_ok"] = df["lidar_ok"].fillna(False).astype(bool) if "lidar_ok" in df else False
+    df["lidar_source"] = df["lidar_source"].fillna("").astype(str) if "lidar_source" in df else ""
+    for c in ("rail_level_m", "wall_left_m", "wall_right_m", "fall_left_m", "fall_right_m", "overhead_fraction", "obstruction_share",
+              *(f"hz_{k:02d}" for k in range(azimuths))):
+        df[c] = df[c].astype(np.float32) if c in df else np.float32(np.nan)
+    df = df.drop(columns=kcols)
     out = {c: df[c].to_numpy() for c in df.columns if not c.startswith("hz_")}
     out["lidar_ok"] = out["lidar_ok"].astype(bool)
     out["horizon_near_deg"] = df[[f"hz_{k:02d}" for k in range(azimuths)]].to_numpy(dtype=np.float32)
+    from ..sources.lidar import drop_rail_outliers
+
+    drop_rail_outliers(out, on_bridge)                   # after merging, so kept and new samples are judged together
     console.log(f"LiDAR: {out['lidar_ok'].mean():.0%} of samples covered ("
                 + ", ".join(f"{k} {v:.0%}" for k, v in pd.Series(out["lidar_source"][out["lidar_ok"]]).value_counts(normalize=True).items()) + ")")
     return out

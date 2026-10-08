@@ -431,13 +431,17 @@ OVERHEAD_M = 5.5                                 # surface this far above the ra
 
 def corridor_features(x: np.ndarray, y: np.ndarray, bearing_deg: np.ndarray, on_bridge: np.ndarray, roofed: np.ndarray,
                       lidar: Lidar, *, corridor_m: float = 60.0, antenna_h_m: float = 4.0, azimuths: int = 16,
-                      segment: int = 6, workers: int = 8, retry_pause_s: float = 5.0, log=console.log) -> dict[str, np.ndarray]:
+                      segment: int = 6, workers: int = 8, retry_pause_s: float = 5.0, log=console.log, todo: np.ndarray | None = None,
+                      outliers: bool = True) -> dict[str, np.ndarray]:
     """For every route sample: rail level, cutting walls / embankment fall either side, the near-field skyline
     (DSM, per azimuth, out to corridor_m), the share of the stretch under a structure, and the share of the ground
     within 30 m under trees or buildings. lidar_ok is False where the surveys have no data (keep the DEM values there).
 
     on_bridge: the line itself is on a structure (OSM), so its rail level is the deck (DSM), not the ground below.
-    roofed: a station roof spans the line here, so a long run of high surface is a roof, not a viaduct."""
+    roofed: a station roof spans the line here, so a long run of high surface is a roof, not a viaduct.
+    todo: read only these samples (the rest stay empty), e.g. those an earlier build could not read. Each sample's
+    features depend only on the surveys around it, so they come out as in a full read.
+    outliers: drop rail levels far from their neighbours (drop_rail_outliers); off when the caller merges reads first."""
     from concurrent.futures import ThreadPoolExecutor
 
     n = len(x)
@@ -454,7 +458,8 @@ def corridor_features(x: np.ndarray, y: np.ndarray, bearing_deg: np.ndarray, on_
     def run(s0: int) -> bool:
         """Features for one stretch of samples; False when a read failed, so the stretch is worth another try."""
         s1 = min(n, s0 + segment)
-        xs, ys = x[s0:s1], y[s0:s1]
+        want = np.ones(s1 - s0, dtype=bool) if todo is None else todo[s0:s1]
+        xs, ys = x[s0:s1][want], y[s0:s1][want]
         bbox = tuple(float(v) for v in (np.floor((xs.min() - pad) / RES) * RES, np.floor((ys.min() - pad) / RES) * RES,
                                         np.ceil((xs.max() + pad) / RES) * RES, np.ceil((ys.max() + pad) / RES) * RES))
         dtm, src = lidar.read(bbox, "dtm")
@@ -469,6 +474,8 @@ def corridor_features(x: np.ndarray, y: np.ndarray, bearing_deg: np.ndarray, on_
 
         warnings.simplefilter("ignore", RuntimeWarning)
         for i in range(s0, s1):
+            if not want[i - s0]:
+                continue
             b = np.radians(bearing_deg[i])
             ax_, ay_ = np.sin(b), np.cos(b)                  # along track
             lx_, ly_ = np.cos(b), -np.sin(b)                 # to the right of travel
@@ -512,7 +519,8 @@ def corridor_features(x: np.ndarray, y: np.ndarray, bearing_deg: np.ndarray, on_
             out["lidar_source"][i] = src
         return not dtm.failed
 
-    starts = list(range(0, n, segment))
+    starts = [s0 for s0 in range(0, n, segment) if todo is None or todo[s0:s0 + segment].any()]
+    total = n if todo is None else int(todo.sum())
     done, failed = 0, []
     with ThreadPoolExecutor(max_workers=workers) as ex:
         for s0, good in zip(starts, ex.map(run, starts)):
@@ -520,15 +528,22 @@ def corridor_features(x: np.ndarray, y: np.ndarray, bearing_deg: np.ndarray, on_
             if not good:
                 failed.append(s0)
             if done % 200 == 0:
-                log(f"LiDAR: {done * segment:,} of {n:,} samples")
+                log(f"LiDAR: {min(done * segment, total):,} of {total:,} samples")
     if failed:                                           # busy services: one slower pass over what failed
         log(f"LiDAR: {len(failed) * segment:,} samples hit a service error; trying them again")
         time.sleep(retry_pause_s)
         with ThreadPoolExecutor(max_workers=2) as ex:
             failed = [s0 for s0, good in zip(failed, ex.map(run, failed)) if not good]
         for s0 in failed:
-            out["lidar_failed"][s0:s0 + segment] = True
-    # a rail level far from its neighbours is a misplaced centreline or a gap in the survey, not a step in the railway
+            out["lidar_failed"][s0:s0 + segment] = True if todo is None else todo[s0:s0 + segment]
+    if outliers:
+        drop_rail_outliers(out, on_bridge)
+    return out
+
+
+def drop_rail_outliers(out: dict[str, np.ndarray], on_bridge: np.ndarray) -> None:
+    """A rail level far from its neighbours is a misplaced centreline or a gap in the survey, not a step in the
+    railway: that sample keeps the terrain model (lidar_ok False). In place."""
     rl = out["rail_level_m"]
     ok = out["lidar_ok"] & np.isfinite(rl)
     if ok.sum() > 5:
@@ -537,7 +552,6 @@ def corridor_features(x: np.ndarray, y: np.ndarray, bearing_deg: np.ndarray, on_
         med = pd.Series(np.where(ok, rl, np.nan)).rolling(5, center=True, min_periods=3).median().to_numpy()
         bad = ok & np.isfinite(med) & (np.abs(rl - med) > 3.0) & ~on_bridge
         out["lidar_ok"][bad] = False
-    return out
 
 
 # ---------------------------------------------------------------- United States
