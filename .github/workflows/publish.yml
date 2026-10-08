@@ -16,9 +16,10 @@ name: publish
 # A full rebuild makes about 18,000 Ofcom calls (one per postcode near the track), so run it at most once per quota
 # period: this key's quota was used up on 26 Sep 2026 and resets around the 16th, hence the 17th below.
 #
-# US routes are built side by side, one job each (the `us` job below: 20 minutes to 2 hours a route, 43 routes), and
-# handed to the publish job as artifacts; GB routes are built in the publish job, which needs the Ofcom quota and its
-# cache. Building every US route costs about 2,500 runner minutes, more than a private repository's monthly allowance,
+# US routes are built side by side, one job each (the `us` job below: 20 minutes to 4 hours a route, 44 routes), while
+# the `gb` job builds the GB routes (it needs the Ofcom quota and its cache); both hand their routes to the `publish`
+# job as artifacts. A US route whose rebuild fails keeps its previous build on the site where one is stored.
+# Building every US route costs about 2,500 runner minutes, more than a private repository's monthly allowance,
 # so each US bundle built on main is also kept as an asset of the `us-bundles` release and reused by later publishes
 # until its route file or the US settings change, or it is six months old (tcs/bundle_store.py). Tick "rebuild_us"
 # to rebuild them all after a code change that should reach every US route. "skip_us" leaves the listed US routes out
@@ -64,14 +65,18 @@ jobs:
       ROUTES: ${{ inputs.routes || '' }}
       FORCE_US: ${{ inputs.rebuild_us && 'true' || '' }}
       SKIP_US: ${{ inputs.skip_us || '' }}
-      GH_TOKEN: ${{ github.token }}
       ON_MAIN: ${{ github.ref == 'refs/heads/main' && 'true' || '' }}
     outputs:
       us: ${{ steps.pick.outputs.us }}
       us_reuse: ${{ steps.pick.outputs.us_reuse }}
+      us_fallback: ${{ steps.pick.outputs.us_fallback }}
       gb: ${{ steps.pick.outputs.gb }}
     steps:
+      # The write token stays out of .git/config and the job's environment: only the two steps that call gh get it,
+      # not `pip install` (whose packages are not pinned) or the code it installs.
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -80,16 +85,34 @@ jobs:
       - run: pip install -e .
       - name: Make sure the US bundle store exists
         if: env.ON_MAIN == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh release view us-bundles >/dev/null 2>&1 || gh release create us-bundles --prerelease --title "US route bundles" \
             --notes "Built US route bundles kept between publishes (see tcs/bundle_store.py). Managed by the publish workflow."
       - id: pick
         shell: python
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          import datetime as dt, json, os, subprocess
+          import datetime as dt, json, os, subprocess, time
           from pathlib import Path
           from tcs import bundle_store
           from tcs.config import list_routes
+
+          def kept_bundles():
+              """The us-bundles release's assets. A listing that fails for any reason but a missing release stops the
+              run: read as "nothing kept", it would rebuild every US route (about 2,500 runner minutes)."""
+              for attempt in range(4):
+                  got = subprocess.run(["gh", "release", "view", "us-bundles", "--json", "assets"], capture_output=True, text=True)
+                  if got.returncode == 0:
+                      return json.loads(got.stdout)["assets"]
+                  if "release not found" in got.stderr.lower():
+                      return []
+                  time.sleep(20 * (attempt + 1))
+              raise SystemExit(f"::error::Could not list the kept US bundles ({got.stderr.strip()[:200]}). "
+                               "Stopping rather than rebuilding every US route; run the workflow again.")
+
           wanted = {x.strip() for x in os.environ["ROUTES"].split(",") if x.strip()}
           routes = [r for r in list_routes() if not wanted or r["id"] in wanted]
           unknown = sorted(wanted - {r["id"] for r in routes})
@@ -101,17 +124,19 @@ jobs:
               raise SystemExit(f"::error::Not US route id(s): {', '.join(unknown)}")
           us = [r["id"] for r in routes if r["country"] == "US" and r["id"] not in skip]
           gb = [r["id"] for r in routes if r["country"] != "US"]
-          reuse = []
+          reuse, fallback = [], {}
           if not wanted:              # a publish: reuse the US bundles kept from earlier publishes where still current
-              got = subprocess.run(["gh", "release", "view", "us-bundles", "--json", "assets"], capture_output=True, text=True)
-              assets = json.loads(got.stdout)["assets"] if got.returncode == 0 else []
+              assets = kept_bundles()
               us, reuse = bundle_store.plan(us, {r["id"]: Path(r["file"]) for r in routes}, assets, dt.datetime.now(dt.timezone.utc),
                                             force=bool(os.environ["FORCE_US"]))
+              fallback = bundle_store.fallbacks(us, assets)   # put back if the rebuild fails, rather than dropping the route
           with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
               fh.write(f"us={json.dumps(us)}\n")
               fh.write(f"us_reuse={' '.join(reuse)}\n")
+              fh.write(f"us_fallback={' '.join(f'{k}={v}' for k, v in fallback.items())}\n")
               fh.write(f"gb={','.join(gb)}\n")
-          print(f"US: {len(us)} route(s) to build, {len(reuse)} kept from earlier publishes, {len(skip)} left out; GB: {len(gb)} route(s)")
+          print(f"US: {len(us)} route(s) to build ({len(fallback)} with an earlier build to fall back on), {len(reuse)} kept from "
+                f"earlier publishes, {len(skip)} left out; GB: {len(gb)} route(s)")
 
   us:
     name: Build ${{ matrix.route }}
@@ -123,11 +148,13 @@ jobs:
       contents: write          # keeps the bundle in the us-bundles release (on main)
     strategy:
       fail-fast: false
-      max-parallel: 20
+      max-parallel: 19         # a free account runs 20 jobs at once: one runner stays free for the GB build alongside
       matrix:
         route: ${{ fromJSON(needs.plan.outputs.us) }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false   # the write token is for the last step only
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -154,6 +181,10 @@ jobs:
           OPENCELLID_TOKEN: ${{ secrets.OPENCELLID_TOKEN }}
           FCC_BDC_USERNAME: ${{ secrets.FCC_BDC_USERNAME }}
           FCC_BDC_TOKEN: ${{ secrets.FCC_BDC_TOKEN }}
+          # OpenCellID allows two downloads of a national file a day: twenty jobs refreshing an expired copy at once
+          # would leave most routes without cell sites. They use the cached copy, whatever its age; the GB job
+          # refreshes it in the cache for the next publish.
+          TCS_OPENCELLID_MAX_AGE_DAYS: "3650"
         run: tcs run --route "${{ matrix.route }}"
       - name: Build its evidence packs
         run: |
@@ -181,11 +212,11 @@ jobs:
           done
           gh release upload us-bundles "$RUNNER_TEMP/$name" --clobber
 
-  publish:
-    name: Rebuild routes from live feeds and publish
-    needs: [plan, us]
-    # US routes that failed are reported below and left out; they never hold back the GB routes or the publish
-    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+  # GB routes build alongside the US ones rather than after them: they need the Ofcom quota and its saved answers.
+  gb:
+    name: Rebuild the GB routes from live feeds
+    needs: plan
+    if: needs.plan.outputs.gb != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -196,26 +227,21 @@ jobs:
       GB_ROUTES: ${{ needs.plan.outputs.gb }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: pyproject.toml
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
 
       - name: Check the secrets are set
         env:
           OFCOM_API_KEY: ${{ secrets.OFCOM_API_KEY }}
           OPENCELLID_TOKEN: ${{ secrets.OPENCELLID_TOKEN }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           missing=""
-          for s in OFCOM_API_KEY OPENCELLID_TOKEN CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do [ -n "${!s}" ] || missing="$missing $s"; done
+          for s in OFCOM_API_KEY OPENCELLID_TOKEN; do [ -n "${!s}" ] || missing="$missing $s"; done
           if [ -n "$missing" ]; then echo "::error::Missing repository secrets:$missing (see docs/hosting.md)"; exit 1; fi
 
       - run: pip install -e .
@@ -223,7 +249,6 @@ jobs:
       # One test call before hours of work: when the Ofcom call quota is used up, every route would silently fall
       # back to stand-in coverage, so stop here and keep the current site.
       - name: Check the Ofcom API still has call quota
-        if: env.GB_ROUTES != ''
         env:
           OFCOM_API_KEY: ${{ secrets.OFCOM_API_KEY }}
         run: |
@@ -244,37 +269,19 @@ jobs:
           restore-keys: raw-
 
       - name: Rebuild the GB routes from the live feeds
-        if: env.GB_ROUTES != ''
         env:
           OFCOM_API_KEY: ${{ secrets.OFCOM_API_KEY }}
           OPENCELLID_TOKEN: ${{ secrets.OPENCELLID_TOKEN }}
         run: tcs build-all --only "$GB_ROUTES"
 
-      - name: Collect the US routes built alongside
-        if: needs.plan.outputs.us != '[]'
-        uses: actions/download-artifact@v4
-        with:
-          pattern: us-bundle-*
-          path: web/public/data/
-      - name: Collect the US routes kept from earlier publishes
-        if: needs.plan.outputs.us_reuse != ''
+      # The US route jobs read OpenCellID's national files from this cache and never download them (see the us job),
+      # so they are kept fresh here, once a publish.
+      - name: Refresh the US cell-site files for the next publish
+        if: always() && github.ref == 'refs/heads/main' && env.ROUTES == ''
         env:
-          GH_TOKEN: ${{ github.token }}
-          REUSE: ${{ needs.plan.outputs.us_reuse }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/kept"
-          for a in $REUSE; do
-            gh release download us-bundles -p "$a" -D "$RUNNER_TEMP/kept" --clobber
-            tar -xzf "$RUNNER_TEMP/kept/$a" -C web/public/data
-          done
-          echo "$(echo $REUSE | wc -w) US route(s) reused from earlier publishes"
-      - name: List the routes for the viewer
-        run: |
-          for d in web/public/data/us-bundle-*; do [ -d "$d" ] && mv "$d" "web/public/data/${d#web/public/data/us-bundle-}"; done
-          python -c "from tcs.cli import write_index; print(write_index())"
-          if [ "${{ needs.us.result }}" = "failure" ]; then
-            echo "::warning::Some US routes failed to build (see the us jobs); they are left out of this run."
-          fi
+          OPENCELLID_TOKEN: ${{ secrets.OPENCELLID_TOKEN }}
+        run: python -c "from tcs.sources.opencellid import refresh_bulk; print(len(refresh_bulk('US')), 'US OpenCellID file(s) current')"
+        continue-on-error: true
 
       # Saved from main only. A cache is ~2.5 GB and the repository keeps 10 GB, so test runs on other
       # branches saving theirs pushed out main's and a publish then had to ask Ofcom again for every postcode (8 Oct 2026).
@@ -309,6 +316,109 @@ jobs:
             data/processed/
           retention-days: 7
           if-no-files-found: ignore
+
+      # Word report + Excel appendix per route for the baseline and EDGE Rail + Fleet Connect scenarios, placed beside
+      # each route bundle for the viewer's Report button. Re-simulates from the data just built: no API calls.
+      # A pack that fails to build does not hold back the publish; that route's Report menu says it has no pack.
+      - name: Build the evidence packs for the Report button
+        run: |
+          if ! tcs report-all --only "$GB_ROUTES"; then
+            echo "::warning::Some evidence packs failed to build (see the log above); those routes are published without a Report download."
+          fi
+
+      - name: Hand the GB routes to the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: gb-bundles
+          path: |
+            web/public/data/
+            !web/public/data/index.json
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: [plan, gb, us]
+    # US routes that failed fall back to their previous build or are left out; they never hold back the GB routes or
+    # the publish. A GB route that failed (or an Ofcom quota that ran out) stops it, and the current site stays live.
+    if: ${{ !cancelled() && needs.plan.result == 'success' && (needs.gb.result == 'success' || needs.gb.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ROUTES: ${{ inputs.routes || '' }}   # empty on the monthly schedule: every route
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Check the secrets are set
+        if: env.ROUTES == ''
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          for s in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do [ -n "${!s}" ] || missing="$missing $s"; done
+          if [ -n "$missing" ]; then echo "::error::Missing repository secrets:$missing (see docs/hosting.md)"; exit 1; fi
+
+      - run: pip install -e .
+
+      - name: Collect the GB routes
+        if: needs.plan.outputs.gb != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: gb-bundles
+          path: web/public/data/
+      - name: Collect the US routes built alongside
+        if: needs.plan.outputs.us != '[]'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: us-bundle-*
+          path: web/public/data/
+      - name: Collect the US routes kept from earlier publishes
+        if: needs.plan.outputs.us_reuse != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REUSE: ${{ needs.plan.outputs.us_reuse }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/kept"
+          for a in $REUSE; do
+            gh release download us-bundles -p "$a" -D "$RUNNER_TEMP/kept" --clobber
+            tar -xzf "$RUNNER_TEMP/kept/$a" -C web/public/data
+          done
+          echo "$(echo $REUSE | wc -w) US route(s) reused from earlier publishes"
+      # A US route whose rebuild failed keeps its previous build on the site instead of disappearing from it.
+      - name: Put back the previous build of any US route that failed
+        if: needs.plan.outputs.us_fallback != '' && needs.us.result != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FALLBACK: ${{ needs.plan.outputs.us_fallback }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/kept"
+          for pair in $FALLBACK; do
+            rid="${pair%%=*}"; a="${pair#*=}"
+            [ -d "web/public/data/us-bundle-$rid" ] && continue
+            gh release download us-bundles -p "$a" -D "$RUNNER_TEMP/kept" --clobber
+            tar -xzf "$RUNNER_TEMP/kept/$a" -C web/public/data
+            echo "::warning::$rid failed to rebuild; its previous build ($a) is published instead."
+          done
+      - name: List the routes for the viewer
+        run: |
+          for d in web/public/data/us-bundle-*; do [ -d "$d" ] && mv "$d" "web/public/data/${d#web/public/data/us-bundle-}"; done
+          python -c "from tcs.cli import write_index; print(write_index())"
+          if [ "${{ needs.us.result }}" = "failure" ]; then
+            echo "::warning::Some US routes failed to build (see the us jobs); those with an earlier build keep it, the rest are left out of this run."
+          fi
 
       - name: Summarise which feeds each route used
         if: always()
@@ -345,16 +455,6 @@ jobs:
           if no_coverage:
               print(f"::error::Less than {LIVE_COVERAGE_MIN:.0%} live Ofcom coverage for: {', '.join(no_coverage)}. Not publishing.")
               raise SystemExit(1)
-
-      # Word report + Excel appendix per route for the baseline and EDGE Rail + Fleet Connect scenarios, placed beside
-      # each route bundle for the viewer's Report button. Re-simulates from the data just built: no API calls.
-      # A pack that fails to build does not hold back the publish; that route's Report menu says it has no pack.
-      - name: Build the evidence packs for the Report button
-        if: env.GB_ROUTES != ''
-        run: |
-          if ! tcs report-all --only "$GB_ROUTES"; then
-            echo "::warning::Some evidence packs failed to build (see the log above); those routes are published without a Report download."
-          fi
 
       # A selected-routes run stops here: its bundles go to an artifact instead of the site (see the header).
       - name: Hand over the rebuilt routes instead of publishing

@@ -56,6 +56,17 @@ def plan(route_ids: list[str], files: dict[str, Path], assets: list[dict], now: 
     return build, reuse
 
 
+def fallbacks(route_ids: list[str], assets: list[dict]) -> dict[str, str]:
+    """route id -> its newest stored asset whatever its fingerprint or age: what a publish puts on the site when that
+    route's rebuild fails, rather than dropping the route. The store keeps one asset a route (a build replaces it)."""
+    newest: dict[str, tuple[str, str]] = {}
+    for a in assets:
+        rid = a["name"].split("--", 1)[0]
+        if rid in route_ids and (rid not in newest or a["createdAt"] > newest[rid][0]):
+            newest[rid] = (a["createdAt"], a["name"])
+    return {rid: name for rid, (_, name) in newest.items()}
+
+
 def _files() -> dict[str, Path]:
     return {r["id"]: Path(r["file"]) for r in list_routes()}
 
