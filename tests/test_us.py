@@ -388,3 +388,139 @@ def test_point_cloud_gaps_take_their_neighbours():
     out = _fill_gaps(a)
     assert out[2, 2] == pytest.approx(20.0) and out[0, 0] == pytest.approx(20.0)
     assert np.isnan(_fill_gaps(np.full((3, 3), np.nan, dtype=np.float32))).all()
+
+
+def test_gtfs_shape_guides_the_track_search(tmp_path):
+    import zipfile
+
+    from tcs.sources.gtfs_feed import trip_shape
+    from tcs.sources.osm_route import _guide_polys
+
+    feed = _gtfs(tmp_path)
+    with zipfile.ZipFile(feed, "a") as z:              # trip a has a 3-point shape, trip b a 2-point one; train 2150 is b
+        z.writestr("shapes.txt", "shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\n"
+                                 "s1,38.90,-77.00,1\ns1,40.75,-74.00,2\ns1,42.35,-71.06,3\ns2,38.90,-77.00,1\ns2,42.35,-71.06,2\n")
+    with zipfile.ZipFile(feed) as z:
+        files = {n: z.read(n).decode() for n in z.namelist()}
+    files["trips.txt"] = "route_id,service_id,trip_id,trip_short_name,shape_id\n1,wk,a,2100,s1\n1,wk,b,2150,s2\n1,sat,c,2000,\n1,wk,d,2101,\n2,wk,e,170,\n"
+    with zipfile.ZipFile(feed, "w") as z:
+        for n, body in files.items():
+            z.writestr(n, body)
+    assert trip_shape(feed, "Acela", "WAS", "BOS").shape == (3, 2)            # most detailed shape by default
+    assert trip_shape(feed, "Acela", "WAS", "BOS", train="2150").shape == (2, 2)
+    assert trip_shape(feed, "Acela", "BOS", "WAS").shape == (3, 2)            # trip d has no shape: borrow the service's best
+    with pytest.raises(SourceUnavailable):
+        trip_shape(feed, "Northeast Regional", "WAS", "BOS")                   # no trip of the service has one
+    guide = trip_shape(feed, "Acela", "WAS", "BOS")
+    proj = Projector(local_crs(-74.0, 40.6, "US"))
+    polys = _guide_polys(guide, proj, 8000, chunk_m=200_000)
+    assert len(polys) == 3                                                     # ~630 km: 200 + 200 + 230 (a short tail joins)
+    from shapely.geometry import Point, Polygon
+
+    last = [float(v) for v in polys[-1].split()]
+    assert Polygon(list(zip(last[1::2], last[::2]))).contains(Point(-71.06, 42.35))   # the far end is searched too
+    assert all(len(p.split()) % 2 == 0 for p in polys)                         # "lat lon lat lon ..." for Overpass
+
+
+def test_multi_day_timetable_counts_each_midnight():
+    from tcs.sources.timetable import schedule_seconds
+
+    calls = pd.DataFrame({"crs": ["LAX", "ELP", "SND", "DRT", "LRK", "CHI"], "time": ["01:00", "17:45", "23:46", "02:12", "00:44", "14:49"]})
+    s = schedule_seconds(calls, "01:00")
+    assert s["DRT"] == pytest.approx((25 * 60 + 12) * 60) and s["LRK"] == pytest.approx((47 * 60 + 44) * 60)
+    assert s["CHI"] == pytest.approx((61 * 60 + 49) * 60)
+    assert list(s.values()) == sorted(s.values())
+
+
+def test_generated_amtrak_routes_are_complete():
+    """Every generated route file: positions for every station, a pinned GTFS train, its calls, and FCC states."""
+    import yaml
+
+    from tcs.config import list_routes
+
+    gen = [r for r in list_routes() if r["country"] == "US" and r["id"] != "nec_was_bos"]
+    assert len(gen) >= 40
+    for r in gen:
+        route = yaml.safe_load(open(r["file"], encoding="utf-8"))["route"]
+        codes = [s["crs"] for s in route["stations"]]
+        assert all("lat" in s and "lon" in s for s in route["stations"]), r["id"]
+        assert route["timetable"]["gtfs"]["train"] and route["geometry"]["guide"] == "gtfs_shape", r["id"]
+        assert set(route["timetable"]["calls"]) == set(codes) and route["fcc_states"], r["id"]
+        assert route["origin_crs"] == codes[0] and route["destination_crs"] == codes[-1], r["id"]
+        assert 50 <= route.get("sample_spacing_m", 50) <= 300, r["id"]
+
+
+def test_guide_is_stitched_through_every_station():
+    from shapely.geometry import LineString, Point
+
+    from tcs.sources.osm_route import _stitch_guide
+
+    proj = Projector(local_crs(-97.0, 34.0, "US"))
+    # a shape for Oklahoma City -> Fort Worth only, with a bend at Norman; the train now runs on to Dallas
+    shape = np.array([[-97.51, 35.47], [-97.40, 35.22], [-97.33, 32.75]])
+    st = pd.DataFrame({"crs": ["OKC", "NOR", "FTW", "DAL"], "lon": [-97.51, -97.44, -97.33, -96.81], "lat": [35.47, 35.22, 32.75, 32.78]})
+    g = _stitch_guide(shape, st, proj)
+    line = LineString(np.column_stack(proj.to_xy(g[:, 0], g[:, 1])))
+    for _, s in st.iterrows():
+        assert line.distance(Point(*proj.to_xy(s.lon, s.lat))) < 1.0           # passes through every station, Dallas too
+    assert any(np.allclose(p, [-97.40, 35.22]) for p in g)                     # and follows the shape between them
+    back = _stitch_guide(shape[::-1].copy(), st, proj)                         # a shape of the return train is turned round
+    assert np.allclose(back, g, atol=1e-6)
+    # Lakeland -> Tampa -> Lakeland: places are found in order, so the second Lakeland call follows the way back
+    there_and_back = np.array([[-81.95, 28.05], [-82.45, 27.95], [-81.95, 28.06], [-81.70, 28.20]])
+    st2 = pd.DataFrame({"crs": ["LKL", "TPA", "LAK", "WPK"], "lon": [-81.95, -82.45, -81.95, -81.70], "lat": [28.05, 27.95, 28.06, 28.20]})
+    g2 = _stitch_guide(there_and_back, st2, proj)
+    assert len(g2) >= 7 and np.allclose(g2[-1], [-81.70, 28.20])
+
+
+def test_us_bundles_are_reused_until_their_inputs_change(tmp_path):
+    import datetime as dt
+
+    from tcs import bundle_store
+
+    cfg = tmp_path / "config"
+    (cfg / "countries" / "US").mkdir(parents=True)
+    (cfg / "countries" / "US" / "profile.yaml").write_text("a: 1\n")
+    (cfg / "simulation.yaml").write_text("model_version: '1'\n")
+    a, b = tmp_path / "a.yaml", tmp_path / "b.yaml"
+    a.write_text("route: {id: a}\n")
+    b.write_text("route: {id: b}\n")
+    files = {"a": a, "b": b}
+    now = dt.datetime(2026, 10, 8, tzinfo=dt.timezone.utc)
+    name_a = bundle_store.asset_name("a", bundle_store.fingerprint(a, cfg))
+    kept = [{"name": name_a, "createdAt": "2026-09-01T00:00:00Z"}, {"name": "b--000000000000.tar.gz", "createdAt": "2026-10-01T00:00:00Z"}]
+    assert bundle_store.plan(["a", "b"], files, kept, now, config_dir=cfg) == (["b"], [name_a])     # b's file changed since
+    assert bundle_store.plan(["a", "b"], files, kept, now, force=True, config_dir=cfg) == (["a", "b"], [])
+    assert bundle_store.plan(["a"], files, kept, now + dt.timedelta(days=200), config_dir=cfg) == (["a"], [])   # too old
+    (cfg / "countries" / "US" / "profile.yaml").write_text("a: 2\n")                                       # US settings changed
+    assert bundle_store.plan(["a"], files, kept, now, config_dir=cfg) == (["a"], [])
+
+
+def test_overpass_waits_out_a_rate_limit(tmp_path, monkeypatch):
+    from tcs.sources import osm_route
+
+    calls = []
+
+    def fake_get(url, **kw):
+        calls.append(url)
+        if len(calls) == 1:
+            raise SourceUnavailable("osm_rail: HTTP 429 rate limit")
+        if len(calls) == 2:
+            raise SourceUnavailable("osm_rail: 504 Server Error: Gateway Timeout for url: https://overpass-api.de/api/interpreter")
+        p = tmp_path / "a.json"
+        p.write_text('{"elements": []}')
+        return p
+
+    monkeypatch.setattr(osm_route, "http_get", fake_get)
+    monkeypatch.setattr(osm_route.time, "sleep", lambda s: None)
+    assert osm_route._overpass("q", tmp_path, "osm_rail", None, False, 10) == {"elements": []}
+    assert calls == list(osm_route.OVERPASS_ENDPOINTS)                 # busy: the next instance in turn
+    assert osm_route.BUSY.search("osm_rail: 500 Server Error: Internal Server Error for url: https://overpass.private.coffee/api/interpreter")
+    calls.clear()
+    monkeypatch.setattr(osm_route, "http_get", lambda url, **kw: (_ for _ in ()).throw(SourceUnavailable("osm_rail: HTTP 400 for x")))
+    with pytest.raises(SourceUnavailable):                     # a bad query is not "busy": no waiting
+        osm_route._overpass("q", tmp_path, "osm_rail", None, False, 10)
+    monkeypatch.setattr(osm_route, "http_get", fake_get)
+    monkeypatch.setattr(osm_route, "OVERPASS_WAITS_S", ())
+    with pytest.raises(SourceUnavailable):                     # out of patience: the caller falls back as before
+        osm_route._overpass("q", tmp_path, "osm_rail", None, False, 10)

@@ -7,7 +7,9 @@ the way tags we need for the obstruction model: tunnel=yes, cutting=yes, embankm
 from __future__ import annotations
 
 import json
+import random
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -17,10 +19,18 @@ import pandas as pd
 from shapely.geometry import LineString
 
 from ..geo import Projector, local_crs
-from .base import Provenance, SourceUnavailable, http_get, now_iso
+from .base import Provenance, SourceUnavailable, console, http_get, now_iso
 
 DEFAULT_OVERPASS = "https://overpass-api.de/api/interpreter"
 WIDER_CORRIDOR = 2.5          # second try, as a multiple of the corridor, when a leg has no rail path
+OVERPASS_ENDPOINTS = (DEFAULT_OVERPASS, "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+                      "https://overpass.private.coffee/api/interpreter")   # tried in turn while busy
+# pauses after a busy answer before asking again (plus up to half again at random): about 25 minutes in all, because
+# on 8 Oct all three instances were overloaded for over half an hour while 20 US routes built at once
+OVERPASS_WAITS_S = (20, 40, 60, 90, 120, 180, 240, 300, 300)
+BUSY = re.compile(r"\b(429|500|502|503|504)\b|timed? ?out|Gateway|Connection", re.I)   # 500: a mirror out of memory under load
+GUIDE_CHUNK_M = 120_000       # a guide line is searched in pieces of this length (one Overpass query each; 200 km pieces
+                              # through cities were slow enough to draw 504s)
 
 
 @dataclass
@@ -35,7 +45,21 @@ class RouteGeometry:
 
 
 def _overpass(query: str, raw_dir: Path, name: str, url: str | None, offline: bool, timeout: int) -> dict:
-    path = http_get(url or DEFAULT_OVERPASS, raw_dir=raw_dir, name=name, data={"data": query}, ext="json", timeout=timeout + 30, offline=offline)
+    # overpass-api.de hands out a few query slots per address and answers 504 when it is loaded. US routes are built
+    # twenty at a time from GitHub's runners, and a long route asks a dozen queries or more, so a 429 or a 504 means
+    # "busy", not "no": wait (up to ~10 minutes in all), alternating with a second public instance, rather than fall
+    # back to the generalised NTAD line for 3,000 km. Half of the first all-Amtrak build did (8 Oct 2026).
+    endpoints = [url] if url else list(OVERPASS_ENDPOINTS)
+    for k, wait in enumerate([*OVERPASS_WAITS_S, None]):
+        try:
+            path = http_get(endpoints[k % len(endpoints)], raw_dir=raw_dir, name=name, data={"data": query}, ext="json",
+                            timeout=timeout + 30, offline=offline)
+            break
+        except SourceUnavailable as exc:
+            if wait is None or offline or not BUSY.search(str(exc)):
+                raise
+            console.log(f"[yellow]Overpass is busy ({str(exc)[:80]}); asking again in {wait:.0f} s")
+            time.sleep(wait + random.uniform(0, wait / 2))
     # A busy Overpass server answers 200 with an HTML error page, or with JSON whose `remark` says the query timed out
     # and whose elements are cut short. Neither is the railway: drop it from the cache so the next run asks again.
     try:
@@ -79,10 +103,66 @@ out center tags;"""
 
 def _corridor_poly(stations: pd.DataFrame, proj: Projector, buffer_m: float) -> str:
     x, y = proj.to_xy(stations["lon"].values, stations["lat"].values)
-    chain = LineString(np.column_stack([x, y])).buffer(buffer_m, quad_segs=4).simplify(500)
+    return _poly_string(LineString(np.column_stack([x, y])), proj, buffer_m)
+
+
+def _poly_string(line_xy: LineString, proj: Projector, buffer_m: float) -> str:
+    chain = line_xy.buffer(buffer_m, quad_segs=4).simplify(500)
     ring = chain.exterior.coords if chain.geom_type == "Polygon" else max(chain.geoms, key=lambda g: g.area).exterior.coords
     lon, lat = proj.to_lonlat(np.array([c[0] for c in ring]), np.array([c[1] for c in ring]))
     return " ".join(f"{a:.5f} {b:.5f}" for a, b in zip(lat, lon))
+
+
+def _guide_polys(guide: np.ndarray, proj: Projector, buffer_m: float, chunk_m: float = GUIDE_CHUNK_M) -> list[str]:
+    """Corridor polygons around a guide line (lon/lat, e.g. the operator's GTFS shape), cut into overlapping pieces: one
+    band over thousands of km is more than Overpass answers in one query, and a guide follows the track far more closely
+    than the straight chain between stations a hundred km apart."""
+    from shapely.ops import substring
+
+    x, y = proj.to_xy(guide[:, 0], guide[:, 1])
+    line = LineString(np.column_stack([x, y]))
+    cuts = list(np.arange(0.0, line.length, chunk_m)[1:])
+    if cuts and line.length - cuts[-1] < chunk_m * 0.2:      # a short tail joins the piece before it
+        cuts.pop()
+    edges = [0.0, *cuts, line.length]
+    return [_poly_string(substring(line, max(0.0, a - buffer_m), min(line.length, b + buffer_m)), proj, buffer_m)
+            for a, b in zip(edges[:-1], edges[1:])]
+
+
+def _stitch_guide(guide: np.ndarray, stations: pd.DataFrame, proj: Projector, max_off_m: float = 15_000) -> np.ndarray:
+    """The guide line made to pass through every station, in order: each leg follows the guide between the two stations'
+    places on it, and is a straight station-to-station line where the guide misses a station (a shape borrowed from a
+    shorter train, a stop off the generalised line) or runs backwards. A guide drawn the other way round is turned first. So the search band always holds every station,
+    whatever the guide covers. Places are found in order along the guide, so a line that doubles back on itself (the
+    Floridian into Tampa and out again) keeps both passes."""
+    from shapely.geometry import Point
+    from shapely.ops import substring
+
+    gx, gy = proj.to_xy(guide[:, 0], guide[:, 1])
+    line = LineString(np.column_stack([gx, gy]))
+    sx, sy = proj.to_xy(stations["lon"].to_numpy(dtype=float), stations["lat"].to_numpy(dtype=float))
+    if line.project(Point(sx[0], sy[0])) > line.project(Point(sx[-1], sy[-1])):   # a shape borrowed from the other direction
+        line = LineString(line.coords[::-1])
+    pos: list[float | None] = []
+    at = 0.0
+    for x, y in zip(sx, sy):
+        rest = substring(line, at, line.length) if at < line.length else None
+        p = Point(x, y)
+        if rest is not None and rest.length > 0 and rest.distance(p) <= max_off_m:
+            at += rest.project(p)
+            pos.append(at)
+        else:
+            pos.append(None)
+    out = [(sx[0], sy[0])]
+    for i in range(len(sx) - 1):
+        a, b = pos[i], pos[i + 1]
+        if a is not None and b is not None and b > a:
+            piece = substring(line, a, b)
+            out += list(piece.coords) if piece.geom_type == "LineString" else []
+        out.append((sx[i + 1], sy[i + 1]))
+    xy = np.array(out, dtype=float)
+    lon, lat = proj.to_lonlat(xy[:, 0], xy[:, 1])
+    return np.column_stack([lon, lat])
 
 
 def _parse_maxspeed(v: str | None) -> float | None:
@@ -111,19 +191,21 @@ def _segment(p0: tuple[float, float], p1: tuple[float, float], tags: dict, way_i
 
 
 def fetch_route(crs_codes: list[str], country: str, raw_dir: Path, *, corridor_m: float = 8000, overpass_url: str | None = None,
-                offline: bool = False, timeout: int = 180, stations: pd.DataFrame | None = None) -> RouteGeometry:
-    """stations: already resolved (crs, name, lat, lon), e.g. from NTAD for a US route; None = look them up in OSM by ref:crs."""
+                offline: bool = False, timeout: int = 180, stations: pd.DataFrame | None = None, guide: np.ndarray | None = None) -> RouteGeometry:
+    """stations: already resolved (crs, name, lat, lon), e.g. from NTAD for a US route; None = look them up in OSM by ref:crs.
+    guide: (n, 2) lon/lat of a line near the track (an operator's GTFS shape): the rail network is searched around it, in
+    pieces, instead of around the straight chain between stations."""
     if stations is None:
         stations = fetch_stations(crs_codes, country, raw_dir, overpass_url=overpass_url, offline=offline, timeout=timeout)
     proj = Projector(local_crs(stations["lon"].mean(), stations["lat"].mean(), country))
-    coords, seg_rows, straight = _route_in_corridor(stations, proj, corridor_m, raw_dir, overpass_url, offline, timeout)
+    coords, seg_rows, straight = _route_in_corridor(stations, proj, corridor_m, raw_dir, overpass_url, offline, timeout, guide)
     warnings: list[str] = []
     if straight:
         # The corridor is a band around the straight station-to-station chain, so a line that swings far off it between
         # two stations (round a hill, an estuary) is clipped away. Ask once more with a wider band before drawing it straight.
         wide = corridor_m * WIDER_CORRIDOR
         try:
-            retry = _route_in_corridor(stations, proj, wide, raw_dir, overpass_url, offline, timeout)
+            retry = _route_in_corridor(stations, proj, wide, raw_dir, overpass_url, offline, timeout, guide)
         except SourceUnavailable as exc:
             warnings.append(f"no rail path for {', '.join(straight)} within {corridor_m / 1000:g} km, and the wider search failed ({exc})")
         else:
@@ -141,23 +223,25 @@ def fetch_route(crs_codes: list[str], country: str, raw_dir: Path, *, corridor_m
 
 
 def _route_in_corridor(stations: pd.DataFrame, proj: Projector, corridor_m: float, raw_dir: Path, overpass_url: str | None, offline: bool,
-                       timeout: int) -> tuple[list[tuple[float, float]], list[dict], list[str]]:
-    """Route station to station through the rail network inside a band of `corridor_m` around the station chain.
-    Returns the line's coordinates, one segment row per piece of it, and the legs that had to be drawn straight."""
-    poly = _corridor_poly(stations, proj, corridor_m)
-    q = f"""[out:json][timeout:{timeout}];
+                       timeout: int, guide: np.ndarray | None = None) -> tuple[list[tuple[float, float]], list[dict], list[str]]:
+    """Route station to station through the rail network inside a band of `corridor_m` around the station chain (or the
+    guide line). Returns the line's coordinates, one segment row per piece of it, and the legs that had to be drawn straight."""
+    polys = [_corridor_poly(stations, proj, corridor_m)] if guide is None else _guide_polys(_stitch_guide(guide, stations, proj), proj, corridor_m)
+    nodes: dict[int, tuple[float, float]] = {}
+    found: dict[int, dict] = {}
+    for poly in polys:
+        q = f"""[out:json][timeout:{timeout}];
 way["railway"="rail"]["service"!~"yard|siding|spur|crossover"](poly:"{poly}");
 out body;
 >;
 out skel qt;"""
-    doc = _overpass(q, raw_dir, "osm_rail", overpass_url, offline, timeout)
-    nodes: dict[int, tuple[float, float]] = {}
-    ways: list[dict] = []
-    for el in doc.get("elements", []):
-        if el["type"] == "node":
-            nodes[el["id"]] = (el["lon"], el["lat"])
-        elif el["type"] == "way":
-            ways.append(el)
+        doc = _overpass(q, raw_dir, "osm_rail", overpass_url, offline, timeout)
+        for el in doc.get("elements", []):
+            if el["type"] == "node":
+                nodes[el["id"]] = (el["lon"], el["lat"])
+            elif el["type"] == "way":
+                found[el["id"]] = el                     # pieces overlap: a way in two of them is one way
+    ways = list(found.values())
     if not ways:
         raise SourceUnavailable("Overpass returned no railway ways for the corridor")
 

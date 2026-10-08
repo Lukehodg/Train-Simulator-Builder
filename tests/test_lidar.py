@@ -187,3 +187,32 @@ def test_reports_say_how_much_of_the_route_the_lidar_covers():
     assert _terrain_row(m)[1].startswith("Copernicus DEM GLO-30 (30 m); near the track, open 2 m LiDAR") and _terrain_row(m)[2] == "live"
     assert lidar_text({"lidar_share": 0.5, "lidar_sources": {"lidar_scotland": 1.0}}) == "open 2 m LiDAR (Scottish public sector; OGL) on 50 % of the route"
     assert lidar_text({"terrain_source": "copernicus_glo30"}) == "" and _lidar_meta(pd.DataFrame({"x": [1]})) == {}
+
+
+def test_an_empty_cached_index_is_asked_for_again(tmp_path):
+    """8 Oct publish: an empty wales_*.json left by a cut-off run failed North Wales Coast outright."""
+    from tcs.sources import lidar
+
+    (tmp_path / "wales_SH47.json").write_text("")
+
+    class Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"features": [{"properties": {"dtm_link": "d", "dsm_link": "s", "british_gr": "SH4070"}}]}
+
+    class Http:
+        class session:
+            calls = 0
+
+            @classmethod
+            def get(cls, *a, **kw):
+                cls.calls += 1
+                return Resp()
+
+    w = lidar.WalesTiles(Http, tmp_path)
+    assert w._square("SH47", 240000, 370000) == [{"dtm": "d", "dsm": "s", "ref": "SH4070"}]
+    assert Http.session.calls == 1
+    assert lidar._read_index(tmp_path / "wales_SH47.json") == [{"dtm": "d", "dsm": "s", "ref": "SH4070"}]
+    assert not list(tmp_path.glob("*.tmp*"))

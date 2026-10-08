@@ -64,14 +64,18 @@ def from_gtfs(folder: Path, trip_id: str) -> pd.DataFrame:
 
 
 def schedule_seconds(calls: pd.DataFrame, departure: str) -> dict[str, float]:
-    """Seconds after departure for each CRS in a calling pattern (handles midnight wrap)."""
+    """Seconds after departure for each CRS in a calling pattern. Calls are in running order, so a time earlier than the
+    one before it is the next day: a long-distance train can run past midnight more than once."""
     base = datetime.strptime(departure[:5], "%H:%M")
     out = {}
+    prev, days = base, 0
     for _, r in calls.iterrows():
         if not isinstance(r.get("time"), str):
             continue
         t = datetime.strptime(r["time"][:5], "%H:%M")
-        if t < base:
-            t += timedelta(days=1)
+        if t + timedelta(days=days) < prev:
+            days += 1
+        t += timedelta(days=days)
         out[r["crs"]] = (t - base).total_seconds()
+        prev = t
     return out

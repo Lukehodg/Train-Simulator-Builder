@@ -105,8 +105,20 @@ the route list shows that region's routes, and `?region=us` opens the US directl
 | Timetable | Route file calls | One real Acela from Amtrak's GTFS feed (`timetable.source: gtfs`, keyless, weekly); the route file's calls if the feed can't be read |
 | Calibration | Yellow Train national fit, Global View corrections and masts | None yet: the figures are uncalibrated until US measurements are fitted |
 
+**Every Amtrak service.** Besides the hand-written Acela, `scripts/amtrak_routes.py` writes a route file for each of the
+other train services in Amtrak's GTFS feed (42 as of October 2026, `<service>_<from>_<to>.yaml`), each from one real
+weekday train (pinned by number): the full run, its stations with their positions (so Toronto, Montreal and Vancouver
+work), its calling times, the states it crosses (Census Bureau boundaries, for the FCC files) and a sample spacing that
+keeps it to ~20,000 samples (50 m up to 1,000 km, up to 225 m on the Texas Eagle). The track is searched for in OSM
+around the feed's shape of that train (`geometry.guide: gtfs_shape`), in 200 km pieces. Times are Amtrak's (US
+Eastern), and a train that runs past midnight more than once keeps counting days. Run the script again when Amtrak
+changes its timetable. Not in Amtrak's feed, so not here yet: the Gold Runner (California's own feed).
+
 The viewer's region switch (UK / USA) picks the country, the evidence packs drop the Ofcom and Network Rail wording for US
-routes, and the publish workflow's live-Ofcom check applies to GB routes only. Add another country by adding
+routes, and the publish workflow's live-Ofcom check applies to GB routes only. The publish workflow builds US routes side
+by side, one job each, and adds them to the site with the GB routes. Building all of them takes about 2,500 runner
+minutes, so bundles built on main are kept in the `us-bundles` release and a publish rebuilds only the US routes whose
+route file or US settings changed, or whose bundle is six months old (the "rebuild_us" input rebuilds them all). Add another country by adding
 `config/countries/<CC>/profile.yaml` (and its networks file) and route files with that `country`.
 
 ## Evidence pack (`tcs report`)

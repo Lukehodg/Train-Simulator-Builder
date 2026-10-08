@@ -223,20 +223,27 @@ def package(out: Path | None = typer.Option(None, help="Output folder (default: 
 
 
 @app.command()
-def routes():
+def routes(country: str | None = typer.Option(None, help="Only this country's routes (GB or US)"),
+           ids_json: bool = typer.Option(False, "--ids-json", help="Print just the ids as a JSON list (for a CI build matrix)")):
     """List the route catalogue (config/routes: GB, and the US through config/countries/US) and which are built."""
+    if ids_json:
+        print(json.dumps([r["id"] for r in list_routes() if not country or r["country"] == normalise_country(country)]))
+        return
     built = {p.parent.name for p in (ROOT / "web" / "public" / "data").glob("*/meta.json")}
     t = Table(title="Routes")
     t.add_column("id"), t.add_column("country"), t.add_column("name"), t.add_column("from → to"), t.add_column("built")
     for r in list_routes():
+        if country and r["country"] != normalise_country(country):
+            continue
         t.add_row(r["id"], r["country"], r["name"] or "", f"{r['origin']} → {r['destination']}", "yes" if r["id"] in built else "-")
     console.print(t)
 
 
 @app.command("build-all")
-def build_all(offline: bool = typer.Option(False), only: str | None = typer.Option(None, help="Comma-separated route ids"), skip_built: bool = typer.Option(False)):
+def build_all(offline: bool = typer.Option(False), only: str | None = typer.Option(None, help="Comma-separated route ids"), skip_built: bool = typer.Option(False),
+              country: str | None = typer.Option(None, help="Only this country's routes (GB or US)")):
     """Run the pipeline for every route in the catalogue (continues past failures; writes index.json)."""
-    ids = [r["id"] for r in list_routes()]
+    ids = [r["id"] for r in list_routes() if not country or r["country"] == normalise_country(country)]
     if only:
         wanted = {x.strip() for x in only.split(",") if x.strip()}
         unknown = sorted(wanted - set(ids))
@@ -355,6 +362,7 @@ REPORT_SCENARIOS = ("baseline", "edge_rail_fleet_connect")
 
 @app.command("report-all")
 def report_all(only: str | None = typer.Option(None, help="Comma-separated route ids (default: every built route)"),
+               country: str | None = typer.Option(None, help="Only this country's routes (GB or US)"),
                scenarios: str = typer.Option(",".join(REPORT_SCENARIOS), help="'baseline' and/or preset ids"),
                web_data: Path = typer.Option(ROOT / "web" / "public" / "data", help="Viewer data folder holding the route bundles")):
     """Evidence packs for every built route, placed beside its viewer bundle (<web-data>/<route>/reports/) with the
@@ -364,6 +372,9 @@ def report_all(only: str | None = typer.Option(None, help="Comma-separated route
     ids = sorted(p.parent.name for p in web_data.glob("*/meta.json"))
     if only:
         ids = [i for i in ids if i in {x.strip() for x in only.split(",")}]
+    if country:
+        mine = {r["id"] for r in list_routes() if r["country"] == normalise_country(country)}
+        ids = [i for i in ids if i in mine]
     wanted = [x.strip() for x in scenarios.split(",") if x.strip()]
     presets = load_settings().sim.get("presets", {})
     failures = []
