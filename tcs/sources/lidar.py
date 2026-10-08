@@ -595,8 +595,10 @@ class Usgs3dep:
                 try:
                     top, _ = self.ept.heights(g, g.arr)
                 except (requests.RequestException, OSError, ValueError) as exc:
-                    console.log(f"[yellow]USGS point cloud read failed ({exc}); bare earth for this window")
-                    top = np.full_like(arr, np.nan)
+                    # a failed read, not "no trees here": flagged, so the stretch is tried again and, if it still
+                    # fails, left out of the feature cache rather than kept as bare earth for every later build
+                    console.log(f"[yellow]USGS point cloud read failed ({exc}); window marked failed")
+                    return Grid(g.x0, g.y1, arr, g.res, True), (self.name if g.missing() < 1.0 else None)
                 with self._lock:
                     self.surface_cells[0] += int(np.isfinite(top).sum())
                     self.surface_cells[1] += int(np.isfinite(arr).sum())

@@ -6,6 +6,8 @@ share one physical site, and a missing cell never implies no service (see docs/d
 """
 from __future__ import annotations
 
+import os
+import time
 from pathlib import Path
 
 import duckdb
@@ -15,6 +17,7 @@ import pandas as pd
 from ..geo import Projector
 from .base import Provenance, SourceUnavailable, console, http_get, now_iso
 
+BULK_MAX_AGE_DAYS = 30        # national files older than this are downloaded again (TCS_OPENCELLID_MAX_AGE_DAYS overrides)
 COLUMNS = ["radio", "mcc", "net", "area", "cell", "unit", "lon", "lat", "range", "samples", "changeable", "created", "updated", "averageSignal"]
 
 
@@ -42,24 +45,77 @@ def fetch_cells_bulk(settings, proj: Projector, samples: pd.DataFrame, raw_dir: 
     mccs = sorted({mcc for op in settings.operators for mcc, _ in plmns(op)})
     frames = []
     shared = raw_dir.parent / "shared"          # one national download serves every route (OpenCellID allows 2 per file per day)
+    max_age = float(os.environ.get("TCS_OPENCELLID_MAX_AGE_DAYS") or BULK_MAX_AGE_DAYS)
     for mcc in mccs:
         url = ocfg["bulk_url"].format(token=token, mcc=mcc)
         try:
-            gz = http_get(url, raw_dir=shared, name="opencellid_bulk", ext="csv.gz", offline=settings.offline, ttl_days=30)
+            gz = _bulk_file(url, shared, mcc, offline=settings.offline, max_age_days=max_age)
         except SourceUnavailable as exc:
             if len(mccs) > 1 and "HTTP 404" in str(exc):     # OpenCellID has no file for an MCC with no cells: the others still count
                 console.log(f"[yellow]OpenCellID has no file for MCC {mcc}; skipped")
                 continue
             raise
+        frames.append(_filter_corridor(gz, proj, samples, corridor_m, ocfg))
+    cells = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=COLUMNS)
+    return _normalise(cells, settings, proj)
+
+
+def _bulk_file(url: str, shared: Path, mcc: int, *, offline: bool, max_age_days: float) -> Path:
+    """The national file for one MCC: the cached copy while younger than max_age_days, else a fresh download. A refresh
+    that fails (OpenCellID answers its daily download limit with a short text page, not an error code) keeps the older
+    copy instead of losing it, so a busy day costs freshness, not the route's cell sites."""
+    try:
+        old = http_get(url, raw_dir=shared, name="opencellid_bulk", ext="csv.gz", offline=True)
+    except SourceUnavailable:
+        old = None
+    if old is not None and (offline or time.time() - old.stat().st_mtime < max_age_days * 86400):
+        return old
+    if offline:
+        raise SourceUnavailable(f"offline mode and no cached OpenCellID file for MCC {mcc}")
+    backup = old.with_name(old.name + ".prev") if old is not None else None
+    if old is not None:
+        old.replace(backup)
+    try:
+        gz = http_get(url, raw_dir=shared, name="opencellid_bulk", ext="csv.gz", ttl_days=max_age_days)
         with open(gz, "rb") as fh:
             magic = fh.read(2)
         if magic != bytes([0x1F, 0x8B]):
             msg = gz.read_text(encoding="utf-8", errors="ignore")[:160]
             gz.unlink(missing_ok=True)
             raise SourceUnavailable(f"OpenCellID bulk download for MCC {mcc} is not a gzip file ({msg.strip()})")
-        frames.append(_filter_corridor(gz, proj, samples, corridor_m, ocfg))
-    cells = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=COLUMNS)
-    return _normalise(cells, settings, proj)
+    except SourceUnavailable as exc:
+        if backup is None:
+            raise
+        backup.replace(old)
+        console.log(f"[yellow]OpenCellID MCC {mcc}: no fresh file ({exc}); using the copy from "
+                    f"{time.strftime('%Y-%m-%d', time.gmtime(old.stat().st_mtime))}")
+        return old
+    if backup is not None:
+        backup.unlink(missing_ok=True)
+    return gz
+
+
+def refresh_bulk(country: str) -> list[Path]:
+    """Download a country's national files again where they are older than BULK_MAX_AGE_DAYS, once, so the parallel
+    US route builds (which read whatever copy the shared download cache holds) never each ask OpenCellID for them."""
+    from ..config import list_routes, load_settings
+
+    rid = next((r["id"] for r in list_routes() if r["country"] == country), None)
+    if rid is None:
+        return []
+    settings = load_settings(route_id=rid)
+    token = settings.key("OPENCELLID_TOKEN")
+    if not token:
+        raise SourceUnavailable("OPENCELLID_TOKEN not set")
+    shared = settings.paths()["raw"].parent / "shared"
+    out = []
+    for mcc in sorted({mcc for op in settings.operators for mcc, _ in plmns(op)}):
+        url = settings.networks["opencellid"]["bulk_url"].format(token=token, mcc=mcc)
+        try:
+            out.append(_bulk_file(url, shared, mcc, offline=False, max_age_days=BULK_MAX_AGE_DAYS))
+        except SourceUnavailable as exc:
+            console.log(f"[yellow]OpenCellID MCC {mcc}: {exc}")
+    return out
 
 
 def _filter_corridor(csv_path: Path, proj: Projector, samples: pd.DataFrame, corridor_m: float, ocfg: dict) -> pd.DataFrame:
