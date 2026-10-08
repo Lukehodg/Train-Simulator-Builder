@@ -471,3 +471,26 @@ def test_guide_is_stitched_through_every_station():
     st2 = pd.DataFrame({"crs": ["LKL", "TPA", "LAK", "WPK"], "lon": [-81.95, -82.45, -81.95, -81.70], "lat": [28.05, 27.95, 28.06, 28.20]})
     g2 = _stitch_guide(there_and_back, st2, proj)
     assert len(g2) >= 7 and np.allclose(g2[-1], [-81.70, 28.20])
+
+
+def test_us_bundles_are_reused_until_their_inputs_change(tmp_path):
+    import datetime as dt
+
+    from tcs import bundle_store
+
+    cfg = tmp_path / "config"
+    (cfg / "countries" / "US").mkdir(parents=True)
+    (cfg / "countries" / "US" / "profile.yaml").write_text("a: 1\n")
+    (cfg / "simulation.yaml").write_text("model_version: '1'\n")
+    a, b = tmp_path / "a.yaml", tmp_path / "b.yaml"
+    a.write_text("route: {id: a}\n")
+    b.write_text("route: {id: b}\n")
+    files = {"a": a, "b": b}
+    now = dt.datetime(2026, 10, 8, tzinfo=dt.timezone.utc)
+    name_a = bundle_store.asset_name("a", bundle_store.fingerprint(a, cfg))
+    kept = [{"name": name_a, "createdAt": "2026-09-01T00:00:00Z"}, {"name": "b--000000000000.tar.gz", "createdAt": "2026-10-01T00:00:00Z"}]
+    assert bundle_store.plan(["a", "b"], files, kept, now, config_dir=cfg) == (["b"], [name_a])     # b's file changed since
+    assert bundle_store.plan(["a", "b"], files, kept, now, force=True, config_dir=cfg) == (["a", "b"], [])
+    assert bundle_store.plan(["a"], files, kept, now + dt.timedelta(days=200), config_dir=cfg) == (["a"], [])   # too old
+    (cfg / "countries" / "US" / "profile.yaml").write_text("a: 2\n")                                       # US settings changed
+    assert bundle_store.plan(["a"], files, kept, now, config_dir=cfg) == (["a"], [])

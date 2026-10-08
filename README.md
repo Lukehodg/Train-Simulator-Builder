@@ -116,7 +116,9 @@ changes its timetable. Not in Amtrak's feed, so not here yet: the Gold Runner (C
 
 The viewer's region switch (UK / USA) picks the country, the evidence packs drop the Ofcom and Network Rail wording for US
 routes, and the publish workflow's live-Ofcom check applies to GB routes only. The publish workflow builds US routes side
-by side, one job each, and adds them to the site with the GB routes. Add another country by adding
+by side, one job each, and adds them to the site with the GB routes. Building all of them takes about 2,500 runner
+minutes, so bundles built on main are kept in the `us-bundles` release and a publish rebuilds only the US routes whose
+route file or US settings changed, or whose bundle is six months old (the "rebuild_us" input rebuilds them all). Add another country by adding
 `config/countries/<CC>/profile.yaml` (and its networks file) and route files with that `country`.
 
 ## Evidence pack (`tcs report`)
