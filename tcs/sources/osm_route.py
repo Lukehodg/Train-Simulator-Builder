@@ -25,7 +25,7 @@ DEFAULT_OVERPASS = "https://overpass-api.de/api/interpreter"
 WIDER_CORRIDOR = 2.5          # second try, as a multiple of the corridor, when a leg has no rail path
 OVERPASS_ENDPOINTS = (DEFAULT_OVERPASS, "https://overpass.private.coffee/api/interpreter")   # tried in turn while busy
 OVERPASS_WAITS_S = (20, 40, 60, 90, 120, 180)   # pauses after a busy answer before asking again (plus up to half again at random)
-BUSY = re.compile(r"\b(429|502|503|504)\b|timed? ?out|Gateway|Connection", re.I)
+BUSY = re.compile(r"\b(429|500|502|503|504)\b|timed? ?out|Gateway|Connection", re.I)   # 500: a mirror out of memory under load
 GUIDE_CHUNK_M = 120_000       # a guide line is searched in pieces of this length (one Overpass query each; 200 km pieces
                               # through cities were slow enough to draw 504s)
 
