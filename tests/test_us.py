@@ -494,3 +494,26 @@ def test_us_bundles_are_reused_until_their_inputs_change(tmp_path):
     assert bundle_store.plan(["a"], files, kept, now + dt.timedelta(days=200), config_dir=cfg) == (["a"], [])   # too old
     (cfg / "countries" / "US" / "profile.yaml").write_text("a: 2\n")                                       # US settings changed
     assert bundle_store.plan(["a"], files, kept, now, config_dir=cfg) == (["a"], [])
+
+
+def test_overpass_waits_out_a_rate_limit(tmp_path, monkeypatch):
+    from tcs.sources import osm_route
+
+    calls = []
+
+    def fake_get(url, **kw):
+        calls.append(1)
+        if len(calls) < 3:
+            raise SourceUnavailable("osm_rail: HTTP 429 rate limit")
+        p = tmp_path / "a.json"
+        p.write_text('{"elements": []}')
+        return p
+
+    monkeypatch.setattr(osm_route, "http_get", fake_get)
+    monkeypatch.setattr(osm_route.time, "sleep", lambda s: None)
+    assert osm_route._overpass("q", tmp_path, "osm_rail", None, False, 10) == {"elements": []}
+    assert len(calls) == 3
+    calls.clear()
+    monkeypatch.setattr(osm_route, "OVERPASS_WAITS_S", ())
+    with pytest.raises(SourceUnavailable):                     # out of patience: the caller falls back as before
+        osm_route._overpass("q", tmp_path, "osm_rail", None, False, 10)

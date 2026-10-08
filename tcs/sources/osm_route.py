@@ -7,7 +7,9 @@ the way tags we need for the obstruction model: tunnel=yes, cutting=yes, embankm
 from __future__ import annotations
 
 import json
+import random
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -17,10 +19,11 @@ import pandas as pd
 from shapely.geometry import LineString
 
 from ..geo import Projector, local_crs
-from .base import Provenance, SourceUnavailable, http_get, now_iso
+from .base import Provenance, SourceUnavailable, console, http_get, now_iso
 
 DEFAULT_OVERPASS = "https://overpass-api.de/api/interpreter"
 WIDER_CORRIDOR = 2.5          # second try, as a multiple of the corridor, when a leg has no rail path
+OVERPASS_WAITS_S = (20, 40, 60, 90, 120, 180)   # pauses after a 429 before asking again (plus up to half again at random)
 GUIDE_CHUNK_M = 200_000       # a guide line is searched in pieces of this length (one Overpass query each)
 
 
@@ -36,7 +39,19 @@ class RouteGeometry:
 
 
 def _overpass(query: str, raw_dir: Path, name: str, url: str | None, offline: bool, timeout: int) -> dict:
-    path = http_get(url or DEFAULT_OVERPASS, raw_dir=raw_dir, name=name, data={"data": query}, ext="json", timeout=timeout + 30, offline=offline)
+    # overpass-api.de hands out a few query slots per address. US routes are built twenty at a time from GitHub's runners,
+    # and a long route asks twenty-odd queries, so a 429 is a queue, not a refusal: wait for a slot (up to ~10 minutes)
+    # rather than fall back to the generalised NTAD line for 3,000 km.
+    for wait in [*OVERPASS_WAITS_S, None]:
+        try:
+            path = http_get(url or DEFAULT_OVERPASS, raw_dir=raw_dir, name=name, data={"data": query}, ext="json", timeout=timeout + 30,
+                            offline=offline)
+            break
+        except SourceUnavailable as exc:
+            if wait is None or "429" not in str(exc):
+                raise
+            console.log(f"[yellow]Overpass is busy (HTTP 429); asking again in {wait:.0f} s")
+            time.sleep(wait + random.uniform(0, wait / 2))
     # A busy Overpass server answers 200 with an HTML error page, or with JSON whose `remark` says the query timed out
     # and whose elements are cut short. Neither is the railway: drop it from the cache so the next run asks again.
     try:

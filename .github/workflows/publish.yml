@@ -124,6 +124,13 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: pip install -e .
+      # A cross-country route downloads FCC coverage files for a dozen states and DEM tiles for thousands of km: the
+      # Floridian filled the runner's ~14 GB on 8 Oct 2026. The preinstalled Android, .NET, Haskell and CodeQL tool
+      # chains (unused here) free about 25 GB more.
+      - name: Make room on the runner
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h / | tail -1
       # Read-only: forty-odd jobs saving their downloads would push the shared cache (and its Ofcom answers) out of
       # GitHub's 10 GB cache limit.
       - name: Restore downloads from recent runs
@@ -140,6 +147,7 @@ jobs:
         run: tcs run --route "${{ matrix.route }}"
       - name: Build its evidence packs
         run: |
+          df -h / | tail -1
           if ! tcs report-all --only "${{ matrix.route }}"; then
             echo "::warning::The evidence packs for ${{ matrix.route }} failed to build; it is published without a Report download."
           fi
