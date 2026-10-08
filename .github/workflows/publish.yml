@@ -200,8 +200,11 @@ jobs:
             echo "::warning::Some US routes failed to build (see the us jobs); they are left out of this run."
           fi
 
+      # Saved from main only. A cache is ~2.5 GB and the repository keeps 10 GB, so test runs on other
+      # branches saving theirs pushed out main's and a publish then had to ask Ofcom again for every postcode (8 Oct 2026).
+      # Runs on other branches still restore main's.
       - name: Keep this run's downloads and Ofcom answers, even if the rebuild failed
-        if: always()
+        if: always() && github.ref == 'refs/heads/main'
         uses: actions/cache/save@v4
         with:
           path: data/raw
