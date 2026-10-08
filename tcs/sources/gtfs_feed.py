@@ -11,6 +11,7 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from .base import SourceUnavailable, console, http_get
@@ -63,6 +64,43 @@ def pick_trip(feed: Path, route_name: str, origin: str, destination: str, train:
             "stops": list(rows["code"]), "feed_version": str(info["feed_version"].iloc[0]) if "feed_version" in info else None}
 
 
+def trip_shape(feed: Path, route_name: str, origin: str, destination: str, train: str | None = None) -> np.ndarray:
+    """(n, 2) lon/lat of the feed's shape for a trip of `route_name` from origin to destination (train `train` when it
+    has a shape, else the trip with the most detailed one). Shapes are generalised (straight runs of up to ~30 km), so
+    this guides the search for the track rather than being the track."""
+    with zipfile.ZipFile(feed) as z:
+        read = lambda n: pd.read_csv(z.open(n), dtype=str)
+        routes, trips, stops = read("routes.txt"), read("trips.txt"), read("stops.txt")
+        if "shapes.txt" not in z.namelist():
+            raise SourceUnavailable("GTFS feed has no shapes")
+        shapes = pd.read_csv(z.open("shapes.txt"), dtype={"shape_id": str})
+        st = pd.read_csv(z.open("stop_times.txt"), dtype=str, usecols=["trip_id", "stop_id", "stop_sequence"])
+    rid = routes.loc[routes["route_long_name"].str.casefold() == route_name.casefold(), "route_id"]
+    t = trips[trips["route_id"].isin(rid) & trips["shape_id"].notna()]
+    code = stops.set_index("stop_id")["stop_code"].fillna(stops.set_index("stop_id").index.to_series())
+    st = st[st["trip_id"].isin(t["trip_id"])].assign(seq=lambda d: d["stop_sequence"].astype(int)).sort_values(["trip_id", "seq"])
+    st["code"] = st["stop_id"].map(code).fillna(st["stop_id"])
+    ends = st.groupby("trip_id")["code"].agg(["first", "last"])
+    t = t[t["trip_id"].isin(ends.index[(ends["first"] == origin) & (ends["last"] == destination)])]
+    if t.empty:
+        raise SourceUnavailable(f"GTFS feed has no {route_name} trip {origin} -> {destination} with a shape")
+    npts = shapes.groupby("shape_id").size()
+    t = t.assign(n=t["shape_id"].map(npts).fillna(0), mine=t["trip_short_name"] == str(train) if train else False)
+    sid = t.sort_values(["mine", "n"], ascending=False)["shape_id"].iloc[0]
+    s = shapes[shapes["shape_id"] == sid].sort_values("shape_pt_sequence")
+    return s[["shape_pt_lon", "shape_pt_lat"]].to_numpy(dtype=float)
+
+
+def feed(settings) -> Path:
+    """The route's GTFS feed (timetable.gtfs.url), cached for a week."""
+    g = (settings.route.get("timetable") or {}).get("gtfs") or {}
+    path = http_get(g["url"], raw_dir=settings.paths()["raw"], name="gtfs", ext="zip", timeout=300, ttl_days=7, offline=settings.offline)
+    if not zipfile.is_zipfile(path):
+        path.unlink(missing_ok=True)
+        raise SourceUnavailable("GTFS download is not a zip")
+    return path
+
+
 def apply(settings) -> dict | None:
     """Resolve a GTFS timetable into settings.route['timetable'] (calls, departure, `resolved`). None when not used."""
     tcfg = settings.route.setdefault("timetable", {})
@@ -70,11 +108,8 @@ def apply(settings) -> dict | None:
         return None
     g = tcfg.get("gtfs") or {}
     try:
-        feed = http_get(g["url"], raw_dir=settings.paths()["raw"], name="gtfs", ext="zip", timeout=300, ttl_days=7, offline=settings.offline)
-        if not zipfile.is_zipfile(feed):
-            feed.unlink(missing_ok=True)
-            raise SourceUnavailable("GTFS download is not a zip")
-        r = pick_trip(feed, g["route"], settings.route["origin_crs"], settings.route["destination_crs"], g.get("train"), g.get("depart_after"))
+        feed_zip = feed(settings)
+        r = pick_trip(feed_zip, g["route"], settings.route["origin_crs"], settings.route["destination_crs"], g.get("train"), g.get("depart_after"))
     except (SourceUnavailable, KeyError) as exc:
         console.log(f"[yellow]GTFS timetable unavailable ({exc}); using the route file's calls")
         return None

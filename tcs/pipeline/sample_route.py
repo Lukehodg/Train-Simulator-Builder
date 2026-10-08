@@ -82,6 +82,16 @@ def build_route(settings: Settings) -> RouteBundle:
     st = geom.stations.copy()
     sx, sy = proj.to_xy(st["lon"].values, st["lat"].values)
     st["distance_m"] = [line_xy.project(Point(a, b)) for a, b in zip(sx, sy)]
+    if not st["distance_m"].is_monotonic_increasing:
+        # a train that runs out and back (Lakeland - Tampa - Lakeland) passes a place twice: look for each station
+        # only beyond the one before it
+        from shapely.ops import substring
+
+        d, out = 0.0, []
+        for a, b in zip(sx, sy):
+            d += substring(line_xy, d, line_xy.length).project(Point(a, b)) if d < line_xy.length else 0.0
+            out.append(d)
+        st["distance_m"] = out
     st["sample_id"] = np.clip(np.round(st["distance_m"] / settings.spacing_m).astype(int), 0, n - 1)
     cfg_by_crs = {c["crs"]: c for c in stations_cfg}
     st["stop"] = st["crs"].map(lambda c: bool(cfg_by_crs[c].get("stop", False)))
@@ -157,18 +167,32 @@ def _us_route(settings: Settings, gsrc: str, crs_codes: list[str], raw_dir: Path
     from ..sources import ntad_amtrak
 
     rcfg = settings.route
-    try:
-        st = ntad_amtrak.fetch_stations(crs_codes, raw_dir, offline=False)
-        st["name"] = [s["name"] for s in rcfg["stations"]]      # NTAD names are towns ("Boston, MA" twice): keep the route file's
-    except SourceUnavailable as exc:
-        warnings.append(f"Amtrak stations unavailable ({exc}); using synthetic geometry")
-        console.log(f"[yellow]{warnings[-1]}")
-        return None
+    if all("lat" in s and "lon" in s for s in rcfg["stations"]):
+        # positions in the route file (written from the operator's GTFS stops by tools/amtrak_routes.py): no lookup, and
+        # stations outside the US (Toronto, Montreal, Vancouver) that NTAD does not list work too
+        st = pd.DataFrame([{"crs": s["crs"], "name": s["name"], "lat": float(s["lat"]), "lon": float(s["lon"])} for s in rcfg["stations"]])
+    else:
+        try:
+            st = ntad_amtrak.fetch_stations(crs_codes, raw_dir, offline=False)
+            st["name"] = [s["name"] for s in rcfg["stations"]]      # NTAD names are towns ("Boston, MA" twice): keep the route file's
+        except SourceUnavailable as exc:
+            warnings.append(f"Amtrak stations unavailable ({exc}); using synthetic geometry")
+            console.log(f"[yellow]{warnings[-1]}")
+            return None
+    guide = None
+    if rcfg.get("geometry", {}).get("guide") == "gtfs_shape":
+        from ..sources import gtfs_feed
+
+        g = (rcfg.get("timetable") or {}).get("gtfs") or {}
+        try:
+            guide = gtfs_feed.trip_shape(gtfs_feed.feed(settings), g["route"], rcfg["origin_crs"], rcfg["destination_crs"], g.get("train"))
+        except (SourceUnavailable, KeyError) as exc:
+            console.log(f"[yellow]GTFS shape unavailable ({exc}); searching for the track around the station chain")
     try:
         if gsrc == "file":
             return load_route_file(Path(rcfg["geometry"]["file"]), crs_codes, st)
         return fetch_route(crs_codes, rcfg["country"], raw_dir, corridor_m=8000, overpass_url=settings.key("OVERPASS_URL"),
-                           timeout=int(rcfg.get("geometry", {}).get("overpass_timeout_s", 180)), stations=st)
+                           timeout=int(rcfg.get("geometry", {}).get("overpass_timeout_s", 180)), stations=st, guide=guide)
     except SourceUnavailable as exc:
         name = rcfg.get("geometry", {}).get("ntad_route")
         console.log(f"[yellow]route source '{gsrc}' unavailable ({exc})" + (f"; trying the NTAD '{name}' line" if name else ""))

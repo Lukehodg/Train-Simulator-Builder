@@ -388,3 +388,62 @@ def test_point_cloud_gaps_take_their_neighbours():
     out = _fill_gaps(a)
     assert out[2, 2] == pytest.approx(20.0) and out[0, 0] == pytest.approx(20.0)
     assert np.isnan(_fill_gaps(np.full((3, 3), np.nan, dtype=np.float32))).all()
+
+
+def test_gtfs_shape_guides_the_track_search(tmp_path):
+    import zipfile
+
+    from tcs.sources.gtfs_feed import trip_shape
+    from tcs.sources.osm_route import _guide_polys
+
+    feed = _gtfs(tmp_path)
+    with zipfile.ZipFile(feed, "a") as z:              # trip a has a 3-point shape, trip b a 2-point one; train 2150 is b
+        z.writestr("shapes.txt", "shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\n"
+                                 "s1,38.90,-77.00,1\ns1,40.75,-74.00,2\ns1,42.35,-71.06,3\ns2,38.90,-77.00,1\ns2,42.35,-71.06,2\n")
+    with zipfile.ZipFile(feed) as z:
+        files = {n: z.read(n).decode() for n in z.namelist()}
+    files["trips.txt"] = "route_id,service_id,trip_id,trip_short_name,shape_id\n1,wk,a,2100,s1\n1,wk,b,2150,s2\n1,sat,c,2000,\n1,wk,d,2101,\n2,wk,e,170,\n"
+    with zipfile.ZipFile(feed, "w") as z:
+        for n, body in files.items():
+            z.writestr(n, body)
+    assert trip_shape(feed, "Acela", "WAS", "BOS").shape == (3, 2)            # most detailed shape by default
+    assert trip_shape(feed, "Acela", "WAS", "BOS", train="2150").shape == (2, 2)
+    with pytest.raises(SourceUnavailable):
+        trip_shape(feed, "Acela", "BOS", "WAS")                                # trip d has no shape
+    guide = trip_shape(feed, "Acela", "WAS", "BOS")
+    proj = Projector(local_crs(-74.0, 40.6, "US"))
+    polys = _guide_polys(guide, proj, 8000)
+    assert len(polys) == 3                                                     # ~630 km: 200 + 200 + 230 (a short tail joins)
+    from shapely.geometry import Point, Polygon
+
+    last = [float(v) for v in polys[-1].split()]
+    assert Polygon(list(zip(last[1::2], last[::2]))).contains(Point(-71.06, 42.35))   # the far end is searched too
+    assert all(len(p.split()) % 2 == 0 for p in polys)                         # "lat lon lat lon ..." for Overpass
+
+
+def test_multi_day_timetable_counts_each_midnight():
+    from tcs.sources.timetable import schedule_seconds
+
+    calls = pd.DataFrame({"crs": ["LAX", "ELP", "SND", "DRT", "LRK", "CHI"], "time": ["01:00", "17:45", "23:46", "02:12", "00:44", "14:49"]})
+    s = schedule_seconds(calls, "01:00")
+    assert s["DRT"] == pytest.approx((25 * 60 + 12) * 60) and s["LRK"] == pytest.approx((47 * 60 + 44) * 60)
+    assert s["CHI"] == pytest.approx((61 * 60 + 49) * 60)
+    assert list(s.values()) == sorted(s.values())
+
+
+def test_generated_amtrak_routes_are_complete():
+    """Every generated route file: positions for every station, a pinned GTFS train, its calls, and FCC states."""
+    import yaml
+
+    from tcs.config import list_routes
+
+    gen = [r for r in list_routes() if r["country"] == "US" and r["id"] != "nec_was_bos"]
+    assert len(gen) >= 40
+    for r in gen:
+        route = yaml.safe_load(open(r["file"], encoding="utf-8"))["route"]
+        codes = [s["crs"] for s in route["stations"]]
+        assert all("lat" in s and "lon" in s for s in route["stations"]), r["id"]
+        assert route["timetable"]["gtfs"]["train"] and route["geometry"]["guide"] == "gtfs_shape", r["id"]
+        assert set(route["timetable"]["calls"]) == set(codes) and route["fcc_states"], r["id"]
+        assert route["origin_crs"] == codes[0] and route["destination_crs"] == codes[-1], r["id"]
+        assert 50 <= route.get("sample_spacing_m", 50) <= 300, r["id"]

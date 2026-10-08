@@ -21,6 +21,7 @@ from .base import Provenance, SourceUnavailable, http_get, now_iso
 
 DEFAULT_OVERPASS = "https://overpass-api.de/api/interpreter"
 WIDER_CORRIDOR = 2.5          # second try, as a multiple of the corridor, when a leg has no rail path
+GUIDE_CHUNK_M = 200_000       # a guide line is searched in pieces of this length (one Overpass query each)
 
 
 @dataclass
@@ -79,10 +80,30 @@ out center tags;"""
 
 def _corridor_poly(stations: pd.DataFrame, proj: Projector, buffer_m: float) -> str:
     x, y = proj.to_xy(stations["lon"].values, stations["lat"].values)
-    chain = LineString(np.column_stack([x, y])).buffer(buffer_m, quad_segs=4).simplify(500)
+    return _poly_string(LineString(np.column_stack([x, y])), proj, buffer_m)
+
+
+def _poly_string(line_xy: LineString, proj: Projector, buffer_m: float) -> str:
+    chain = line_xy.buffer(buffer_m, quad_segs=4).simplify(500)
     ring = chain.exterior.coords if chain.geom_type == "Polygon" else max(chain.geoms, key=lambda g: g.area).exterior.coords
     lon, lat = proj.to_lonlat(np.array([c[0] for c in ring]), np.array([c[1] for c in ring]))
     return " ".join(f"{a:.5f} {b:.5f}" for a, b in zip(lat, lon))
+
+
+def _guide_polys(guide: np.ndarray, proj: Projector, buffer_m: float, chunk_m: float = GUIDE_CHUNK_M) -> list[str]:
+    """Corridor polygons around a guide line (lon/lat, e.g. the operator's GTFS shape), cut into overlapping pieces: one
+    band over thousands of km is more than Overpass answers in one query, and a guide follows the track far more closely
+    than the straight chain between stations a hundred km apart."""
+    from shapely.ops import substring
+
+    x, y = proj.to_xy(guide[:, 0], guide[:, 1])
+    line = LineString(np.column_stack([x, y]))
+    cuts = list(np.arange(0.0, line.length, chunk_m)[1:])
+    if cuts and line.length - cuts[-1] < chunk_m * 0.2:      # a short tail joins the piece before it
+        cuts.pop()
+    edges = [0.0, *cuts, line.length]
+    return [_poly_string(substring(line, max(0.0, a - buffer_m), min(line.length, b + buffer_m)), proj, buffer_m)
+            for a, b in zip(edges[:-1], edges[1:])]
 
 
 def _parse_maxspeed(v: str | None) -> float | None:
@@ -111,19 +132,21 @@ def _segment(p0: tuple[float, float], p1: tuple[float, float], tags: dict, way_i
 
 
 def fetch_route(crs_codes: list[str], country: str, raw_dir: Path, *, corridor_m: float = 8000, overpass_url: str | None = None,
-                offline: bool = False, timeout: int = 180, stations: pd.DataFrame | None = None) -> RouteGeometry:
-    """stations: already resolved (crs, name, lat, lon), e.g. from NTAD for a US route; None = look them up in OSM by ref:crs."""
+                offline: bool = False, timeout: int = 180, stations: pd.DataFrame | None = None, guide: np.ndarray | None = None) -> RouteGeometry:
+    """stations: already resolved (crs, name, lat, lon), e.g. from NTAD for a US route; None = look them up in OSM by ref:crs.
+    guide: (n, 2) lon/lat of a line near the track (an operator's GTFS shape): the rail network is searched around it, in
+    pieces, instead of around the straight chain between stations."""
     if stations is None:
         stations = fetch_stations(crs_codes, country, raw_dir, overpass_url=overpass_url, offline=offline, timeout=timeout)
     proj = Projector(local_crs(stations["lon"].mean(), stations["lat"].mean(), country))
-    coords, seg_rows, straight = _route_in_corridor(stations, proj, corridor_m, raw_dir, overpass_url, offline, timeout)
+    coords, seg_rows, straight = _route_in_corridor(stations, proj, corridor_m, raw_dir, overpass_url, offline, timeout, guide)
     warnings: list[str] = []
     if straight:
         # The corridor is a band around the straight station-to-station chain, so a line that swings far off it between
         # two stations (round a hill, an estuary) is clipped away. Ask once more with a wider band before drawing it straight.
         wide = corridor_m * WIDER_CORRIDOR
         try:
-            retry = _route_in_corridor(stations, proj, wide, raw_dir, overpass_url, offline, timeout)
+            retry = _route_in_corridor(stations, proj, wide, raw_dir, overpass_url, offline, timeout, guide)
         except SourceUnavailable as exc:
             warnings.append(f"no rail path for {', '.join(straight)} within {corridor_m / 1000:g} km, and the wider search failed ({exc})")
         else:
@@ -141,23 +164,25 @@ def fetch_route(crs_codes: list[str], country: str, raw_dir: Path, *, corridor_m
 
 
 def _route_in_corridor(stations: pd.DataFrame, proj: Projector, corridor_m: float, raw_dir: Path, overpass_url: str | None, offline: bool,
-                       timeout: int) -> tuple[list[tuple[float, float]], list[dict], list[str]]:
-    """Route station to station through the rail network inside a band of `corridor_m` around the station chain.
-    Returns the line's coordinates, one segment row per piece of it, and the legs that had to be drawn straight."""
-    poly = _corridor_poly(stations, proj, corridor_m)
-    q = f"""[out:json][timeout:{timeout}];
+                       timeout: int, guide: np.ndarray | None = None) -> tuple[list[tuple[float, float]], list[dict], list[str]]:
+    """Route station to station through the rail network inside a band of `corridor_m` around the station chain (or the
+    guide line). Returns the line's coordinates, one segment row per piece of it, and the legs that had to be drawn straight."""
+    polys = [_corridor_poly(stations, proj, corridor_m)] if guide is None else _guide_polys(guide, proj, corridor_m)
+    nodes: dict[int, tuple[float, float]] = {}
+    found: dict[int, dict] = {}
+    for poly in polys:
+        q = f"""[out:json][timeout:{timeout}];
 way["railway"="rail"]["service"!~"yard|siding|spur|crossover"](poly:"{poly}");
 out body;
 >;
 out skel qt;"""
-    doc = _overpass(q, raw_dir, "osm_rail", overpass_url, offline, timeout)
-    nodes: dict[int, tuple[float, float]] = {}
-    ways: list[dict] = []
-    for el in doc.get("elements", []):
-        if el["type"] == "node":
-            nodes[el["id"]] = (el["lon"], el["lat"])
-        elif el["type"] == "way":
-            ways.append(el)
+        doc = _overpass(q, raw_dir, "osm_rail", overpass_url, offline, timeout)
+        for el in doc.get("elements", []):
+            if el["type"] == "node":
+                nodes[el["id"]] = (el["lon"], el["lat"])
+            elif el["type"] == "way":
+                found[el["id"]] = el                     # pieces overlap: a way in two of them is one way
+    ways = list(found.values())
     if not ways:
         raise SourceUnavailable("Overpass returned no railway ways for the corridor")
 

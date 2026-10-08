@@ -58,6 +58,9 @@ def synthetic_route(stations_cfg: list[dict], country: str):
     rows = []
     table = fallback_stations_for(country)
     for s in stations_cfg:
+        if "lat" in s and "lon" in s:                    # positions in the route file (generated US routes)
+            rows.append({"crs": s["crs"], "name": s["name"], "lat": float(s["lat"]), "lon": float(s["lon"])})
+            continue
         if s["crs"] not in table:
             raise KeyError(f"offline mode has no coordinates for {s['crs']}: add it to tcs/sources/fallback_stations.py, "
                            "or run online (OSM) / supply a route file")

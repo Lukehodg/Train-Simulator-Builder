@@ -16,6 +16,9 @@ name: publish
 # A full rebuild makes about 18,000 Ofcom calls (one per postcode near the track), so run it at most once per quota
 # period: this key's quota was used up on 26 Sep 2026 and resets around the 16th, hence the 17th below.
 #
+# US routes are built side by side, one job each (the `us` job below: about 20 minutes a route, 43 routes), and handed to
+# the publish job as artifacts; GB routes are built in the publish job, which needs the Ofcom quota and its cache.
+#
 # "Run workflow" also takes a list of route ids (e.g. tpe_man_ncl) to rebuild just those. Such a run does not publish,
 # since the runner holds only those routes and publishing would drop the rest: it uploads their bundles, evidence packs
 # included, as the run's "route-bundles" artifact, to drop into web/public/data/ next to the others and deploy from there.
@@ -34,16 +37,99 @@ permissions:
   contents: read
 
 concurrency:
-  group: publish
+  # runs that publish queue one behind another; a selected-routes run (never publishes) goes alongside them
+  group: ${{ inputs.routes && format('build-{0}', github.run_id) || 'publish' }}
   cancel-in-progress: false
 
 jobs:
+  plan:
+    name: Pick the routes to build
+    runs-on: ubuntu-latest
+    env:
+      ROUTES: ${{ inputs.routes || '' }}
+    outputs:
+      us: ${{ steps.pick.outputs.us }}
+      gb: ${{ steps.pick.outputs.gb }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e .
+      - id: pick
+        shell: python
+        run: |
+          import json, os
+          from tcs.config import list_routes
+          wanted = {x.strip() for x in os.environ["ROUTES"].split(",") if x.strip()}
+          routes = [r for r in list_routes() if not wanted or r["id"] in wanted]
+          unknown = sorted(wanted - {r["id"] for r in routes})
+          if unknown:
+              raise SystemExit(f"::error::Unknown route id(s): {', '.join(unknown)}")
+          us = [r["id"] for r in routes if r["country"] == "US"]
+          gb = [r["id"] for r in routes if r["country"] != "US"]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write(f"us={json.dumps(us)}\n")
+              fh.write(f"gb={','.join(gb)}\n")
+          print(f"US: {len(us)} route(s), GB: {len(gb)} route(s)")
+
+  us:
+    name: Build ${{ matrix.route }}
+    needs: plan
+    if: needs.plan.outputs.us != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        route: ${{ fromJSON(needs.plan.outputs.us) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e .
+      # Read-only: forty-odd jobs saving their downloads would push the shared cache (and its Ofcom answers) out of
+      # GitHub's 10 GB cache limit.
+      - name: Restore downloads from recent runs
+        uses: actions/cache/restore@v4
+        with:
+          path: data/raw
+          key: raw-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: raw-
+      - name: Build the route from the live feeds
+        env:
+          OPENCELLID_TOKEN: ${{ secrets.OPENCELLID_TOKEN }}
+          FCC_BDC_USERNAME: ${{ secrets.FCC_BDC_USERNAME }}
+          FCC_BDC_TOKEN: ${{ secrets.FCC_BDC_TOKEN }}
+        run: tcs run --route "${{ matrix.route }}"
+      - name: Build its evidence packs
+        run: |
+          if ! tcs report-all --only "${{ matrix.route }}"; then
+            echo "::warning::The evidence packs for ${{ matrix.route }} failed to build; it is published without a Report download."
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: us-bundle-${{ matrix.route }}
+          path: web/public/data/${{ matrix.route }}/
+          retention-days: 7
+          if-no-files-found: error
+
   publish:
     name: Rebuild routes from live feeds and publish
+    needs: [plan, us]
+    # US routes that failed are reported below and left out; they never hold back the GB routes or the publish
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 350   # a full rebuild is mostly Ofcom API calls (about one per corridor postcode): roughly 5 h
     env:
       ROUTES: ${{ inputs.routes || '' }}   # empty on the monthly schedule: every route
+      GB_ROUTES: ${{ needs.plan.outputs.gb }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -73,6 +159,7 @@ jobs:
       # One test call before hours of work: when the Ofcom call quota is used up, every route would silently fall
       # back to stand-in coverage, so stop here and keep the current site.
       - name: Check the Ofcom API still has call quota
+        if: env.GB_ROUTES != ''
         env:
           OFCOM_API_KEY: ${{ secrets.OFCOM_API_KEY }}
         run: |
@@ -92,14 +179,26 @@ jobs:
           key: raw-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: raw-
 
-      - name: Rebuild the routes from the live feeds
+      - name: Rebuild the GB routes from the live feeds
+        if: env.GB_ROUTES != ''
         env:
           OFCOM_API_KEY: ${{ secrets.OFCOM_API_KEY }}
           OPENCELLID_TOKEN: ${{ secrets.OPENCELLID_TOKEN }}
-          FCC_BDC_USERNAME: ${{ secrets.FCC_BDC_USERNAME }}   # US routes: FCC National Broadband Map (optional)
-          FCC_BDC_TOKEN: ${{ secrets.FCC_BDC_TOKEN }}
+        run: tcs build-all --only "$GB_ROUTES"
+
+      - name: Collect the US routes built alongside
+        if: needs.plan.outputs.us != '[]'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: us-bundle-*
+          path: web/public/data/
+      - name: List the routes for the viewer
         run: |
-          if [ -n "$ROUTES" ]; then tcs build-all --only "$ROUTES"; else tcs build-all; fi
+          for d in web/public/data/us-bundle-*; do [ -d "$d" ] && mv "$d" "web/public/data/${d#web/public/data/us-bundle-}"; done
+          python -c "from tcs.cli import write_index; print(write_index())"
+          if [ "${{ needs.us.result }}" = "failure" ]; then
+            echo "::warning::Some US routes failed to build (see the us jobs); they are left out of this run."
+          fi
 
       - name: Keep this run's downloads and Ofcom answers, even if the rebuild failed
         if: always()
@@ -161,8 +260,9 @@ jobs:
       # each route bundle for the viewer's Report button. Re-simulates from the data just built: no API calls.
       # A pack that fails to build does not hold back the publish; that route's Report menu says it has no pack.
       - name: Build the evidence packs for the Report button
+        if: env.GB_ROUTES != ''
         run: |
-          if ! tcs report-all; then
+          if ! tcs report-all --only "$GB_ROUTES"; then
             echo "::warning::Some evidence packs failed to build (see the log above); those routes are published without a Report download."
           fi
 
