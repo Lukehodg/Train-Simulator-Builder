@@ -6,8 +6,8 @@ All constants: `config/simulation.yaml` (versioned by `model_version`).
 
 ```
 q_base = prior_score                       # Ofcom level → score, or Connected Nations %, or synthetic
-       − cutting_penalty_max · min(1, cutting_depth / cutting_full_depth_m)   # 0.28 at 8 m (fitted; depth from LiDAR in GB)
-       − penalty_per_km · max(0, serving_cell_distance_km − free_km)       # 0.01 beyond 8 km (fitted; masts placed from scanner logs)
+       − cutting_penalty_max · min(1, cutting_depth / cutting_full_depth_m)   # 0.28 at 10 m (fitted; depth from LiDAR in GB)
+       − penalty_per_km · max(0, serving_cell_distance_km − free_km)       # 0 (fitted: no penalty since model 0.4.2)
        + calibration_bias[operator]        # tcs calibrate (one route) or tcs calibrate-national (config/calibration.yaml)
        + measured_correction_db / slope    # where trains measured: earlier trips' errors here (tcs correct-routes)
 q      = clip(q_base + vehicle_offset)     # rooftop 0 · handset −0.18 (≈ −18 dB penetration)
@@ -29,6 +29,10 @@ same mast at its fitted position (docs/data-sources.md, 4a).
 The distance penalty was hand-set at 0.06 per km beyond 3 km until the national fit searched it (October 2026). With
 OpenCellID's positions or with the fitted ones, the measurements choose almost none: 0.01 per km beyond 8 km. The
 hand-set value made far-from-mast stretches too weak; removing it cut the 2026 check's error from 10.2 to 9.7 dB.
+Model 0.4.2 fixed the distance beyond the candidate radius: 12 km from every cell of a network it had been left blank,
+so no penalty applied exactly where the train was furthest from a mast. Refitted on the corrected distances, the
+measurements choose no penalty at all (docs/validation.md). `serving_distance_m` is still the distance to the cell the
+model hands over between, as the viewer shows it.
 
 **Measured corrections** (`tcs/corrections.py`). Where scanner trains have measured a route, the calibrated model's
 error at each measured route point (after one level per measurement set and network, taken over every route the set
