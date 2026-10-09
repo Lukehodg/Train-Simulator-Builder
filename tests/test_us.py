@@ -524,3 +524,85 @@ def test_overpass_waits_out_a_rate_limit(tmp_path, monkeypatch):
     monkeypatch.setattr(osm_route, "OVERPASS_WAITS_S", ())
     with pytest.raises(SourceUnavailable):                     # out of patience: the caller falls back as before
         osm_route._overpass("q", tmp_path, "osm_rail", None, False, 10)
+
+
+def test_a_failed_us_rebuild_falls_back_to_its_stored_build():
+    from tcs import bundle_store
+
+    kept = [{"name": "nec--111111111111.tar.gz", "createdAt": "2026-09-01T00:00:00Z"},
+            {"name": "nec_was_bos--222222222222.tar.gz", "createdAt": "2026-10-01T00:00:00Z"},
+            {"name": "other--333333333333.tar.gz", "createdAt": "2026-10-01T00:00:00Z"}]
+    assert bundle_store.fallbacks(["nec_was_bos", "new_route"], kept) == {"nec_was_bos": "nec_was_bos--222222222222.tar.gz"}
+
+
+def test_opencellid_keeps_its_older_file_when_a_refresh_is_refused(tmp_path, monkeypatch):
+    """OpenCellID allows two downloads of a national file a day and answers the third with a short text page: twenty
+    US route jobs refreshing an expired copy at once used to lose it and fall back to stand-in cell sites."""
+    import gzip
+    import os
+    import time
+
+    from tcs.sources import opencellid
+
+    path, calls, answer = tmp_path / "310.csv.gz", [], [gzip.compress(b"LTE,310,410,1,2,0,-77,38,1000,5,1,0,0,0\n")]
+
+    def fake_get(url, *, raw_dir, name, ext, offline=False, ttl_days=30):
+        if offline:
+            if path.exists():
+                return path
+            raise SourceUnavailable("no cached copy")
+        calls.append(url)
+        path.write_bytes(answer[0])
+        return path
+
+    monkeypatch.setattr(opencellid, "http_get", fake_get)
+    get = lambda age: opencellid._bulk_file("u", tmp_path, 310, offline=False, max_age_days=age)   # noqa: E731
+    good = answer[0]
+    assert get(30).read_bytes() == good and len(calls) == 1          # first download
+    assert get(30) == path and len(calls) == 1                       # fresh copy: no call
+    old = time.time() - 40 * 86400
+    os.utime(path, (old, old))
+    assert get(3650) == path and len(calls) == 1                     # the US jobs' setting: any cached copy will do
+    answer[0] = b"RATE_LIMITED"
+    assert get(30).read_bytes() == good and len(calls) == 2          # refused refresh: the older copy is kept
+    assert not list(tmp_path.glob("*.prev"))
+    path.unlink()
+    with pytest.raises(SourceUnavailable):
+        get(30)                                                      # nothing to fall back on
+
+
+def test_a_failed_point_cloud_read_is_flagged_not_taken_as_bare_earth(monkeypatch):
+    import threading
+
+    import requests
+
+    from tcs.sources import lidar, usgs_ept
+
+    class Down:
+        def heights(self, g, dtm):
+            raise requests.ConnectionError("reset")
+
+    bbox = (0.0, 0.0, 20.0, 20.0)
+    g = lidar.Grid.blank(bbox)
+    g.arr[:] = 5.0
+    u = object.__new__(lidar.Usgs3dep)
+    u.ept, u.surface_cells, u._lock = Down(), [0, 0], threading.Lock()
+    u._last = {threading.get_ident(): (bbox, g)}
+    out, src = u.read(bbox, "dsm")
+    assert out.failed and src == "usgs_3dep"                         # corridor_features retries it and keeps it out of the cache
+
+    e = object.__new__(usgs_ept.Ept)
+    e.lock, e.projects, e.http, e.cache = threading.Lock(), {}, None, None
+    errors = {"busy": requests.ConnectionError("reset")}
+    gone = requests.Response()
+    gone.status_code = 404
+    errors["gone"] = requests.HTTPError("404", response=gone)
+
+    def project(url, http, cache):
+        raise errors[url]
+
+    monkeypatch.setattr(usgs_ept, "_Project", project)
+    with pytest.raises(requests.ConnectionError):
+        e._project("busy")
+    assert "busy" not in e.projects                                  # asked again for the next window
+    assert e._project("gone") is None and e.projects["gone"] is None

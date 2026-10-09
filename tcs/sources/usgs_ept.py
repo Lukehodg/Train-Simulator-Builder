@@ -136,8 +136,14 @@ class Ept:
                 return self.projects[url]
         try:
             pr = _Project(url, self.http, self.cache)
-        except (requests.RequestException, SourceUnavailable, KeyError, ValueError):
-            pr = None
+        except requests.HTTPError as exc:
+            if exc.response is None or not 400 <= exc.response.status_code < 500:
+                raise                                    # the service, not the project: ask again next window
+            pr = None                                    # gone from the bucket: skipped for good
+        except requests.RequestException:
+            raise
+        except (SourceUnavailable, KeyError, ValueError):
+            pr = None                                    # a project this reader cannot use: skipped for good
         with self.lock:
             self.projects[url] = pr
         return pr
