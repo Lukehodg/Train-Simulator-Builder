@@ -1,5 +1,5 @@
 # Every numerical assumption lives here and is versioned with model_version.
-model_version: "0.4.1"
+model_version: "0.4.2"
 
 vehicle:
   profile: EXTERNAL_ROOFTOP_ANTENNA     # EXTERNAL_ROOFTOP_ANTENNA | PASSENGER_HANDSET_INSIDE_CARRIAGE
@@ -21,12 +21,12 @@ cellular:
   # Network Rail Yellow Train LTE measurements, 2018-19, all routes. Re-fit with `tcs calibrate-national`.
   terrain:
     cutting_penalty_max: 0.28           # about 13 dB, reached at full_depth (cutting depth from LiDAR in GB)
-    cutting_full_depth_m: 8
+    cutting_full_depth_m: 10
   cell_distance:
     free_km: 0.0
-    penalty_per_km: 0.01
+    penalty_per_km: 0.0
   tunnels:
-    default_score: 0.08                 # deep inside a tunnel with no in-tunnel coverage (about -116 dBm): below usable
+    default_score: 0.06                 # deep inside a tunnel with no in-tunnel coverage (about -116 dBm): below usable
     # Signal from outside carries some way in: the open-air score at each portal falls off exponentially with
     # distance into the tunnel (e-folding length, m) towards default_score. null = default_score throughout.
     portal_decay_m: 150

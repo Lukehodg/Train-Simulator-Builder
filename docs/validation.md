@@ -132,6 +132,24 @@ Both go into `config/calibration.yaml` (a re-run of `tcs calibrate-national` kee
 (sections 8.2 and 8.3, and the sources table) and in the viewer's Sources tab.
 
 
+### Far from every mast (model 0.4.2)
+
+More than 12 km (`candidate_radius_m`) from every cell of a network, the train kept its serving cell but its distance
+was left blank, and the model read a blank as no distance penalty: the signal there scored better than at 11 km. It
+hit 35 % of the Great Eastern's (route point, network) rows, 31 % of the Highland's, 17 % of the Cornish main line's
+and 10 % of the East Coast's, where OpenCellID has no cells for long stretches. The distance now keeps counting. Refitted
+on the 8 October routes, the measurements then choose no distance penalty (0 per km); the same refit without the fix
+keeps 0.01 per km. The cutting depth (10 m) and tunnel floor (0.06) moved with the newer route data, with or without the fix.
+
+| | model 0.4.1 | model 0.4.2 |
+|---|---|---|
+| 2019 Yellow Train test, mean absolute error | 10.73 dB | 10.72 dB |
+| 2026 Global View check, model as calibrated | 9.73 dB | 9.74 dB |
+| 2026 Global View check, with measured corrections | 8.19 dB | 8.20 dB |
+
+(0.4.1 here is the published calibration on the 8 October routes.) Per route the 2026 error moves by at most 0.2 dB
+(HS1 8.20 to 8.00) and the share of the route with good or excellent Wi-Fi by at most 0.7 points.
+
 ### Measured corrections (`tcs correct-routes`)
 
 Signal at a given spot repeats from trip to trip far more closely than any coverage prediction places it (a mast's own
