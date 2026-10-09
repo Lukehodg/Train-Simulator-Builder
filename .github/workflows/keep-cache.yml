@@ -1,0 +1,35 @@
+name: keep-cache
+
+# GitHub deletes a cache that nobody has read for 7 days, and the publish runs once a month: by the 17th, the
+# downloads and Ofcom answers the last publish saved would be gone, and the next one would ask Ofcom again for every
+# postcode (about 18,000 calls, ~5 hours, most of a month's quota). Reading them once a week keeps them. A restore
+# takes about a minute of runner time.
+
+on:
+  schedule:
+    - cron: "41 4 * * 1"   # Mondays 04:41 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  touch:
+    name: Read the saved downloads so GitHub keeps them
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Restore the newest saved downloads and Ofcom answers
+        id: raw
+        uses: actions/cache/restore@v4
+        with:
+          path: data/raw
+          key: raw-keep-warm            # never saved: the restore-keys prefix finds the newest publish's copy
+          restore-keys: raw-
+      - name: Report
+        run: |
+          if [ -z "${{ steps.raw.outputs.cache-matched-key }}" ]; then
+            echo "::warning::No saved downloads found: the next publish will fetch everything again, Ofcom answers included."
+          else
+            echo "Kept ${{ steps.raw.outputs.cache-matched-key }} ($(du -sh data/raw | cut -f1))"
+          fi

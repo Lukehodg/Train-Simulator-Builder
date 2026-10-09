@@ -29,6 +29,7 @@ OVERPASS_ENDPOINTS = (DEFAULT_OVERPASS, "https://maps.mail.ru/osm/tools/overpass
 # on 8 Oct all three instances were overloaded for over half an hour while 20 US routes built at once
 OVERPASS_WAITS_S = (20, 40, 60, 90, 120, 180, 240, 300, 300)
 BUSY = re.compile(r"\b(429|500|502|503|504)\b|timed? ?out|Gateway|Connection", re.I)   # 500: a mirror out of memory under load
+OVERPASS_TTL_DAYS = 45
 GUIDE_CHUNK_M = 120_000       # a guide line is searched in pieces of this length (one Overpass query each; 200 km pieces
                               # through cities were slow enough to draw 504s)
 
@@ -52,8 +53,12 @@ def _overpass(query: str, raw_dir: Path, name: str, url: str | None, offline: bo
     endpoints = [url] if url else list(OVERPASS_ENDPOINTS)
     for k, wait in enumerate([*OVERPASS_WAITS_S, None]):
         try:
+            # cached by the query, not the mirror that answered it; kept 45 days so a monthly publish reuses the last
+            # one's railway (the 30-day default had always just expired), and an older copy beats none when every
+            # mirror is down on the last try
             path = http_get(endpoints[k % len(endpoints)], raw_dir=raw_dir, name=name, data={"data": query}, ext="json",
-                            timeout=timeout + 30, offline=offline)
+                            timeout=timeout + 30, offline=offline, cache_key=f"overpass|{query}", ttl_days=OVERPASS_TTL_DAYS,
+                            stale_ok=wait is None)
             break
         except SourceUnavailable as exc:
             if wait is None or offline or not BUSY.search(str(exc)):

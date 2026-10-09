@@ -216,3 +216,81 @@ def test_an_empty_cached_index_is_asked_for_again(tmp_path):
     assert Http.session.calls == 1
     assert lidar._read_index(tmp_path / "wales_SH47.json") == [{"dtm": "d", "dsm": "s", "ref": "SH4070"}]
     assert not list(tmp_path.glob("*.tmp*"))
+
+
+def test_only_the_samples_asked_for_are_read():
+    """A later build reads only what an earlier one could not; the samples it does read come out as in a full read."""
+    reads = []
+
+    class Counting(FakeLidar):
+        def read(self, bbox, layer):
+            reads.append(bbox)
+            return super().read(bbox, layer)
+
+    ys = np.arange(0.0, 1200.0, 50.0)
+    n = len(ys)
+    args = (np.full(n, TRACK_X), ys, np.zeros(n), np.zeros(n, bool), np.zeros(n, bool))
+    kw = dict(corridor_m=60, segment=3, workers=1, retry_pause_s=0, log=lambda *a: None)
+    full = corridor_features(*args, Counting(), **kw)
+    todo = np.zeros(n, bool)
+    todo[[4, 5, 17]] = True
+    reads.clear()
+    part = corridor_features(*args, Counting(), todo=todo, **kw)
+    assert len(reads) == 2 * 2                                                # two stretches, terrain and surface each
+    for k in ("rail_level_m", "wall_left_m", "wall_right_m", "obstruction_share", "horizon_near_deg"):
+        np.testing.assert_array_equal(part[k][todo], full[k][todo])
+    assert np.isnan(part["rail_level_m"][~todo]).all() and not part["lidar_ok"][~todo].any()
+
+
+def _lidar_settings(tmp_path, monkeypatch, lidar):
+    from types import SimpleNamespace
+
+    import pandas as pd
+    import pyproj
+
+    from tcs.sources import lidar as lidar_mod
+
+    monkeypatch.setattr(lidar_mod, "Lidar", lambda cache: lidar)
+    ys = np.arange(0.0, 1200.0, 50.0)
+    s = SimpleNamespace(offline=False, terrain={"lidar": {"workers": 1}}, route={"country": "GB"}, paths=lambda: {"raw": tmp_path / "raw" / "r"})
+    samples = pd.DataFrame({"x": np.full(len(ys), TRACK_X), "y": ys, "bearing_deg": 0.0, "on_bridge": False, "canopy_probability": 0.0})
+    b = SimpleNamespace(samples=samples, proj=SimpleNamespace(crs=pyproj.CRS.from_epsg(27700)))
+    return s, b
+
+
+def test_a_build_keeps_what_it_read_and_the_next_reads_only_the_rest(tmp_path, monkeypatch):
+    """Publishes read every GB route's LiDAR again because one failed stretch kept the whole route out of the cache
+    (8 Oct 2026: ECML 17 min, ~1 h 40 min over the GB routes). Now what was read is kept and only the rest is asked for."""
+    from tcs.pipeline.obstruction import lidar_features
+
+    reads = []
+
+    class Patchy(FakeLidar):
+        broken = True
+
+        def read(self, bbox, layer):
+            reads.append(bbox)
+            g, src = super().read(bbox, layer)
+            if self.broken and bbox[1] < 500 < bbox[3]:                     # one stretch is down for the whole first build
+                g.arr[:] = np.nan
+                g.failed = True
+                return g, None
+            return g, src
+
+    lid = Patchy()
+    s, b = _lidar_settings(tmp_path, monkeypatch, lid)
+    first = lidar_features(s, b)
+    assert not first["lidar_ok"][10] and first["lidar_ok"][0]
+    lid.broken = False
+    reads.clear()
+    second = lidar_features(s, b)
+    assert reads and all(bb[1] < 500 < bb[3] for bb in reads)               # only the stretch that failed
+    assert second["lidar_ok"].all()
+    reads.clear()
+    third = lidar_features(s, b)
+    assert not reads                                                         # nothing left to read
+    for k in ("rail_level_m", "wall_left_m", "obstruction_share", "horizon_near_deg"):
+        np.testing.assert_array_equal(third[k], second[k])
+    clean = lidar_features(*_lidar_settings(tmp_path / "clean", monkeypatch, FakeLidar()))
+    for k in ("rail_level_m", "wall_left_m", "wall_right_m", "overhead_fraction", "obstruction_share", "horizon_near_deg", "lidar_ok"):
+        np.testing.assert_array_equal(third[k], clean[k])                    # the same as one clean read

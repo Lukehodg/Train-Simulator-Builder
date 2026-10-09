@@ -187,6 +187,9 @@ jobs:
     # US routes that failed are reported below and left out; they never hold back the GB routes or the publish
     if: ${{ !cancelled() && needs.plan.result == 'success' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write           # deletes the older saved downloads once this run's are saved
     timeout-minutes: 350   # a full rebuild is mostly Ofcom API calls (about one per corridor postcode): roughly 5 h
     env:
       ROUTES: ${{ inputs.routes || '' }}   # empty on the monthly schedule: every route
@@ -277,11 +280,22 @@ jobs:
       # branches saving theirs pushed out main's and a publish then had to ask Ofcom again for every postcode (8 Oct 2026).
       # Runs on other branches still restore main's.
       - name: Keep this run's downloads and Ofcom answers, even if the rebuild failed
+        id: keep
         if: always() && github.ref == 'refs/heads/main'
         uses: actions/cache/save@v4
         with:
           path: data/raw
           key: raw-${{ github.run_id }}-${{ github.run_attempt }}
+      # This run's copy holds everything the older ones did (it started from the newest), so they only take room:
+      # at ~2.5 GB each, four publishes filled the repository's 10 GB and GitHub began evicting caches. Keep the newest.
+      - name: Drop older copies of the downloads
+        if: always() && steps.keep.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP: raw-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          gh cache list --repo "$GITHUB_REPOSITORY" --key raw- --ref refs/heads/main --limit 100 --json id,key -q '.[] | select(.key != env.KEEP) | .id' |
+            while read -r id; do gh cache delete "$id" --repo "$GITHUB_REPOSITORY" || true; done
 
       # Each route's model inputs and outputs (route samples, coverage, serving cells, predictions; not the raw downloads)
       # for calibrating and validating the model against field measurements, which never come to GitHub. Kept for 7 days.
