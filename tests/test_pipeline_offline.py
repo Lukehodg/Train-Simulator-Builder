@@ -23,7 +23,7 @@ def pipeline():
     b.samples = enrich_terrain(s, b)
     prior, b.samples = coverage_prior(s, b)
     cells = corridor_cells(s, b, b.samples)
-    serving = serving_cells(s, b.samples, candidate_cells(s, b.samples, cells))
+    serving = serving_cells(s, b.samples, candidate_cells(s, b.samples, cells), cells)
     b.samples, stations = movement(s, b.samples, b.stations)
     obs, rc = simulate(s, b.samples, prior, serving)
     return s, b, stations, prior, serving, obs, rc

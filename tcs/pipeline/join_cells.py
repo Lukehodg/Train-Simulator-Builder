@@ -87,16 +87,20 @@ def candidate_cells(settings: Settings, samples: pd.DataFrame, cells: pd.DataFra
     return df
 
 
-def serving_cells(settings: Settings, samples: pd.DataFrame, candidates: pd.DataFrame) -> pd.DataFrame:
+def serving_cells(settings: Settings, samples: pd.DataFrame, candidates: pd.DataFrame, cells: pd.DataFrame | None = None) -> pd.DataFrame:
     """Sequential serving-cell choice with hysteresis per operator; emits handover flags.
 
     Output per (sample, operator): serving_cell, serving_distance_m, handover (bool), handover_penalty (0..1 decaying).
+    Where no cell of a network is a candidate (none within candidate_radius_m), the train keeps its serving cell; with
+    `cells` (cell_key, x, y) its distance to that cell keeps counting, else it is NaN and the model applies no distance penalty.
     """
     hcfg = settings.sim["cellular"]["handover"]
     ratio = float(hcfg["hysteresis_ratio"])
     max_d = float(hcfg["max_serving_distance_km"]) * 1000
     dur = int(hcfg["duration_samples"])
     n = len(samples)
+    sx, sy = samples["x"].to_numpy(float), samples["y"].to_numpy(float)
+    at = {} if cells is None else dict(zip(cells["cell_key"].tolist(), zip(cells["x"].tolist(), cells["y"].tolist())))
     out = []
     for pid, grp in candidates.groupby("provider_id"):
         best = grp.sort_values(["sample_id", "dist_m"]).drop_duplicates("sample_id").set_index("sample_id")
@@ -126,6 +130,9 @@ def serving_cells(settings: Settings, samples: pd.DataFrame, candidates: pd.Data
                 cur = nk if isinstance(nk, str) else cur
                 cd = cands.get(cur, np.nan) if cur else np.nan
             serving[i] = cur
+            if not np.isfinite(cd) and cur in at:
+                cx, cy = at[cur]
+                cd = float(np.hypot(sx[i] - cx, sy[i] - cy))
             sdist[i] = cd if np.isfinite(cd) else np.nan
             if left > 0:
                 pen[i] = left / dur

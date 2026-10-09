@@ -87,7 +87,7 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
         prior, b.samples = coverage_prior(s, b, limit=limit_postcodes)
         cells = corridor_cells(s, b, b.samples)
     cand = candidate_cells(s, b.samples, cells)
-    serving = serving_cells(s, b.samples, cand)
+    serving = serving_cells(s, b.samples, cand, cells)
     gtfs_feed.apply(s)                                         # timetable.source: gtfs -> one real train's calls
     b.samples, stations = movement(s, b.samples, b.stations)
     b.stations = stations
