@@ -6,6 +6,7 @@ export interface ProviderMeta {
   type: ProviderType
   capacity_prior_mbps: Record<string, number> | number
   terminal?: string
+  terminals?: number        // satcom terminals of this provider on the train (capacity scales with the count)
   terminal_default?: string
   enabled?: boolean
   enabled_default?: boolean
