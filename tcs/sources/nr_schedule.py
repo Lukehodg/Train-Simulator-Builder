@@ -11,7 +11,9 @@ overlay (STP O) replaces the permanent schedule.
 TIPLOCs map to station codes (CRS) from the extract's own TIPLOC records, topped up from CORPUS (the location reference
 file from the same service). Some big stations have platforms under a TIPLOC that carries no station code (Victoria's
 Brighton side is VICTRIC, Waterloo's main line WATRLMN, St Pancras' HS1 platforms STPANCI): a route file lists those under
-`timetable.network_rail.tiplocs` ({CRS: [TIPLOC, ...]}). Needs NETWORK_RAIL_USERNAME and NETWORK_RAIL_PASSWORD (repository secrets in CI). When the
+`timetable.network_rail.tiplocs` ({CRS: [TIPLOC, ...]}). Where the feed codes a call differently from the route file
+(HS1's domestic platforms at Stratford International and Ebbsfleet are SDI and EBF), `aliases` ({feed CRS: route CRS})
+renames it. Needs NETWORK_RAIL_USERNAME and NETWORK_RAIL_PASSWORD (repository secrets in CI). When the
 feed can't be read, the route file's own `calls` are used, so a build never stops for the timetable.
 
 The extract is ~135 MB gzipped (~3.5 GB of JSON lines, ~720k schedules), downloaded once a day and shared by every GB
@@ -210,6 +212,9 @@ def apply(settings) -> dict | None:
     except (SourceUnavailable, OSError, ValueError) as exc:
         console.log(f"[yellow]Network Rail timetable unavailable ({exc}); using the route file's calls")
         return None
+    alias = n.get("aliases") or {}
+    r["calls"] = {alias.get(c, c): t for c, t in r["calls"].items()}
+    r["stops"] = [alias.get(c, c) for c in r["stops"]]
     tcfg["calls"], tcfg["departure"] = r["calls"], r["departure"]
     tcfg["resolved"] = {"source": "network_rail", "train": r["train"], "uid": r["uid"], "toc": r["toc"], "date": r["date"], "stops": r["stops"]}
     console.log(f"timetable: {r['toc']} {r['train']} ({r['uid']}) from Network Rail SCHEDULE for {r['date']}, {r['departure']} {origin} -> "

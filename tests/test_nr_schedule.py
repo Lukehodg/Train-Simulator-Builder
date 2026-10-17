@@ -134,3 +134,6 @@ def test_route_file_adds_tiplocs_with_no_station_code(tmp_path, monkeypatch):
     s.route["timetable"]["network_rail"]["tiplocs"] = {"KGX": ["KNGXHL"]}
     r = nr_schedule.apply(s)
     assert r["uid"] == "A00009" and r["calls"]["KGX"] == "09:00"
+    s.route["timetable"]["network_rail"]["aliases"] = {"PBO": "PBR"}         # the feed's code for a call -> the route file's
+    r = nr_schedule.apply(s)
+    assert "PBR" in r["calls"] and "PBO" not in r["calls"] and r["stops"][1] == "PBR"
