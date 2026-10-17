@@ -9,7 +9,9 @@ GTFS train (gtfs_feed.py). Short-term plans are honoured: a cancellation (STP C)
 overlay (STP O) replaces the permanent schedule.
 
 TIPLOCs map to station codes (CRS) from the extract's own TIPLOC records, topped up from CORPUS (the location reference
-file from the same service). Needs NETWORK_RAIL_USERNAME and NETWORK_RAIL_PASSWORD (repository secrets in CI). When the
+file from the same service). Some big stations have platforms under a TIPLOC that carries no station code (Victoria's
+Brighton side is VICTRIC, Waterloo's main line WATRLMN, St Pancras' HS1 platforms STPANCI): a route file lists those under
+`timetable.network_rail.tiplocs` ({CRS: [TIPLOC, ...]}). Needs NETWORK_RAIL_USERNAME and NETWORK_RAIL_PASSWORD (repository secrets in CI). When the
 feed can't be read, the route file's own `calls` are used, so a build never stops for the timetable.
 
 The extract is ~135 MB gzipped (~3.5 GB of JSON lines, ~720k schedules), downloaded once a day and shared by every GB
@@ -200,7 +202,10 @@ def apply(settings) -> dict | None:
     origin, dest = settings.route["origin_crs"], settings.route["destination_crs"]
     try:
         sched, corpus = download(settings)
-        r = pick_train(sched, crs_tiplocs(sched, corpus), origin, dest, day=typical_weekday(), toc=n.get("toc"),
+        tiplocs = crs_tiplocs(sched, corpus)
+        for crs, extra in (n.get("tiplocs") or {}).items():
+            tiplocs.setdefault(crs, set()).update(extra)
+        r = pick_train(sched, tiplocs, origin, dest, day=typical_weekday(), toc=n.get("toc"),
                        train=n.get("train"), depart_after=n.get("depart_after") or tcfg.get("departure"))
     except (SourceUnavailable, OSError, ValueError) as exc:
         console.log(f"[yellow]Network Rail timetable unavailable ({exc}); using the route file's calls")

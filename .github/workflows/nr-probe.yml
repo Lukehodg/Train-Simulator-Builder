@@ -14,38 +14,26 @@ jobs:
       - uses: actions/setup-python@v6
         with: {python-version: "3.12", cache: pip, cache-dependency-path: pyproject.toml}
       - run: pip install -e .
-      - name: Diagnose the routes with no train
+      - name: Pick a real train for every GB route
         env:
           NETWORK_RAIL_USERNAME: ${{ secrets.NETWORK_RAIL_USERNAME }}
           NETWORK_RAIL_PASSWORD: ${{ secrets.NETWORK_RAIL_PASSWORD }}
         run: |
           python - <<'PY'
-          import collections, gzip, json
-          from tcs.config import load_settings
-          from tcs.sources import nr_schedule as nr
-          s = load_settings(route_id="hs1_stp_dvp")
-          sched, corpus = nr.download(s)
-          pref = ("VICT", "WATRL", "BRGHT", "WEYM", "MNCR")
-          with nr._open(sched) as fh:
-              for line in fh:
-                  if line.startswith('{"TiplocV1"'):
-                      t = json.loads(line)["TiplocV1"]
-                      if t["tiploc_code"].startswith(pref):
-                          print("TIPLOC", t)
-                  elif line.startswith('{"JsonSchedule'):
-                      break
-          for r in json.load(nr._open(corpus))["TIPLOCDATA"]:
-              if r["TIPLOC"].startswith(pref):
-                  print("CORPUS", r)
-          day = nr.typical_weekday()
-          for dest in ("BRGHTN", "WEYMTH"):
-              c = collections.Counter()
-              with nr._open(sched) as fh:
-                  for line in fh:
-                      if line.startswith('{"JsonScheduleV1"') and f'"{dest}"' in line:
-                          x = json.loads(line)["JsonScheduleV1"]
-                          if nr._runs_on(x, day) and x.get("train_status") in ("P", "1"):
-                              locs = x["schedule_segment"]["schedule_location"]
-                              c[(x["atoc_code"], locs[0]["tiploc_code"], locs[-1]["tiploc_code"])] += 1
-              print(dest, c.most_common(12))
+          import time
+          from tcs.config import list_routes, load_settings
+          from tcs.sources import nr_schedule
+          for r in list_routes():
+              if r["country"] == "US":
+                  continue
+              s = load_settings(route_id=r["id"])
+              before = dict(s.route["timetable"]["calls"])
+              t0 = time.time()
+              got = nr_schedule.apply(s)
+              print(f"== {r['id']} ({time.time() - t0:.0f}s)")
+              print("   route file:", before)
+              if got:
+                  print("   network rail:", got["toc"], got["train"], got["uid"], got["calls"])
+                  stations = [x["crs"] for x in s.route["stations"]]
+                  print("   route stations it calls at:", [c for c in stations if c in got["stops"]], " passes:", [c for c in stations if c not in got["stops"]])
           PY

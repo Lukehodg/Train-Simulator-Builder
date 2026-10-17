@@ -121,3 +121,16 @@ def test_every_gb_route_asks_for_a_network_rail_train():
         s = load_settings(offline=True, route_id=r["id"])
         tt = s.route["timetable"]
         assert tt["source"] == "network_rail" and tt["network_rail"]["toc"] and tt["calls"], r["id"]
+
+
+def test_route_file_adds_tiplocs_with_no_station_code(tmp_path, monkeypatch):
+    locs = _kgx_edb()
+    locs[0] = _loc("LO", "KNGXHL", dep="0900")                             # a platform TIPLOC the feed gives no CRS
+    sched, corpus = _extract(tmp_path, [_sched("A00009", "P", locs)])
+    s = load_settings(offline=False)
+    monkeypatch.setattr(nr_schedule, "download", lambda settings: (sched, corpus))
+    monkeypatch.setattr(nr_schedule, "typical_weekday", lambda: DAY)
+    assert nr_schedule.apply(s) is None                                    # not found by station code alone
+    s.route["timetable"]["network_rail"]["tiplocs"] = {"KGX": ["KNGXHL"]}
+    r = nr_schedule.apply(s)
+    assert r["uid"] == "A00009" and r["calls"]["KGX"] == "09:00"
