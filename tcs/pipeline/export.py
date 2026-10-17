@@ -105,6 +105,7 @@ def export_all(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame, s
         else:
             sp = next(s for s in all_sat if s["id"] == p["id"])
             p["terminal"] = sp["terminal"]
+            p["terminals"] = int(sp.get("terminals", 1))
             p["capacity_prior_mbps"] = sp["capacity_prior_mbps"][sp["terminal"]]
             p["capacity_priors"] = sp["capacity_prior_mbps"]          # all terminal classes, so the viewer can switch designs
             dsp = next((d for d in settings.starlink_defaults.get("satcom", {}).get("providers", []) if d["id"] == p["id"]), sp)

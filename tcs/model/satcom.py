@@ -35,7 +35,7 @@ def satcom_observations(settings: Settings, samples: pd.DataFrame, weather: str 
         thr = p["availability"]["sky_threshold"]
         p_link = np.clip((sky_eff - thr) / (1 - thr), 0, 1) ** 0.5 * (1 - p["availability"]["speed_penalty_per_100kph"] * speed / 100)
         avail = in_service & ~tun & (sky_eff >= thr)
-        cap_prior = p["capacity_prior_mbps"][term]
+        cap_prior = p["capacity_prior_mbps"][term] * int(p.get("terminals", 1))   # several terminals share the sky and are bonded
         cap = np.where(avail, cap_prior * np.power(sky_eff, 1.4) * wcfg["capacity_factor"] * np.where(temp, 0.3, 1.0), 0.0)
         lat = p["latency_prior_ms"]["base"] + p["latency_prior_ms"]["obstruction_penalty"] * (1 - sky_eff) + np.where(temp, 40, 0)
         loss = np.where(avail, np.where(sky_eff < 0.6, 1.2, 0.3) + np.where(temp, 3.0, 0.0), 100.0)

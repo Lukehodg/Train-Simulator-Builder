@@ -177,6 +177,7 @@ def apply_to_settings(settings, design: TrainDesign) -> None:
     sim["satcom_enabled"] = design.satcom_units > 0
     for p in settings.starlink["satcom"]["providers"]:
         p["enabled"] = design.satcom_units > 0
+        p["terminals"] = max(1, design.satcom_units)          # e.g. two Starlink tiles on a 9-car set: twice the capacity
         if design.satcom_terminal and design.satcom_terminal in p.get("capacity_prior_mbps", {}):
             p["terminal"] = design.satcom_terminal
     sim["train"] = {**sim.get("train", {}), "design": design.summary()}

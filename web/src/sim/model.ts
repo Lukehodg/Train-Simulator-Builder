@@ -91,7 +91,7 @@ export function simulate(data: RouteData, sc: Scenario): SimResult {
         if (!onTrain) { r.avail[i] = 0; r.reason[i] = 'NOT_FITTED' }    // the network's own signal still shows; the train cannot use it
       }
     } else {
-      const av = p.availability!, w = av.weather[sc.weather] ?? av.weather.nominal, prior = p.capacity_prior_mbps as number, lp = p.latency_prior_ms!
+      const av = p.availability!, w = av.weather[sc.weather] ?? av.weather.nominal, prior = (p.capacity_prior_mbps as number) * (p.terminals ?? 1), lp = p.latency_prior_ms!
       const satFitted = sim.satcom_enabled !== false && p.enabled !== false   // switched off, or no terminal in the design
       const satEnabled = satFitted && (!p.service_area || p.service_area.countries.some(c => c.toUpperCase() === meta.route.country.toUpperCase()))
       for (let i = 0; i < n; i++) {
