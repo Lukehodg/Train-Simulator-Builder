@@ -2,34 +2,38 @@ name: nr-probe (temporary)
 on:
   push:
     branches: [claude/project-thread-xklwdq]
-    paths: [.github/workflows/nr-probe.yml]
+    paths: [.github/workflows/nr-probe.yml, tcs/sources/nr_schedule.py]
 permissions:
   contents: read
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
-      - name: Download and describe SCHEDULE and CORPUS
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: {python-version: "3.12", cache: pip, cache-dependency-path: pyproject.toml}
+      - run: pip install -e .
+      - name: Pick a real train for every GB route
         env:
-          U: ${{ secrets.NETWORK_RAIL_USERNAME }}
-          P: ${{ secrets.NETWORK_RAIL_PASSWORD }}
+          NETWORK_RAIL_USERNAME: ${{ secrets.NETWORK_RAIL_USERNAME }}
+          NETWORK_RAIL_PASSWORD: ${{ secrets.NETWORK_RAIL_PASSWORD }}
         run: |
-          [ -n "$U" ] && echo "username set" || echo "username MISSING"
-          [ -n "$P" ] && echo "password set" || echo "password MISSING"
-          B=https://publicdatafeeds.networkrail.co.uk/ntrod
-          get() { curl -sS -L -u "$U:$P" -o "$2" -w "$1 HTTP %{http_code} %{size_download} bytes in %{time_total}s\n" "$B/$1"; }
-          get "SupportingFileAuthenticate?type=CORPUS" corpus.gz
-          get "CifFileAuthenticate?type=CIF_ALL_FULL_DAILY&day=toc-full" all.gz
-          get "CifFileAuthenticate?type=CIF_GR_TOC_FULL_DAILY&day=toc-full" gr.gz
-          for f in corpus.gz all.gz gr.gz; do echo "== $f"; file $f; ls -l $f; done
-          zcat corpus.gz | head -c 600; echo
-          echo "== record types in ALL"
-          zcat all.gz | wc -lc
-          zcat all.gz | cut -c1-30 | sed -E 's/":.*//' | sort | uniq -c
-          zcat all.gz | head -1 | head -c 800; echo
-          zcat all.gz | grep -m2 '"TiplocV1"' | head -c 800; echo
-          zcat all.gz | grep '"JsonScheduleV1"' | grep -m1 '"KNGX' | head -c 3000; echo
-          echo "== GR"
-          zcat gr.gz | head -c 300; echo
-          zcat gr.gz | wc -l
+          python - <<'PY'
+          import time
+          from tcs.config import list_routes, load_settings
+          from tcs.sources import nr_schedule
+          for r in list_routes():
+              if r["country"] == "US":
+                  continue
+              s = load_settings(route_id=r["id"])
+              before = dict(s.route["timetable"]["calls"])
+              t0 = time.time()
+              got = nr_schedule.apply(s)
+              print(f"== {r['id']} ({time.time() - t0:.0f}s)")
+              print("   route file:", before)
+              if got:
+                  print("   network rail:", got["toc"], got["train"], got["uid"], got["calls"])
+                  stations = [x["crs"] for x in s.route["stations"]]
+                  print("   route stations it calls at:", [c for c in stations if c in got["stops"]], " passes:", [c for c in stations if c not in got["stops"]])
+          PY
