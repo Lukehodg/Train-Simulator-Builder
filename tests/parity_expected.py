@@ -15,8 +15,9 @@ from pathlib import Path
 
 import pandas as pd
 
+from tcs import corrections
 from tcs.config import load_settings
-from tcs.model import calibration
+from tcs.model import adjustment, calibration
 from tcs.model.bonding import POLICIES
 from tcs.model.simulate import simulate
 from tcs.model.wifi import CLASSES
@@ -44,6 +45,7 @@ def main() -> int:
     prior = pd.read_parquet(interim / "coverage_prior.parquet")
     serving = pd.read_parquet(interim / "serving.parquet")
     cal = calibration.for_route(s, interim)
+    corr, adj = corrections.load_interim(interim), adjustment.load_interim(interim)     # as the build applied them
     order = [p["id"] for p in meta["providers"]]
     bit = {pid: 1 << k for k, pid in enumerate(order)}
     weathers = sorted({w for p in s.starlink["satcom"]["providers"] for w in p["availability"]["weather"]} | {"nominal"})
@@ -59,7 +61,8 @@ def main() -> int:
                         continue                                      # the fitted set only changes which links compete
                     s.sim["vehicle"]["profile"] = vehicle
                     s.sim["cellular"]["fitted_networks"] = list(networks) if networks else None
-                    _, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, policy=policy)
+                    _, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, policy=policy,
+                                     corrections=corr, adjustment=adj)
                     scenarios.append({
                         "policy": policy, "vehicle": vehicle, "weather": weather, "networks": list(networks) if networks else None,
                         # float32 -> float64 before rounding, or the JSON keeps float32 artefacts (765.2064819335938)

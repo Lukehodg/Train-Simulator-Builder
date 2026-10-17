@@ -126,9 +126,11 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
         meas_db, meas_w = m["correction_db"].to_numpy(float), m["weight"].fillna(0).to_numpy(float)
         meas_q = np.where(np.isfinite(meas_db), meas_db / slope_db, 0.0)
     adj_db = np.zeros(len(df))
+    adj_out = np.full(len(df), np.nan)
     if adjustment is not None and len(adjustment):
         a = df[["sample_id", "provider_id"]].merge(adjustment[["sample_id", "provider_id", "adjustment_db"]], on=["sample_id", "provider_id"], how="left")
-        adj_db = a["adjustment_db"].fillna(0).to_numpy(float)
+        adj_out = a["adjustment_db"].to_numpy(float)
+        adj_db = np.nan_to_num(adj_out)
     meas_q = meas_q + adj_db / slope_db                     # both shift the score by dB on the calibration's scale
     tun = df["in_tunnel"].fillna(False).values.astype(bool)
     q_base = q_base + np.where(tun, 0.0, meas_q)            # inside tunnels the correction goes on the tunnel model, below
@@ -201,8 +203,8 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
         "handover": df["handover"].fillna(False).values.astype(bool), "source_flags": flags, "model_version": settings.sim["model_version"],
         "quality_base": q_base, "handover_penalty": hp,
         "rsrp_slope": rsrp_slope, "rsrp_intercept": rsrp_intercept,
-        "measured_correction_db": meas_db.astype(np.float32),
-        "_calibrated": calibrated, "_meas_w": meas_w, "_adjustment_db": adj_db.astype(np.float32),
+        "measured_correction_db": meas_db.astype(np.float32), "learned_adjustment_db": adj_out.astype(np.float32),
+        "_calibrated": calibrated, "_meas_w": meas_w,
         "_has_prior": has_prior, "_prior_source": df["source"].astype(str).values, "_in_tunnel": tun,
     })
     return out

@@ -126,6 +126,8 @@ function renderSample(store: Store, i: number) {
       if (dp > 0.005) rows.push([`cell ${dk.toFixed(1)} km away`, `−${dp.toFixed(2)}`])
       const mc = b.meas ? b.meas[i] : NaN
       if (Number.isFinite(mc) && Math.abs(mc) >= 0.5) rows.push(['measured correction (earlier trips here)', `${mc > 0 ? '+' : '−'}${Math.abs(mc).toFixed(1)} dB`])
+      const ad = b.adj ? b.adj[i] : NaN
+      if (Number.isFinite(ad) && Math.abs(ad) >= 0.5) rows.push(['learned adjustment (measured stretches like this one)', `${ad > 0 ? '+' : '−'}${Math.abs(ad).toFixed(1)} dB`])
       if (vprof.score_offset) rows.push([vprof.score_offset < 0 ? 'carriage penetration loss' : `active antenna (+${vprof.db_offset} dB)`, `${vprof.score_offset > 0 ? '+' : ''}${vprof.score_offset.toFixed(2)}`])
       if (vprof.capacity_factor && vprof.capacity_factor !== 1) rows.push(['antenna / MIMO factor', `×${vprof.capacity_factor}`])
       if (L.reason[i] === 'NOT_FITTED') rows.push(['on this train', 'not fitted: no modem for this network, so the router cannot use it'])
