@@ -20,31 +20,32 @@ jobs:
           NETWORK_RAIL_PASSWORD: ${{ secrets.NETWORK_RAIL_PASSWORD }}
         run: |
           python - <<'PY'
-          import collections, json
+          import collections, gzip, json
           from tcs.config import load_settings
           from tcs.sources import nr_schedule as nr
           s = load_settings(route_id="hs1_stp_dvp")
           sched, corpus = nr.download(s)
-          t = nr.crs_tiplocs(sched, corpus)
-          pairs = [("STP", "DVP"), ("SPX", "DVP"), ("VIC", "BTN"), ("WAT", "WEY"), ("MAN", "NCL"), ("MCV", "NCL")]
-          for o, d in pairs:
-              print(o, sorted(t.get(o, [])), d, sorted(t.get(d, [])))
+          pref = ("VICT", "WATRL", "BRGHT", "WEYM", "MNCR")
+          with nr._open(sched) as fh:
+              for line in fh:
+                  if line.startswith('{"TiplocV1"'):
+                      t = json.loads(line)["TiplocV1"]
+                      if t["tiploc_code"].startswith(pref):
+                          print("TIPLOC", t)
+                  elif line.startswith('{"JsonSchedule'):
+                      break
+          for r in json.load(nr._open(corpus))["TIPLOCDATA"]:
+              if r["TIPLOC"].startswith(pref):
+                  print("CORPUS", r)
           day = nr.typical_weekday()
-          for o, d in pairs:
-              ok, dk = [f'"{x}"' for x in t.get(o, [])], [f'"{x}"' for x in t.get(d, [])]
-              seen = collections.Counter(); ex = []
+          for dest in ("BRGHTN", "WEYMTH"):
+              c = collections.Counter()
               with nr._open(sched) as fh:
                   for line in fh:
-                      if not line.startswith('{"JsonScheduleV1"') or not (any(k in line for k in ok) and any(k in line for k in dk)):
-                          continue
-                      x = json.loads(line)["JsonScheduleV1"]
-                      run = nr._runs_on(x, day)
-                      seen[(x.get("atoc_code"), x.get("train_status"), x.get("CIF_stp_indicator"), run)] += 1
-                      if run and len(ex) < 2:
-                          locs = x["schedule_segment"]["schedule_location"]
-                          ex.append([(l["tiploc_code"], l.get("public_arrival"), l.get("public_departure"), l.get("pass")) for l in locs
-                                     if l["tiploc_code"] in t.get(o, set()) | t.get(d, set())])
-              print(f"== {o}->{d}", dict(seen.most_common(12)))
-              for e in ex:
-                  print("   ", e)
+                      if line.startswith('{"JsonScheduleV1"') and f'"{dest}"' in line:
+                          x = json.loads(line)["JsonScheduleV1"]
+                          if nr._runs_on(x, day) and x.get("train_status") in ("P", "1"):
+                              locs = x["schedule_segment"]["schedule_location"]
+                              c[(x["atoc_code"], locs[0]["tiploc_code"], locs[-1]["tiploc_code"])] += 1
+              print(dest, c.most_common(12))
           PY
