@@ -55,7 +55,10 @@ route:
   # (tcs calibrate-national lists such tunnels).
   das_tunnels: ["Severn Tunnel"]
   timetable:
-    source: yaml
+    # A real weekday train from Network Rail's SCHEDULE feed (tcs/sources/nr_schedule.py): first at or after `departure`;
+    # the calls below are used when the feed can't be read (no NETWORK_RAIL_USERNAME / _PASSWORD, offline).
+    source: network_rail
+    network_rail: {toc: GW}
     departure: 09:00
     calls:
       PAD: 09:00

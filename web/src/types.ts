@@ -55,7 +55,7 @@ export interface Meta {
   length_m: number
   duration_s: number
   departure: string
-  timetable?: { source: string; route?: string; train?: string; feed_version?: string | null }   // a GTFS train (US) names itself
+  timetable?: { source: string; route?: string; train?: string; feed_version?: string | null; uid?: string; toc?: string; date?: string }   // a real train (GTFS in the US, Network Rail SCHEDULE in GB) names itself
   ookla_check?: { quarter: string; samples_with_tests: number; median_ookla_down_mbps: number | null; median_model_best_mbps: number | null
     sections: number; section_km: number; section_rank_correlation?: number | null; slowest_fifth_overlap?: number | null; used_as_input?: boolean }
   n_samples: number

@@ -35,6 +35,13 @@ INK, MUTED, HAIRLINE = "#1f2933", "#5d6c7b", "#dde3e9"
 
 
 # ---------------------------------------------------------------- analysis
+
+def timetable_source(t: dict) -> str:
+    """One line naming the real train a build follows: Network Rail SCHEDULE (GB) or an operator's GTFS feed (US)."""
+    if t.get("source") == "network_rail":
+        return f"{t.get('toc') or ''} train {t['train']} (UID {t.get('uid')}) from Network Rail's SCHEDULE feed, as timetabled for {t.get('date')}".strip()
+    return f"{t.get('route', 'Train')} {t['train']} from the operator's GTFS feed" + (f" (feed {t['feed_version']})" if t.get("feed_version") else "")
+
 def section_table(samples: pd.DataFrame, rc: pd.DataFrame, obs: pd.DataFrame, stations: pd.DataFrame, providers: list[str]) -> pd.DataFrame:
     """Station-to-station sections (between consecutive stations in the sequence)."""
     st = stations.sort_values("distance_m").reset_index(drop=True)
@@ -492,8 +499,7 @@ def _assumptions(settings: Settings, meta: dict | None = None) -> list[tuple[str
         ("Passenger demand", f"{pw['passengers']} seats, load factor {lo}–{hi} along the route, {pw['active_share'] * 100:.0f} % online, "
                              f"{pw['per_user_demand_mbps']} Mbps each; access points {pw['ap_capacity_mbps']} Mbps in total"),
         ("Service-class thresholds (score out of 100)", ", ".join(f"{c} ≥ {v}" for c, v in pw["classes"].items())),
-        ("Timetable", (f"{(meta or {}).get('timetable', {}).get('route', 'train')} {meta['timetable']['train']} from the operator's GTFS feed, "
-                       if ((meta or {}).get("timetable") or {}).get("train") else "")
+        ("Timetable", (f"{timetable_source((meta or {}).get('timetable'))}, " if ((meta or {}).get("timetable") or {}).get("train") else "")
                       + f"departure {(meta or {}).get('departure') or settings.route.get('timetable', {}).get('departure')}, "
                         f"{settings.route.get('timetable', {}).get('dwell_s')} s dwell at each stop"),
         ("Model version", str(sim.get("model_version", ""))),
@@ -745,8 +751,7 @@ def build_report(settings: Settings, meta: dict, samples: pd.DataFrame, obs: pd.
         _coverage_row(meta),
         ("Cell sites and handovers", cells_text(meta), live(meta.get("cell_source") == "opencellid")),
         ("Satellite", "Predictive sky-visibility model" + (" with terminal telemetry" if any("telemetry" in str(x) for x in obs["source_flags"].unique()) else ""), "predictive"),
-        ("Timetable", f"Operator GTFS feed (feed {meta['timetable'].get('feed_version')}, train {meta['timetable']['train']})" if (meta.get("timetable") or {}).get("train")
-         else "Route configuration", "live" if (meta.get("timetable") or {}).get("train") else "configured"),
+        ("Timetable", timetable_source(meta["timetable"]) if (meta.get("timetable") or {}).get("train") else "Route configuration", "live" if (meta.get("timetable") or {}).get("train") else "configured"),
         _calibration_row(meta.get("calibration")),
         *_check_rows(meta.get("calibration")),
         *_corrections_rows(meta),

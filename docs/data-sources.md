@@ -14,7 +14,7 @@ the app bar and the **Sources** tab show exactly which inputs produced the bundl
 | Cell sites / handovers | OpenCellID bulk MCC download (token); 4G mast positions fitted to Network Rail Global View logs (`config/masts.csv`) | `tcs/sources/opencellid.py`, `tcs/masts.py` | synthetic sites | + cells → 0.65 |
 | Measured RF (calibration + validation) | Network Rail Yellow Train LTE logs and Global View 4G/5G logs (Rail Data Marketplace), Ofcom drive-test CSVs, Ofcom Connectivity on Trains study annexes, Network Survey, modem logs | `tcs/sources/measurements.py`, `tcs/model/calibration.py`, `tcs/validate/metrics.py` | none | 0.70–0.92 |
 | Satcom | Stage 1: geometry only. Stage 2: Starlink terminal telemetry (`starlink-grpc-tools` export) + train GPS | `tcs/sources/starlink.py` | predictive only | 0.35 → 0.85 |
-| Timetable | YAML calling pattern; CIF (Network Rail Open Data / RDG) with CORPUS; GTFS | `tcs/sources/timetable.py` | YAML | — |
+| Timetable | Network Rail Open Data SCHEDULE (daily full extract, JSON) with CORPUS (free account, GB); GTFS (US); YAML calling pattern | `tcs/sources/nr_schedule.py`, `tcs/sources/gtfs_feed.py` | YAML | — |
 
 ## 1. Route geometry — OpenStreetMap
 
@@ -184,9 +184,17 @@ An optional orbital layer from CelesTrak TLEs is visualisation only and never cl
 
 ## 7. Timetable
 
-`route.yaml` carries the calling pattern; the movement model stretches physics-based run times to match it. For
-real schedules use `timetable.from_cif(path, train_uid, corpus_json)` (Network Rail Open Data SCHEDULE feed + the
-CORPUS TIPLOC reference, free registration) or `from_gtfs()`.
+`route.yaml` carries the calling pattern; the movement model stretches physics-based run times to match it.
+
+GB routes set `timetable.source: network_rail` and follow a real train from Network Rail Open Data
+(`tcs/sources/nr_schedule.py`; free account, `NETWORK_RAIL_USERNAME` / `NETWORK_RAIL_PASSWORD`). The daily SCHEDULE full
+extract (CIF_ALL_FULL_DAILY, JSON, ~135 MB gzipped) is downloaded once a day and shared by every route; TIPLOCs map to
+station codes from its own TIPLOC records and CORPUS. The train is the first passenger service of the route's operator
+(`timetable.network_rail.toc`, ATOC code or a list) to leave the origin at or after `departure` and call later at the
+destination, as timetabled for the coming Wednesday, with short-term cancellations and overlays applied; `train` (a
+headcode or UID) pins one. Its public calls replace `calls`, route stations it doesn't call at become passing points,
+and meta.json records it (`timetable`). Without the account, or offline, the route file's `calls` are used. US routes
+use the operator's GTFS feed (section 8).
 
 ## 8. United States (`config/countries/US`)
 

@@ -257,7 +257,9 @@ function renderSources(store: Store) {
     ['Satcom', false, `Predictive obstruction model (${esc(m.providers.find(p => p.type === 'satcom')?.terminal ?? 'performance')} terminal). No public route-level Starlink RF telemetry exists; confidence capped at 0.35 until terminal telemetry is ingested.`, 'predictive'],
     ['Calibration', !!m.calibration, calibrationText(m.calibration), m.calibration ? undefined : 'none'],
     ...(m.measured_corrections ? [['Measured corrections', true, correctionsText(m), 'measured'] as [string, boolean, string, string]] : []),
-    ...(m.timetable?.train ? [['Timetable', true, `${esc(m.timetable.route ?? 'Train')} ${esc(m.timetable.train)} from the operator's GTFS feed${m.timetable.feed_version ? ` (version ${esc(m.timetable.feed_version)})` : ''}: real calling points and times; stations it doesn't call at are passed at line speed.`] as [string, boolean, string]] : []),
+    ...(m.timetable?.train ? [['Timetable', true, `${m.timetable.source === 'network_rail'
+      ? `${esc(m.timetable.toc ?? '')} train ${esc(m.timetable.train)} from Network Rail's SCHEDULE feed${m.timetable.date ? ` (as timetabled for ${esc(m.timetable.date)})` : ''}`
+      : `${esc(m.timetable.route ?? 'Train')} ${esc(m.timetable.train)} from the operator's GTFS feed${m.timetable.feed_version ? ` (version ${esc(m.timetable.feed_version)})` : ''}`}: real calling points and times; stations it doesn't call at are passed at line speed.`] as [string, boolean, string]] : []),
     ...(m.ookla_check ? [[m.ookla_check.used_as_input ? 'Phone speed tests' : 'Phone speed tests (check)', true, ooklaText(m.ookla_check), m.ookla_check.used_as_input ? 'live' : 'check'] as [string, boolean, string, string]] : []),
   ] as [string, boolean, string, string?][]
   let h = `<div class="src-list">`
