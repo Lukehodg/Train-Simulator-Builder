@@ -14,26 +14,37 @@ jobs:
       - uses: actions/setup-python@v6
         with: {python-version: "3.12", cache: pip, cache-dependency-path: pyproject.toml}
       - run: pip install -e .
-      - name: Pick a real train for every GB route
+      - name: Diagnose the routes with no train
         env:
           NETWORK_RAIL_USERNAME: ${{ secrets.NETWORK_RAIL_USERNAME }}
           NETWORK_RAIL_PASSWORD: ${{ secrets.NETWORK_RAIL_PASSWORD }}
         run: |
           python - <<'PY'
-          import time
-          from tcs.config import list_routes, load_settings
-          from tcs.sources import nr_schedule
-          for r in list_routes():
-              if r["country"] == "US":
-                  continue
-              s = load_settings(route_id=r["id"])
-              before = dict(s.route["timetable"]["calls"])
-              t0 = time.time()
-              got = nr_schedule.apply(s)
-              print(f"== {r['id']} ({time.time() - t0:.0f}s)")
-              print("   route file:", before)
-              if got:
-                  print("   network rail:", got["toc"], got["train"], got["uid"], got["calls"])
-                  stations = [x["crs"] for x in s.route["stations"]]
-                  print("   route stations it calls at:", [c for c in stations if c in got["stops"]], " passes:", [c for c in stations if c not in got["stops"]])
+          import collections, json
+          from tcs.config import load_settings
+          from tcs.sources import nr_schedule as nr
+          s = load_settings(route_id="hs1_stp_dvp")
+          sched, corpus = nr.download(s)
+          t = nr.crs_tiplocs(sched, corpus)
+          pairs = [("STP", "DVP"), ("SPX", "DVP"), ("VIC", "BTN"), ("WAT", "WEY"), ("MAN", "NCL"), ("MCV", "NCL")]
+          for o, d in pairs:
+              print(o, sorted(t.get(o, [])), d, sorted(t.get(d, [])))
+          day = nr.typical_weekday()
+          for o, d in pairs:
+              ok, dk = [f'"{x}"' for x in t.get(o, [])], [f'"{x}"' for x in t.get(d, [])]
+              seen = collections.Counter(); ex = []
+              with nr._open(sched) as fh:
+                  for line in fh:
+                      if not line.startswith('{"JsonScheduleV1"') or not (any(k in line for k in ok) and any(k in line for k in dk)):
+                          continue
+                      x = json.loads(line)["JsonScheduleV1"]
+                      run = nr._runs_on(x, day)
+                      seen[(x.get("atoc_code"), x.get("train_status"), x.get("CIF_stp_indicator"), run)] += 1
+                      if run and len(ex) < 2:
+                          locs = x["schedule_segment"]["schedule_location"]
+                          ex.append([(l["tiploc_code"], l.get("public_arrival"), l.get("public_departure"), l.get("pass")) for l in locs
+                                     if l["tiploc_code"] in t.get(o, set()) | t.get(d, set())])
+              print(f"== {o}->{d}", dict(seen.most_common(12)))
+              for e in ex:
+                  print("   ", e)
           PY
