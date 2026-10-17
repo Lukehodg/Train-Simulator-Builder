@@ -41,7 +41,7 @@ def run(offline: bool = typer.Option(False, help="Use cached/synthetic sources o
 def run_pipeline(offline: bool = False, route: str | None = None, weather: str = "nominal", policy: str | None = None, limit_postcodes: int | None = None,
                  copy_to_web: bool = True, train: Path | None = None, preset: str | None = None, satcom: bool = True):
     from . import corrections
-    from .model import calibration
+    from .model import adjustment, calibration
     from .model.simulate import simulate
     from .pipeline.export import export_all
     from .pipeline.join_cells import candidate_cells, corridor_cells, serving_cells
@@ -98,8 +98,11 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     serving.to_parquet(interim / "serving.parquet", index=False)
     cal = calibration.for_route(s, interim)
     corr = corrections.for_build(s, b, interim)
+    adj = adjustment.for_build(s, b.samples, prior, serving, cells, interim)
     if corr is not None:
         console.log(f"measured corrections: {corr['sample_id'].nunique():,} of {len(b.samples):,} samples on at least one network")
+    if adj is not None:
+        console.log(f"learned adjustment: median {adj['adjustment_db'].abs().median():.1f} dB either way")
     extra, got = {}, None
     ocfg = s.country_profile.get("ookla") or {}
     if ocfg.get("check") or ocfg.get("capacity"):             # crowd-sourced phone speeds (US): a check, and optionally an input
@@ -113,7 +116,7 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
                 cs = b.samples["capacity_scale"]
                 console.log(f"Ookla capacity scale: {cs.quantile(0.1):.2f} / {cs.median():.2f} / {cs.quantile(0.9):.2f} (10th / median / 90th percentile)")
             save_bundle(b, interim)                            # `tcs report` re-simulates from these samples
-    obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, policy=policy, corrections=corr)
+    obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, policy=policy, corrections=corr, adjustment=adj)
     if got is not None:
         extra["ookla_check"] = ookla.check(b.samples, obs, got[0], got[1]) | {"used_as_input": bool(ocfg.get("capacity"))}
         c = extra["ookla_check"]
@@ -289,7 +292,7 @@ def report(route: str | None = typer.Option(None, help="Route id (default: confi
 def _build_report(route: str | None, preset: str | None, train: Path | None, policy: str | None, weather: str, out: Path | None,
                   info: dict[str, str] | None = None, satcom: bool = True) -> dict[str, Path]:
     from . import corrections
-    from .model import calibration
+    from .model import adjustment, calibration
     from .model.simulate import simulate
     from .pipeline.export import _lidar_meta
     from .pipeline.sample_route import load_bundle
@@ -331,7 +334,8 @@ def _build_report(route: str | None, preset: str | None, train: Path | None, pol
     stations = pd.read_parquet(processed / "stations.parquet")
     cal = calibration.for_route(s, interim)
     corr = corrections.load_interim(interim)
-    obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, corrections=corr)
+    adj = adjustment.load_interim(interim)
+    obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, corrections=corr, adjustment=adj)
     meta = json.loads((processed / "web" / "meta.json").read_text(encoding="utf-8"))
     meta["model_version"] = s.sim["model_version"]
     meta["calibration"] = calibration.describe(s, interim)     # as simulated now, not as when the bundle was built
@@ -348,12 +352,12 @@ def _build_report(route: str | None, preset: str | None, train: Path | None, pol
         from .report_docx import POLICIES, VEHICLES
 
         base = load_settings(route_id=route)
-        obs_b, rc_b = simulate(base, b.samples, prior, serving, calibration=cal, corrections=corr)
+        obs_b, rc_b = simulate(base, b.samples, prior, serving, calibration=cal, corrections=corr, adjustment=adj)
         v, p = base.sim["vehicle"]["profile"], base.sim["wan"]["policy"]
         baseline = {"title": f"{VEHICLES.get(v, v).lower()}, {POLICIES.get(p, p).split(' (')[0].lower()}", "obs": obs_b, "rc": rc_b}
     from .sensitivity import run as sensitivity
 
-    sens = sensitivity(s, b.samples, prior, serving, calibration=cal, weather=weather, corrections=corr)
+    sens = sensitivity(s, b.samples, prior, serving, calibration=cal, weather=weather, corrections=corr, adjustment=adj)
     return build_report(s, meta, b.samples, obs, rc, stations, out or (processed / "reports"), label, validation, weather=weather, baseline=baseline,
                         sensitivity=sens, variant=variant)
 
@@ -524,6 +528,38 @@ def locate_masts(measurements: Path = typer.Argument(..., help="Scanner logs nam
     console.log(f"wrote {len(m):,} masts to {out} ({', '.join(f'{k} {v:,}' for k, v in m['network'].value_counts().items())})")
 
 
+@app.command("learn-adjustment")
+def learn_adjustment(four_g: Path = typer.Option(..., "--four-g", help="Current scanner logs along the routes, e.g. Global View 4G (CSV or parquet)"),
+                     older: Path | None = typer.Option(None, help="An older measurement set (e.g. Yellow Train), at a tenth of the weight"),
+                     preset_4g: str = typer.Option("global_view_4g"), preset_older: str = typer.Option("yellow_train"),
+                     only: str | None = typer.Option(None, help="Comma-separated route ids (default: every built route)"),
+                     out: Path = typer.Option(ROOT / "config" / "learned_adjustment.parquet")):
+    """The learned adjustment (tcs/model/adjustment.py): trees fitted to the calibrated model's errors where trains have
+    measured, applied along every route on the next build. Writes the trees only. Run after `tcs calibrate-national`
+    and before `tcs correct-routes`; `tcs check-national` tests the same fit on later trips."""
+    import datetime
+
+    from . import corrections, national
+    from .model import adjustment
+
+    ids = [r["id"] for r in list_routes()]
+    if only:
+        ids = [i for i in ids if i in {x.strip() for x in only.split(",")}]
+    every = pd.Timestamp("2100-01-01", tz="UTC")                 # every measurement informs the trees
+    sets, sources = [], []
+    for path, preset, weight in ((four_g, preset_4g, corrections.SET_WEIGHT.get(preset_4g, 1.0)),
+                                 *([(older, preset_older, corrections.SET_WEIGHT.get(preset_older, 0.1))] if older else [])):
+        routes, _ = national.collect(ids, path, preset, every, log=console.log)
+        sets.append((routes, "fit", weight))
+        sources.append({"file": Path(path).name, "preset": preset, "weight": weight, **national._period(routes, "fit")})
+    table = national.learn_adjustment(sets, log=console.log)
+    cal = yaml_load(ROOT / "config" / "calibration.yaml")
+    adjustment.save(table, out, meta={"sources": sources, "built_on": datetime.date.today().isoformat(),
+                                      "calibration_fitted_on": cal.get("fitted_on"), "model_version": load_settings().sim["model_version"],
+                                      "params": adjustment.PARAMS})
+    console.log(f"wrote {int(table['tree'].max()) + 1} trees to {out}")
+
+
 @app.command("correct-routes")
 def correct_routes(four_g: Path = typer.Option(..., "--four-g", help="Current scanner logs along the routes, e.g. Global View 4G (CSV or parquet)"),
                    older: Path | None = typer.Option(None, help="An older measurement set (e.g. Yellow Train), at a tenth of the weight"),
@@ -532,7 +568,8 @@ def correct_routes(four_g: Path = typer.Option(..., "--four-g", help="Current sc
                    out: Path = typer.Option(ROOT / "config" / "route_corrections.parquet")):
     """Measured corrections along each route (tcs/corrections.py): the calibrated model's errors at the measurements,
     smoothed along the track, added to its predictions there on the next build. Writes positions, networks and dB only.
-    Re-run after `tcs calibrate-national`; `tcs check-national` reports how such corrections fare on later trips."""
+    Re-run after `tcs calibrate-national` and `tcs learn-adjustment`; `tcs check-national` reports how such corrections
+    fare on later trips."""
     import datetime
 
     from . import corrections, national

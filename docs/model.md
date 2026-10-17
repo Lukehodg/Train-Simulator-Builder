@@ -9,6 +9,7 @@ q_base = prior_score                       # Ofcom level → score, or Connected
        − cutting_penalty_max · min(1, cutting_depth / cutting_full_depth_m)   # 0.28 at 10 m (fitted; depth from LiDAR in GB)
        − penalty_per_km · max(0, serving_cell_distance_km − free_km)       # 0 (fitted: no penalty since model 0.4.2)
        + calibration_bias[operator]        # tcs calibrate (one route) or tcs calibrate-national (config/calibration.yaml)
+       + learned_adjustment_db / slope     # everywhere: trees learned from the errors where trains measured (tcs learn-adjustment)
        + measured_correction_db / slope    # where trains measured: earlier trips' errors here (tcs correct-routes)
 q      = clip(q_base + vehicle_offset)     # rooftop 0 · handset −0.18 (≈ −18 dB penetration)
 tunnel: q = floor + (q_portal − floor) · exp(−d / portal_decay_m), the better of the two portals, where q_portal is
@@ -43,6 +44,17 @@ calibration's dB scale before the clip, so capacity, latency and the viewer foll
 measured, in-tunnel errors alone (against the portal or DAS model) are smoothed and added to that model there.
 Signal at a given spot repeats from trip to trip much more closely than coverage predictions place it, so this is the
 largest single accuracy gain the model has (docs/validation.md). Confidence there is 0.85.
+
+**Learned adjustment** (`tcs/model/adjustment.py`, model 0.4.3). Corrections only reach where trains have measured. The
+model's error elsewhere still follows what is known at every route point, so gradient-boosted trees (400 trees of up to
+63 leaves, least absolute error) are fitted to the calibrated model's errors at every measured route point (less each
+measurement set's level per network; Global View at weight 1, Yellow Train at 0.1) from 32 features: the Ofcom level,
+its spread, the premises behind it and the postcode's distance; the distance to the serving cell and handovers; how
+many cells of that network stand within 2 and 5 km and how far the nearest is; the LiDAR cutting, embankment, walls,
+skyline and overhead cover; the land's height relative to the kilometre around; line speed, urban density, bridges,
+tunnels and the network. The trees are stored as a table (`config/learned_adjustment.parquet`) and walked with numpy
+when a route is built; the adjustment (dB) enters the score like a measured correction, and measured corrections are
+fitted on top of it. GB only: `learned_adjustment: null` in the US profile.
 
 ## Vehicle profiles and the EDGE Rail preset
 

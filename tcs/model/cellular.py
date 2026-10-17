@@ -76,9 +76,11 @@ def tunnel_quality(q: np.ndarray, sample_pos: np.ndarray, provider: np.ndarray, 
 
 
 def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.DataFrame, serving: pd.DataFrame,
-                          calibration: dict | None = None, corrections: pd.DataFrame | None = None) -> pd.DataFrame:
+                          calibration: dict | None = None, corrections: pd.DataFrame | None = None,
+                          adjustment: pd.DataFrame | None = None) -> pd.DataFrame:
     """corrections: measured corrections along the route (tcs/corrections.py): sample_id, provider_id, correction_db,
-    weight; added to the score through the calibration's dB scale."""
+    weight; added to the score through the calibration's dB scale. adjustment: the learned adjustment
+    (tcs/model/adjustment.py): sample_id, provider_id, adjustment_db; added the same way, under the corrections."""
     cfg = settings.sim["cellular"]
     vcfg = settings.sim["vehicle"]
     vprof = vcfg["profiles"][vcfg["profile"]]
@@ -117,12 +119,17 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
             raise ValueError("calibration biases must be finite")
         q_base = q_base + correction
     meas_db, meas_w, meas_q = np.full(len(df), np.nan), np.zeros(len(df)), np.zeros(len(df))
+    nominal = float(cfg["rsrp_dbm"]["at_one"] - cfg["rsrp_dbm"]["at_zero"])
+    slope_db = df["provider_id"].map({k: float(v["slope"]) for k, v in (calibration or {}).get("rsrp_map", {}).items()}).fillna(nominal).to_numpy(float)
     if corrections is not None and len(corrections):
         m = df[["sample_id", "provider_id"]].merge(corrections[["sample_id", "provider_id", "correction_db", "weight"]], on=["sample_id", "provider_id"], how="left")
         meas_db, meas_w = m["correction_db"].to_numpy(float), m["weight"].fillna(0).to_numpy(float)
-        nominal = float(cfg["rsrp_dbm"]["at_one"] - cfg["rsrp_dbm"]["at_zero"])
-        slope_db = df["provider_id"].map({k: float(v["slope"]) for k, v in (calibration or {}).get("rsrp_map", {}).items()}).fillna(nominal).to_numpy(float)
         meas_q = np.where(np.isfinite(meas_db), meas_db / slope_db, 0.0)
+    adj_db = np.zeros(len(df))
+    if adjustment is not None and len(adjustment):
+        a = df[["sample_id", "provider_id"]].merge(adjustment[["sample_id", "provider_id", "adjustment_db"]], on=["sample_id", "provider_id"], how="left")
+        adj_db = a["adjustment_db"].fillna(0).to_numpy(float)
+    meas_q = meas_q + adj_db / slope_db                     # both shift the score by dB on the calibration's scale
     tun = df["in_tunnel"].fillna(False).values.astype(bool)
     q_base = q_base + np.where(tun, 0.0, meas_q)            # inside tunnels the correction goes on the tunnel model, below
     q_base = np.clip(q_base, 0, 1).astype(np.float32)
@@ -182,6 +189,7 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
     flags = np.where(df["serving_cell"].notna().values, np.char.add(flags.astype(str), "|cells"), flags)
     flags = np.char.add(flags.astype(str), np.where(calibrated, "|calibrated", ""))
     flags = np.char.add(flags.astype(str), np.where(np.isfinite(meas_db), "|measured_correction", ""))
+    flags = np.char.add(flags.astype(str), np.where(adj_db != 0, "|learned_adjustment", ""))
 
     out = pd.DataFrame({
         "sample_id": df["sample_id"].values, "route_id": settings.route_id, "provider_id": df["provider_id"].values,
@@ -194,7 +202,7 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
         "quality_base": q_base, "handover_penalty": hp,
         "rsrp_slope": rsrp_slope, "rsrp_intercept": rsrp_intercept,
         "measured_correction_db": meas_db.astype(np.float32),
-        "_calibrated": calibrated, "_meas_w": meas_w,
+        "_calibrated": calibrated, "_meas_w": meas_w, "_adjustment_db": adj_db.astype(np.float32),
         "_has_prior": has_prior, "_prior_source": df["source"].astype(str).values, "_in_tunnel": tun,
     })
     return out
