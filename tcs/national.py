@@ -22,7 +22,7 @@ import yaml
 
 from . import corrections
 from .config import Settings, load_settings
-from .model import calibration
+from .model import adjustment, calibration
 from .model.cellular import cellular_observations
 from .pipeline.sample_route import load_bundle
 from .sources.measurements import attach_to_route, load_measurements, near_route, route_bbox
@@ -52,6 +52,8 @@ class RouteData:
     serving: pd.DataFrame
     points: pd.DataFrame                   # sample_id, provider_id, period (fit | test), rsrp_dbm (median of the passes), n
     measurements: dict = field(default_factory=dict)   # per period: rows matched to the route, first and last day
+    cells: pd.DataFrame | None = None      # the route's cell list: mast density for the learned adjustment
+    _adjustment: pd.DataFrame | None = field(default=None, repr=False)   # the stored trees' adjustment (as_calibrated)
 
 
 def collect(route_ids: list[str], path, preset: str, split: pd.Timestamp, max_distance_m: float = 50.0,
@@ -81,7 +83,9 @@ def collect(route_ids: list[str], path, preset: str, split: pd.Timestamp, max_di
         pts = m.groupby(["sample_id", "provider_id", "period"], as_index=False).agg(rsrp_dbm=("rsrp_dbm", "median"), n=("rsrp_dbm", "size"))
         per = {p: {"rows": int(len(g)), "first": str(g["timestamp"].min().date()), "last": str(g["timestamp"].max().date())}
                for p, g in m.groupby("period")}
-        routes.append(RouteData(s, b.samples, pd.read_parquet(interim / "coverage_prior.parquet"), pd.read_parquet(interim / "serving.parquet"), pts, per))
+        cells = pd.read_parquet(interim / "cells.parquet") if (interim / "cells.parquet").exists() else None
+        routes.append(RouteData(s, b.samples, pd.read_parquet(interim / "coverage_prior.parquet"), pd.read_parquet(interim / "serving.parquet"), pts, per,
+                                cells))
         log(f"{rid}: {len(m):,} measurements within {max_distance_m:.0f} m -> {len(pts):,} route points x network x period")
     return routes, skipped
 
@@ -120,9 +124,11 @@ def environment_of(s: Settings) -> dict:
             "cell_free_km": c["cell_distance"]["free_km"], "cell_penalty_per_km": c["cell_distance"]["penalty_per_km"]}
 
 
-def predict(r: RouteData, env: dict, cal: dict | None, corrections: pd.DataFrame | None = None) -> pd.DataFrame:
+def predict(r: RouteData, env: dict, cal: dict | None, corrections: pd.DataFrame | None = None,
+            adjustment: pd.DataFrame | None = None) -> pd.DataFrame:
     """The model's RSRP at each measured route point, with what the accuracy breakdowns need."""
-    obs = cellular_observations(with_environment(r.settings, env), r.samples, r.prior, r.serving, calibration=cal, corrections=corrections)
+    obs = cellular_observations(with_environment(r.settings, env), r.samples, r.prior, r.serving, calibration=cal, corrections=corrections,
+                                adjustment=adjustment)
     obs = obs[["sample_id", "provider_id", "quality_score", "signal_primary", "_in_tunnel", "reason_code"]]
     j = r.points.merge(obs, on=["sample_id", "provider_id"])
     j = j.merge(r.samples[["sample_id", "distance_m", "cutting_depth_m"]], on="sample_id")
@@ -339,12 +345,41 @@ def _as_calibrated(r: RouteData) -> tuple[dict, dict | None]:
     return environment_of(r.settings), calibration.for_route(r.settings, r.settings.paths()["interim"])
 
 
+def stored_adjustment(r: RouteData) -> pd.DataFrame | None:
+    """The learned adjustment as stored (config/learned_adjustment.parquet) at this route's points, worked out once."""
+    if r._adjustment is None:
+        r._adjustment = adjustment.for_route(adjustment.load(adjustment.path_of(r.settings)), r.samples, r.prior, r.serving, r.cells)
+    return r._adjustment
+
+
+def learn_adjustment(sets: list[tuple[list[RouteData], str, float]], log=print) -> pd.DataFrame:
+    """Trees for the learned adjustment (tcs/model/adjustment.py) from each set's errors against the calibrated model,
+    less the set's own level per network (corrections.levels), weighted by the set's weight. sets: (routes, period, weight)."""
+    xs, ys, ws = [], [], []
+    for routes, period, weight in sets:
+        js = [(r, (j := predict(r, *_as_calibrated(r)))[j["period"] == period]) for r in routes]
+        level = corrections.levels(pd.concat([j for _, j in js]))
+        for r, j in js:
+            e = corrections.errors(j, weight, level)
+            if e.empty:
+                continue
+            xs.append(adjustment.features(r.samples, r.prior, r.serving, r.cells, e))
+            ys.append(e["error_db"].to_numpy(float))
+            ws.append(e["w"].to_numpy(float))
+    if not xs:
+        raise ValueError("no measured route points to learn the adjustment from")
+    x = pd.concat(xs, ignore_index=True)
+    log(f"learning the adjustment from {len(x):,} route points x network")
+    return adjustment.fit(x, np.concatenate(ys), np.concatenate(ws))
+
+
 def route_corrections(sets: list[tuple[list[RouteData], float]], log=print) -> pd.DataFrame:
     """Measured corrections for every route a measurement set covers (tcs/corrections.py), against the model as
-    calibrated now: each set's errors at its route points, weighted, pooled and smoothed along the track."""
+    calibrated now (learned adjustment included): each set's errors at its route points, weighted, pooled and smoothed
+    along the track."""
     errs: dict[str, tuple[RouteData, list[pd.DataFrame]]] = {}
     for routes, weight in sets:
-        js = [(r, predict(r, *_as_calibrated(r))) for r in routes]
+        js = [(r, predict(r, *_as_calibrated(r), adjustment=stored_adjustment(r))) for r in routes]
         level = corrections.levels(pd.concat([j for _, j in js]))          # the set's own level, over all its routes
         for r, j in js:
             errs.setdefault(r.settings.route_id, (r, []))[1].append(corrections.errors(j, weight, level))
@@ -358,7 +393,7 @@ def route_corrections(sets: list[tuple[list[RouteData], float]], log=print) -> p
 
 
 def check(route_ids: list[str], path, preset: str, split: str, max_distance_m: float = 50.0, older: list[RouteData] | None = None,
-          older_weight: float = corrections.SET_WEIGHT["yellow_train"], log=print) -> dict:
+          older_weight: float = corrections.SET_WEIGHT["yellow_train"], learned: bool = True, log=print) -> dict:
     """The model as calibrated, against a later measurement set whose overall level may differ from the calibration
     data's (a scanner that logs signal before correcting for its antenna and cable). One level offset is fitted on the
     measurements before `split`; accuracy is then measured on those from `split`, per route, network and setting."""
@@ -375,21 +410,30 @@ def check(route_ids: list[str], path, preset: str, split: str, max_distance_m: f
     test = test.assign(signal_primary=test["signal_primary"] + offset)
     b = breakdown(test, names)
     log(f"level offset {offset:+.1f} dB; then {b['overall']['points']:,} test points, bias {b['overall']['bias_db']:+.1f} dB, MAE {b['overall']['mae_db']:.1f} dB")
-    # measured corrections (tcs/corrections.py) as `tcs correct-routes` makes them, but from this set's measurements before
-    # the split only (plus the older set's, if given), tested on those from it: what corrections do on later trips
+    # the learned adjustment (tcs/model/adjustment.py) and measured corrections (tcs/corrections.py) as `tcs learn-adjustment`
+    # and `tcs correct-routes` make them, but from this set's measurements before the split only (plus the older set's, if
+    # given), tested on those from it: what they do on later trips
     old = {r.settings.route_id: r for r in older or []}
-    olds = {rid: predict(r, *_as_calibrated(r)) for rid, r in old.items()}
-    level = corrections.levels(fit)
+    trees = learn_adjustment([(routes, "fit", 1.0), *([(list(old.values()), "fit", older_weight)] if old else [])], log=log) if learned else None
+    adj = {r.settings.route_id: adjustment.for_route(trees, r.samples, r.prior, r.serving, r.cells) for r in [*routes, *old.values()]}
+    olds = {rid: predict(r, *_as_calibrated(r), adjustment=adj[rid]) for rid, r in old.items()}
+    js = {r.settings.route_id: predict(r, *_as_calibrated(r), adjustment=adj[r.settings.route_id]) for r in routes}
+    level = corrections.levels(pd.concat(j[j["period"] == "fit"] for j in js.values()))
     old_level = corrections.levels(pd.concat(olds.values())) if olds else None
+    ta = pd.concat(js.values())
+    ta = ta[ta["period"] == "test"].assign(signal_primary=lambda d: d["signal_primary"] + offset)
+    ba = breakdown(ta, names) if learned else None
+    if learned:
+        log(f"with the learned adjustment from before {cut.date()}: MAE {ba['overall']['mae_db']:.1f} dB")
     parts = []
     for r in routes:
         env, cal = _as_calibrated(r)
-        jr = predict(r, env, cal)
+        jr = js[r.settings.route_id]
         e = [corrections.errors(jr[jr["period"] == "fit"], 1.0, level)]
         if r.settings.route_id in olds:
             e.append(corrections.errors(olds[r.settings.route_id], older_weight, old_level))
         corr = corrections.smooth(pd.concat(e, ignore_index=True), r.samples)
-        parts.append(predict(r, env, cal, corrections=corr))
+        parts.append(predict(r, env, cal, corrections=corr, adjustment=adj[r.settings.route_id]))
     tc = pd.concat(parts)
     tc = tc[tc["period"] == "test"].assign(signal_primary=lambda d: d["signal_primary"] + offset)
     bc = breakdown(tc, names)
@@ -397,7 +441,8 @@ def check(route_ids: list[str], path, preset: str, split: str, max_distance_m: f
     return {"preset": preset, "fit_period": _period(routes, "fit"), "test_period": _period(routes, "test"), "split": str(cut.date()),
             "level_offset_db": round(offset, 1), "max_distance_m": max_distance_m, "skipped": skipped, **b,
             "routes": {rid: accuracy(g) for rid, g in test.groupby("route_id")},
-            "with_measured_corrections": {"older_set": bool(old), "older_weight": older_weight if old else None, **bc,
+            **({"with_learned_adjustment": {**ba, "routes": {rid: accuracy(g) for rid, g in ta.groupby("route_id")}}} if learned else {}),
+            "with_measured_corrections": {"older_set": bool(old), "older_weight": older_weight if old else None, "learned_adjustment": learned, **bc,
                                           "routes": {rid: accuracy(g) for rid, g in tc.groupby("route_id")}}}
 
 

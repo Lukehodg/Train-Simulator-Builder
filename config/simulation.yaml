@@ -1,5 +1,5 @@
 # Every numerical assumption lives here and is versioned with model_version.
-model_version: "0.4.2"
+model_version: "0.4.3"
 
 vehicle:
   profile: EXTERNAL_ROOFTOP_ANTENNA     # EXTERNAL_ROOFTOP_ANTENNA | PASSENGER_HANDSET_INSIDE_CARRIAGE
@@ -43,6 +43,9 @@ cellular:
   # Measured corrections along each route where scanner trains have measured (`tcs correct-routes`; tcs/corrections.py):
   # earlier trips' errors, smoothed along the track, added to the prediction there. null = none.
   measured_corrections: config/route_corrections.parquet
+  # Learned adjustment (`tcs learn-adjustment`; tcs/model/adjustment.py): trees fitted to the model's errors where trains
+  # measured, applied along every route, measured or not. null = none.
+  learned_adjustment: config/learned_adjustment.parquet
   sinr_db:  {at_zero: -5,   at_one: 25}
   throughput:
     score_floor: 0.12                   # below this no usable data session

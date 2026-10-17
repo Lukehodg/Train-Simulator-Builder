@@ -21,11 +21,13 @@ SAMPLE_COLS = ["sample_id", "distance_m", "latitude", "longitude", "elevation_m"
                "lidar", "overhead_fraction", "capacity_scale", "speed_kph", "sim_seconds", "next_station", "time_to_next_station_s", "station_nearby"]
 PROVIDER_COLS = ["quality_score", "quality_base", "signal_primary", "signal_secondary", "capacity_mbps", "latency_ms", "packet_loss_pct",
                  "available", "confidence", "reason_code", "serving_cell", "serving_distance_m", "handover", "handover_penalty",
-                 "radio_technology", "source_flags", "rsrp_slope", "rsrp_intercept", "measured_correction_db"]
+                 "radio_technology", "source_flags", "rsrp_slope", "rsrp_intercept", "measured_correction_db",
+                 "learned_adjustment_db"]
 SHORT = {"quality_score": "q", "quality_base": "qb", "signal_primary": "sig", "signal_secondary": "sig2", "capacity_mbps": "cap", "latency_ms": "lat",
          "packet_loss_pct": "loss", "available": "avail", "confidence": "conf", "reason_code": "reason", "serving_cell": "cell",
          "serving_distance_m": "celld", "handover": "ho", "handover_penalty": "hp", "radio_technology": "tech", "source_flags": "src",
-         "rsrp_slope": "rsrp_slope", "rsrp_intercept": "rsrp_intercept", "measured_correction_db": "meas"}
+         "rsrp_slope": "rsrp_slope", "rsrp_intercept": "rsrp_intercept", "measured_correction_db": "meas",
+         "learned_adjustment_db": "adj"}
 
 
 def _cast(df: pd.DataFrame, schema: pa.Schema) -> pa.Table:

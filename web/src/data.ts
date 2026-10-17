@@ -47,6 +47,7 @@ export async function loadRoute(routeId = CONFIG.defaultRoute): Promise<RouteDat
       qb: f32(t, `${p.id}_qb`, n), hp: f32(t, `${p.id}_hp`, n), conf: f32(t, `${p.id}_conf`, n), tech: str(t, `${p.id}_tech`, n),
       cell: str(t, `${p.id}_cell`, n), celld: f32(t, `${p.id}_celld`, n), src: str(t, `${p.id}_src`, n), rsrp: f32(t, `${p.id}_sig`, n),
       meas: t.getChild(`${p.id}_meas`) ? f32(t, `${p.id}_meas`, n) : undefined,
+      adj: t.getChild(`${p.id}_adj`) ? f32(t, `${p.id}_adj`, n) : undefined,
     }
   }
   const cells: CellRecord[] = []

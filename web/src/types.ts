@@ -122,6 +122,7 @@ export interface ProviderBase {
   src: (string | null)[]
   rsrp: Float32Array       // Python's signal_primary for reference
   meas?: Float32Array      // measured correction applied, dB (NaN where none; bundles from Oct 2026 on)
+  adj?: Float32Array       // learned adjustment applied, dB (NaN where none; model 0.4.3 on)
 }
 
 export interface CellRecord { key: string; provider: string; radio: string; lat: number; lon: number; samples: number; range: number; source: string }

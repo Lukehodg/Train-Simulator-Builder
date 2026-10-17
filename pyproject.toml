@@ -30,11 +30,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.5", "pdfplumber>=0.11", "scipy>=1.11"]
+dev = ["pytest>=8", "ruff>=0.5", "pdfplumber>=0.11", "scipy>=1.11", "scikit-learn>=1.4"]
 # aa/ (active antenna modelling) and scripts/: reading vendor antenna reports, curve fits
 aa = ["pdfplumber>=0.11", "scipy>=1.11"]
-# `tcs locate-masts`: placing masts from scanner logs (building routes only reads the result)
-fit = ["scipy>=1.11"]
+# `tcs locate-masts` and `tcs learn-adjustment`: placing masts, fitting the trees (building routes only reads the results)
+fit = ["scipy>=1.11", "scikit-learn>=1.4"]
 
 [project.scripts]
 tcs = "tcs.cli:app"
