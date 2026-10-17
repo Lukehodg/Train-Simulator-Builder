@@ -8,6 +8,8 @@ name: publish
 #   OFCOM_API_KEY, OPENCELLID_TOKEN       the same keys as your local .env
 #   CLOUDFLARE_API_TOKEN                  a token with Account -> Workers Scripts -> Edit
 #   CLOUDFLARE_ACCOUNT_ID                 from the Cloudflare dashboard
+# and, optionally, NETWORK_RAIL_USERNAME and NETWORK_RAIL_PASSWORD (a free Network Rail Open Data account): GB routes then
+# follow a real weekday train from the SCHEDULE feed, and without them keep the calls in their route files.
 #
 # Nothing is published, and the previous version stays live, if: the Ofcom API refuses a test call up front (its
 # call quota is used up), any route fails to build, or less than 90 % of any GB route's coverage is live Ofcom data.
@@ -248,6 +250,8 @@ jobs:
         env:
           OFCOM_API_KEY: ${{ secrets.OFCOM_API_KEY }}
           OPENCELLID_TOKEN: ${{ secrets.OPENCELLID_TOKEN }}
+          NETWORK_RAIL_USERNAME: ${{ secrets.NETWORK_RAIL_USERNAME }}
+          NETWORK_RAIL_PASSWORD: ${{ secrets.NETWORK_RAIL_PASSWORD }}
         run: tcs build-all --only "$GB_ROUTES"
 
       - name: Collect the US routes built alongside
