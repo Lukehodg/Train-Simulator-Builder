@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -52,6 +53,30 @@ def test_apply_to_settings(tmp_path):
     assert s.sim["satcom_enabled"] is True
     assert s.sim["train"]["design"]["n_carriages"] == 5
     assert s.sim["cellular"]["fitted_networks"] == ["ee", "vodafone", "three"]
+
+
+def test_lner_designs_fit_four_networks_and_count_starlink_tiles():
+    """The LNER sets: four active antennas (one per UK network) under Fleet Connect; one Starlink tile on 5 cars, two on 9."""
+    import numpy as np
+    import pandas as pd
+
+    from tcs.model.satcom import satcom_observations
+    from tcs.sources.train_studio import load_design
+
+    root = Path(__file__).resolve().parents[1] / "examples"
+    caps = {}
+    for n, tiles in ((5, 1), (9, 2)):
+        s = load_settings(offline=True)
+        d = load_design(root / f"lner-{n}car.train.json", s)
+        assert len(d.carriages) == n and d.aps_connected == n and d.satcom_units == tiles and not d.warnings
+        assert d.fitted_networks == ["ee", "vodafone", "three", "o2"] and d.policy == "PACKET_BONDING"
+        apply_to_settings(s, d)
+        assert s.starlink["satcom"]["providers"][0]["terminals"] == tiles
+        m = 4
+        samples = pd.DataFrame({"sample_id": np.arange(m), "sky_visibility": np.ones(m), "in_tunnel": np.zeros(m, bool), "canopy_probability": np.zeros(m),
+                                "cutting_depth_m": np.zeros(m), "urban_density": np.zeros(m), "distance_m": np.arange(m) * 50.0})
+        caps[n] = satcom_observations(s, samples)["capacity_mbps"].to_numpy()
+    assert np.allclose(caps[9], 2 * caps[5])                    # two tiles bond to twice one tile's capacity under the same sky
 
 
 def test_no_satcom_no_units(tmp_path):

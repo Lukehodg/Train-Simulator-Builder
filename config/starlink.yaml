@@ -3,6 +3,7 @@ satcom:
     - id: starlink
       name: Starlink
       enabled: true
+      terminals: 1                   # terminals fitted (a Train Studio design sets it); capacity scales with the count
       terminal: performance          # performance | standard | flat_high_performance | mini (EDGE Mini integrates a Starlink Mini)
       service_area:
         countries: [GB, US]          # Land Mobility availability is a country/region eligibility, not RF telemetry
