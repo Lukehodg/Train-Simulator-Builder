@@ -36,6 +36,31 @@ def test_overpass_answers_are_kept_whichever_mirror_gave_them(tmp_path, monkeypa
     assert not asked
 
 
+def test_a_station_answer_missing_stations_is_asked_again_and_never_kept(tmp_path, monkeypatch):
+    """Overpass once answered CrossCountry's stations with none; that answer was cached and two publishes in a row drew
+    the route as a stand-in curve. A short answer is now dropped and asked again."""
+    from tcs.sources import osm_route
+
+    answers = [b'{"elements": []}', b'{"elements": [{"type": "node", "lat": 51.4, "lon": -2.6, "tags": {"ref:crs": "BRI", "name": "Bristol"}}]}']
+
+    def post(url, **kw):
+        r = Mock(status_code=200, close=Mock())
+        r.iter_content.return_value = iter([answers.pop(0)])
+        return r
+
+    monkeypatch.setattr(base.requests, "post", post)
+    got = osm_route.fetch_stations(["BRI"], "GB", tmp_path, overpass_url=None, offline=False, timeout=10)
+    assert got["crs"].tolist() == ["BRI"] and not answers
+    assert osm_route.fetch_stations(["BRI"], "GB", tmp_path, overpass_url=None, offline=True, timeout=10)["name"].tolist() == ["Bristol"]
+
+    answers[:] = [b'{"elements": []}', b'{"elements": []}']
+    with pytest.raises(base.SourceUnavailable, match="YRK"):
+        osm_route.fetch_stations(["YRK"], "GB", tmp_path, overpass_url=None, offline=False, timeout=10)
+    assert not answers
+    with pytest.raises(base.SourceUnavailable):                     # nothing kept: offline has no answer to reuse
+        osm_route.fetch_stations(["YRK"], "GB", tmp_path, overpass_url=None, offline=True, timeout=10)
+
+
 def test_an_expired_copy_is_used_when_the_service_is_down_if_the_caller_allows(tmp_path, monkeypatch):
     good = Mock(status_code=200)
     good.iter_content.return_value = iter([b"railway"])
