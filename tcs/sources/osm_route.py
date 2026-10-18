@@ -19,7 +19,7 @@ import pandas as pd
 from shapely.geometry import LineString
 
 from ..geo import Projector, local_crs
-from .base import Provenance, SourceUnavailable, console, http_get, now_iso
+from .base import Provenance, SourceUnavailable, cache_path, console, http_get, now_iso
 
 DEFAULT_OVERPASS = "https://overpass-api.de/api/interpreter"
 WIDER_CORRIDOR = 2.5          # second try, as a multiple of the corridor, when a leg has no rail path
@@ -90,17 +90,26 @@ area["ISO3166-1"="{iso}"]->.a;
   way(area.a)["railway"="station"]["ref:crs"~"^({codes})$"];
 );
 out center tags;"""
-    doc = _overpass(q, raw_dir, "osm_stations", overpass_url, offline, timeout)
-    rows = []
-    for el in doc.get("elements", []):
-        tags = el.get("tags", {})
-        lat = el.get("lat") or el.get("center", {}).get("lat")
-        lon = el.get("lon") or el.get("center", {}).get("lon")
-        if lat is None:
-            continue
-        rows.append({"crs": tags.get("ref:crs"), "name": tags.get("name"), "lat": float(lat), "lon": float(lon)})
-    df = pd.DataFrame(rows, columns=["crs", "name", "lat", "lon"]).drop_duplicates("crs")
-    missing = sorted(set(crs_codes) - set(df["crs"]))
+    # A short answer is kept like any other: on 17 October 2026 Overpass answered CrossCountry's 11 stations with none
+    # (they were all there on 9 October), and two publishes in a row drew the route as a curve from that cached
+    # answer. So a short answer is dropped from the cache and asked once more, and never kept.
+    cached = cache_path(raw_dir, "osm_stations", f"overpass|{q}", "json")
+    for attempt in range(1 if offline else 2):
+        doc = _overpass(q, raw_dir, "osm_stations", overpass_url, offline, timeout)
+        rows = []
+        for el in doc.get("elements", []):
+            tags = el.get("tags", {})
+            lat = el.get("lat") or el.get("center", {}).get("lat")
+            lon = el.get("lon") or el.get("center", {}).get("lon")
+            if lat is None:
+                continue
+            rows.append({"crs": tags.get("ref:crs"), "name": tags.get("name"), "lat": float(lat), "lon": float(lon)})
+        df = pd.DataFrame(rows, columns=["crs", "name", "lat", "lon"]).drop_duplicates("crs")
+        missing = sorted(set(crs_codes) - set(df["crs"]))
+        if not missing:
+            break
+        if not offline:
+            cached.unlink(missing_ok=True)
     if missing:
         raise SourceUnavailable(f"OSM has no station with ref:crs for: {missing}")
     return df.set_index("crs").loc[crs_codes].reset_index()
