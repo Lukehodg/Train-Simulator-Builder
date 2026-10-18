@@ -1353,684 +1353,713 @@ current_check:
     from: '2026-04-07'
     to: '2026-05-02'
   split: '2026-04-07'
-  level_offset_db: -6.4
+  level_offset_db: -6.3
   max_distance_m: 50.0
-  skipped:
-    xc_bri_yrk: approximate track geometry (synthetic)
+  skipped: {}
   overall:
-    points: 173316
-    bias_db: 1.05
-    mae_db: 9.77
-    rmse_db: 12.61
-    within_6db: 0.397
-    correlation: 0.365
+    points: 182310
+    bias_db: 0.71
+    mae_db: 9.7
+    rmse_db: 12.53
+    within_6db: 0.4
+    correlation: 0.378
     usable_agreement: 0.927
-    measured_median_dbm: -90.4
+    measured_median_dbm: -90.3
     predicted_median_dbm: -88.6
   networks:
     EE:
-      points: 47140
-      bias_db: -0.26
-      mae_db: 9.04
-      rmse_db: 11.73
-      within_6db: 0.426
-      correlation: 0.349
+      points: 49620
+      bias_db: -0.57
+      mae_db: 9.0
+      rmse_db: 11.69
+      within_6db: 0.428
+      correlation: 0.361
       usable_agreement: 0.952
       measured_median_dbm: -89.0
-      predicted_median_dbm: -87.7
+      predicted_median_dbm: -87.9
     O2:
-      points: 45394
-      bias_db: 1.46
-      mae_db: 9.47
-      rmse_db: 12.2
-      within_6db: 0.41
-      correlation: 0.393
-      usable_agreement: 0.944
+      points: 47799
+      bias_db: 1.15
+      mae_db: 9.38
+      rmse_db: 12.09
+      within_6db: 0.413
+      correlation: 0.407
+      usable_agreement: 0.945
       measured_median_dbm: -89.6
-      predicted_median_dbm: -86.5
+      predicted_median_dbm: -87.1
     Three:
-      points: 45446
-      bias_db: 1.5
-      mae_db: 9.9
-      rmse_db: 12.66
-      within_6db: 0.388
-      correlation: 0.362
-      usable_agreement: 0.899
-      measured_median_dbm: -93.2
-      predicted_median_dbm: -90.9
+      points: 47815
+      bias_db: 1.05
+      mae_db: 9.78
+      rmse_db: 12.53
+      within_6db: 0.394
+      correlation: 0.378
+      usable_agreement: 0.902
+      measured_median_dbm: -93.0
+      predicted_median_dbm: -91.4
     Vodafone:
-      points: 35336
-      bias_db: 1.68
-      mae_db: 10.97
-      rmse_db: 14.11
-      within_6db: 0.355
-      correlation: 0.307
+      points: 37076
+      bias_db: 1.41
+      mae_db: 10.95
+      rmse_db: 14.1
+      within_6db: 0.356
+      correlation: 0.32
       usable_agreement: 0.906
-      measured_median_dbm: -89.9
-      predicted_median_dbm: -86.8
+      measured_median_dbm: -89.8
+      predicted_median_dbm: -87.1
   settings:
     open:
-      points: 151338
-      bias_db: 1.27
-      mae_db: 9.73
-      rmse_db: 12.55
-      within_6db: 0.398
-      correlation: 0.34
-      usable_agreement: 0.936
-      measured_median_dbm: -89.7
-      predicted_median_dbm: -87.7
+      points: 151132
+      bias_db: 0.96
+      mae_db: 9.65
+      rmse_db: 12.47
+      within_6db: 0.402
+      correlation: 0.339
+      usable_agreement: 0.941
+      measured_median_dbm: -89.3
+      predicted_median_dbm: -87.6
     cutting:
-      points: 20851
-      bias_db: -0.19
-      mae_db: 9.93
-      rmse_db: 12.83
-      within_6db: 0.393
-      correlation: 0.377
-      usable_agreement: 0.865
-      measured_median_dbm: -95.7
-      predicted_median_dbm: -94.5
+      points: 29981
+      bias_db: -0.22
+      mae_db: 9.86
+      rmse_db: 12.74
+      within_6db: 0.396
+      correlation: 0.369
+      usable_agreement: 0.864
+      measured_median_dbm: -96.1
+      predicted_median_dbm: -94.6
     tunnel:
-      points: 1127
-      bias_db: -6.59
-      mae_db: 12.12
-      rmse_db: 15.65
-      within_6db: 0.315
-      correlation: 0.181
-      usable_agreement: 0.795
+      points: 1197
+      bias_db: -6.99
+      mae_db: 11.89
+      rmse_db: 15.48
+      within_6db: 0.33
+      correlation: 0.226
+      usable_agreement: 0.796
       measured_median_dbm: -97.0
-      predicted_median_dbm: -102.5
+      predicted_median_dbm: -102.4
   routes:
     bml_vic_btn:
       points: 5879
-      bias_db: 5.85
-      mae_db: 10.55
-      rmse_db: 13.57
-      within_6db: 0.364
-      correlation: 0.372
-      usable_agreement: 0.894
+      bias_db: 5.11
+      mae_db: 10.26
+      rmse_db: 13.25
+      within_6db: 0.378
+      correlation: 0.389
+      usable_agreement: 0.893
       measured_median_dbm: -93.9
-      predicted_median_dbm: -86.8
+      predicted_median_dbm: -87.5
     chiltern_myb_bmo:
       points: 1569
-      bias_db: 1.4
-      mae_db: 10.63
-      rmse_db: 13.42
-      within_6db: 0.345
-      correlation: 0.252
-      usable_agreement: 0.929
+      bias_db: 0.81
+      mae_db: 10.52
+      rmse_db: 13.25
+      within_6db: 0.349
+      correlation: 0.279
+      usable_agreement: 0.924
       measured_median_dbm: -89.9
-      predicted_median_dbm: -87.6
+      predicted_median_dbm: -88.5
     cornish_pad_pnz:
       points: 20410
-      bias_db: 0.97
-      mae_db: 10.18
-      rmse_db: 13.01
-      within_6db: 0.378
-      correlation: 0.346
-      usable_agreement: 0.923
+      bias_db: 0.59
+      mae_db: 10.04
+      rmse_db: 12.88
+      within_6db: 0.386
+      correlation: 0.367
+      usable_agreement: 0.922
       measured_median_dbm: -90.2
       predicted_median_dbm: -88.6
     ecml_kgx_edb:
       points: 25694
-      bias_db: -0.37
-      mae_db: 9.84
-      rmse_db: 12.64
+      bias_db: -0.48
+      mae_db: 9.8
+      rmse_db: 12.6
       within_6db: 0.395
-      correlation: 0.299
+      correlation: 0.308
       usable_agreement: 0.952
       measured_median_dbm: -88.7
-      predicted_median_dbm: -88.4
+      predicted_median_dbm: -88.5
     gwml_pad_swa:
       points: 6325
-      bias_db: -2.17
-      mae_db: 9.09
-      rmse_db: 11.75
-      within_6db: 0.425
-      correlation: 0.405
+      bias_db: -2.21
+      mae_db: 9.02
+      rmse_db: 11.69
+      within_6db: 0.43
+      correlation: 0.416
       usable_agreement: 0.97
       measured_median_dbm: -85.7
-      predicted_median_dbm: -87.2
+      predicted_median_dbm: -87.5
     hs1_stp_dvp:
       points: 2168
-      bias_db: -0.15
-      mae_db: 9.78
-      rmse_db: 12.7
-      within_6db: 0.404
-      correlation: 0.314
+      bias_db: -0.17
+      mae_db: 9.96
+      rmse_db: 12.91
+      within_6db: 0.397
+      correlation: 0.286
       usable_agreement: 0.932
       measured_median_dbm: -91.1
-      predicted_median_dbm: -89.1
+      predicted_median_dbm: -89.4
     mml_stp_shf:
       points: 18849
-      bias_db: 0.51
-      mae_db: 9.12
-      rmse_db: 11.97
-      within_6db: 0.428
-      correlation: 0.334
+      bias_db: -0.09
+      mae_db: 9.03
+      rmse_db: 11.85
+      within_6db: 0.435
+      correlation: 0.356
       usable_agreement: 0.951
       measured_median_dbm: -88.9
-      predicted_median_dbm: -87.6
+      predicted_median_dbm: -88.5
     nwc_cre_hhd:
       points: 36
-      bias_db: -3.67
-      mae_db: 7.12
-      rmse_db: 8.32
+      bias_db: -3.52
+      mae_db: 7.03
+      rmse_db: 8.26
       within_6db: 0.5
       correlation: 0.083
       usable_agreement: 1.0
       measured_median_dbm: -78.1
-      predicted_median_dbm: -82.8
+      predicted_median_dbm: -82.6
     sc_lds_car:
       points: 11463
-      bias_db: 1.45
-      mae_db: 9.23
-      rmse_db: 11.83
-      within_6db: 0.412
-      correlation: 0.533
+      bias_db: 1.09
+      mae_db: 9.09
+      rmse_db: 11.66
+      within_6db: 0.42
+      correlation: 0.548
       usable_agreement: 0.843
       measured_median_dbm: -96.0
-      predicted_median_dbm: -94.0
+      predicted_median_dbm: -93.9
     swml_wat_wey:
       points: 5279
-      bias_db: 3.65
-      mae_db: 10.62
-      rmse_db: 13.59
-      within_6db: 0.359
-      correlation: 0.438
+      bias_db: 3.2
+      mae_db: 10.34
+      rmse_db: 13.31
+      within_6db: 0.372
+      correlation: 0.462
       usable_agreement: 0.885
       measured_median_dbm: -91.7
-      predicted_median_dbm: -87.6
+      predicted_median_dbm: -87.7
     tfw_cdf_man:
       points: 15311
-      bias_db: 1.63
-      mae_db: 8.99
-      rmse_db: 11.45
-      within_6db: 0.42
-      correlation: 0.385
+      bias_db: 1.7
+      mae_db: 9.02
+      rmse_db: 11.49
+      within_6db: 0.418
+      correlation: 0.382
       usable_agreement: 0.931
       measured_median_dbm: -93.3
-      predicted_median_dbm: -91.3
+      predicted_median_dbm: -91.2
     tpe_man_ncl:
       points: 10196
-      bias_db: -0.06
-      mae_db: 9.81
-      rmse_db: 12.65
-      within_6db: 0.399
-      correlation: 0.287
+      bias_db: -0.19
+      mae_db: 9.77
+      rmse_db: 12.64
+      within_6db: 0.404
+      correlation: 0.293
       usable_agreement: 0.951
       measured_median_dbm: -89.0
       predicted_median_dbm: -88.5
     wcml_eus_glc:
       points: 41054
-      bias_db: 1.72
-      mae_db: 10.25
-      rmse_db: 13.29
-      within_6db: 0.383
-      correlation: 0.294
+      bias_db: 1.36
+      mae_db: 10.17
+      rmse_db: 13.19
+      within_6db: 0.385
+      correlation: 0.308
       usable_agreement: 0.915
       measured_median_dbm: -90.6
       predicted_median_dbm: -88.6
     wcml_eus_man:
       points: 9083
-      bias_db: 0.9
-      mae_db: 9.11
-      rmse_db: 11.69
-      within_6db: 0.417
-      correlation: 0.378
+      bias_db: 0.37
+      mae_db: 9.01
+      rmse_db: 11.58
+      within_6db: 0.423
+      correlation: 0.397
       usable_agreement: 0.95
       measured_median_dbm: -89.0
-      predicted_median_dbm: -87.6
+      predicted_median_dbm: -87.8
+    xc_bri_yrk:
+      points: 8994
+      bias_db: 0.22
+      mae_db: 10.01
+      rmse_db: 12.87
+      within_6db: 0.382
+      correlation: 0.333
+      usable_agreement: 0.946
+      measured_median_dbm: -88.6
+      predicted_median_dbm: -87.5
   with_learned_adjustment:
     overall:
-      points: 173316
-      bias_db: 1.12
-      mae_db: 8.73
-      rmse_db: 11.53
+      points: 182310
+      bias_db: 0.92
+      mae_db: 8.72
+      rmse_db: 11.52
       within_6db: 0.456
-      correlation: 0.507
-      usable_agreement: 0.928
-      measured_median_dbm: -90.4
-      predicted_median_dbm: -88.9
+      correlation: 0.508
+      usable_agreement: 0.929
+      measured_median_dbm: -90.3
+      predicted_median_dbm: -89.0
     networks:
       EE:
-        points: 47140
-        bias_db: -0.11
-        mae_db: 7.93
-        rmse_db: 10.55
-        within_6db: 0.496
-        correlation: 0.508
+        points: 49620
+        bias_db: -0.3
+        mae_db: 7.92
+        rmse_db: 10.54
+        within_6db: 0.497
+        correlation: 0.511
         usable_agreement: 0.954
         measured_median_dbm: -89.0
-        predicted_median_dbm: -88.7
+        predicted_median_dbm: -88.8
       O2:
-        points: 45394
-        bias_db: 1.52
-        mae_db: 8.67
-        rmse_db: 11.42
-        within_6db: 0.46
-        correlation: 0.499
-        usable_agreement: 0.945
+        points: 47799
+        bias_db: 1.36
+        mae_db: 8.63
+        rmse_db: 11.36
+        within_6db: 0.461
+        correlation: 0.504
+        usable_agreement: 0.946
         measured_median_dbm: -89.6
-        predicted_median_dbm: -87.2
+        predicted_median_dbm: -87.1
       Three:
-        points: 45446
-        bias_db: 1.41
+        points: 47815
+        bias_db: 1.05
         mae_db: 8.76
-        rmse_db: 11.47
-        within_6db: 0.448
-        correlation: 0.523
-        usable_agreement: 0.901
-        measured_median_dbm: -93.2
-        predicted_median_dbm: -91.7
+        rmse_db: 11.44
+        within_6db: 0.447
+        correlation: 0.521
+        usable_agreement: 0.904
+        measured_median_dbm: -93.0
+        predicted_median_dbm: -91.8
       Vodafone:
-        points: 35336
-        bias_db: 1.9
-        mae_db: 9.85
-        rmse_db: 12.94
-        within_6db: 0.41
-        correlation: 0.466
-        usable_agreement: 0.909
-        measured_median_dbm: -89.9
-        predicted_median_dbm: -87.5
+        points: 37076
+        bias_db: 1.83
+        mae_db: 9.86
+        rmse_db: 12.99
+        within_6db: 0.408
+        correlation: 0.469
+        usable_agreement: 0.908
+        measured_median_dbm: -89.8
+        predicted_median_dbm: -87.4
     settings:
       open:
-        points: 151338
-        bias_db: 1.19
-        mae_db: 8.71
-        rmse_db: 11.5
-        within_6db: 0.457
-        correlation: 0.489
-        usable_agreement: 0.937
-        measured_median_dbm: -89.7
-        predicted_median_dbm: -88.2
+        points: 151132
+        bias_db: 0.98
+        mae_db: 8.69
+        rmse_db: 11.48
+        within_6db: 0.458
+        correlation: 0.482
+        usable_agreement: 0.942
+        measured_median_dbm: -89.3
+        predicted_median_dbm: -88.0
       cutting:
-        points: 20851
-        bias_db: 0.86
-        mae_db: 8.82
-        rmse_db: 11.7
-        within_6db: 0.455
-        correlation: 0.528
+        points: 29981
+        bias_db: 0.82
+        mae_db: 8.86
+        rmse_db: 11.71
+        within_6db: 0.451
+        correlation: 0.509
         usable_agreement: 0.872
-        measured_median_dbm: -95.7
-        predicted_median_dbm: -94.2
+        measured_median_dbm: -96.1
+        predicted_median_dbm: -94.4
       tunnel:
-        points: 1127
-        bias_db: -3.35
-        mae_db: 9.68
-        rmse_db: 12.54
-        within_6db: 0.398
-        correlation: 0.553
-        usable_agreement: 0.817
+        points: 1197
+        bias_db: -3.39
+        mae_db: 9.46
+        rmse_db: 12.29
+        within_6db: 0.392
+        correlation: 0.56
+        usable_agreement: 0.821
         measured_median_dbm: -97.0
-        predicted_median_dbm: -99.3
+        predicted_median_dbm: -99.2
     routes:
       bml_vic_btn:
         points: 5879
-        bias_db: 3.15
-        mae_db: 8.12
-        rmse_db: 10.93
-        within_6db: 0.5
-        correlation: 0.596
-        usable_agreement: 0.897
+        bias_db: 3.51
+        mae_db: 8.47
+        rmse_db: 11.28
+        within_6db: 0.472
+        correlation: 0.566
+        usable_agreement: 0.899
         measured_median_dbm: -93.9
-        predicted_median_dbm: -90.4
+        predicted_median_dbm: -89.8
       chiltern_myb_bmo:
         points: 1569
-        bias_db: -0.9
-        mae_db: 9.92
+        bias_db: -1.18
+        mae_db: 9.89
         rmse_db: 12.47
-        within_6db: 0.375
-        correlation: 0.383
-        usable_agreement: 0.929
+        within_6db: 0.371
+        correlation: 0.389
+        usable_agreement: 0.931
         measured_median_dbm: -89.9
-        predicted_median_dbm: -90.5
+        predicted_median_dbm: -90.8
       cornish_pad_pnz:
         points: 20410
-        bias_db: 0.74
-        mae_db: 9.6
-        rmse_db: 12.41
-        within_6db: 0.409
-        correlation: 0.429
+        bias_db: 0.67
+        mae_db: 9.48
+        rmse_db: 12.33
+        within_6db: 0.416
+        correlation: 0.441
         usable_agreement: 0.923
         measured_median_dbm: -90.2
-        predicted_median_dbm: -88.9
+        predicted_median_dbm: -89.0
       ecml_kgx_edb:
         points: 25694
-        bias_db: 0.3
-        mae_db: 9.17
-        rmse_db: 11.94
-        within_6db: 0.431
+        bias_db: 0.17
+        mae_db: 9.14
+        rmse_db: 11.95
+        within_6db: 0.434
         correlation: 0.396
         usable_agreement: 0.953
         measured_median_dbm: -88.7
-        predicted_median_dbm: -88.0
+        predicted_median_dbm: -88.1
       gwml_pad_swa:
         points: 6325
-        bias_db: -0.47
-        mae_db: 7.92
-        rmse_db: 10.43
-        within_6db: 0.493
-        correlation: 0.575
+        bias_db: -0.44
+        mae_db: 7.95
+        rmse_db: 10.42
+        within_6db: 0.491
+        correlation: 0.576
         usable_agreement: 0.97
         measured_median_dbm: -85.7
         predicted_median_dbm: -85.5
       hs1_stp_dvp:
         points: 2168
-        bias_db: -0.45
-        mae_db: 8.83
-        rmse_db: 11.35
-        within_6db: 0.425
+        bias_db: 0.23
+        mae_db: 8.8
+        rmse_db: 11.34
+        within_6db: 0.432
         correlation: 0.466
-        usable_agreement: 0.93
+        usable_agreement: 0.932
         measured_median_dbm: -91.1
-        predicted_median_dbm: -90.5
+        predicted_median_dbm: -89.7
       mml_stp_shf:
         points: 18849
-        bias_db: 0.23
+        bias_db: 0.09
         mae_db: 7.42
-        rmse_db: 10.08
+        rmse_db: 10.05
         within_6db: 0.53
-        correlation: 0.583
+        correlation: 0.584
         usable_agreement: 0.954
         measured_median_dbm: -88.9
         predicted_median_dbm: -88.5
       nwc_cre_hhd:
         points: 36
-        bias_db: -3.58
-        mae_db: 6.24
-        rmse_db: 7.63
+        bias_db: -4.29
+        mae_db: 6.9
+        rmse_db: 8.16
         within_6db: 0.528
-        correlation: 0.422
+        correlation: 0.344
         usable_agreement: 1.0
         measured_median_dbm: -78.1
-        predicted_median_dbm: -81.8
+        predicted_median_dbm: -83.1
       sc_lds_car:
         points: 11463
-        bias_db: 0.81
-        mae_db: 8.88
-        rmse_db: 11.35
-        within_6db: 0.424
-        correlation: 0.579
-        usable_agreement: 0.85
+        bias_db: 0.2
+        mae_db: 8.79
+        rmse_db: 11.29
+        within_6db: 0.432
+        correlation: 0.582
+        usable_agreement: 0.847
         measured_median_dbm: -96.0
-        predicted_median_dbm: -94.1
+        predicted_median_dbm: -94.9
       swml_wat_wey:
         points: 5279
-        bias_db: 2.57
-        mae_db: 9.55
-        rmse_db: 12.49
-        within_6db: 0.413
-        correlation: 0.549
+        bias_db: 1.98
+        mae_db: 9.36
+        rmse_db: 12.26
+        within_6db: 0.421
+        correlation: 0.56
         usable_agreement: 0.885
         measured_median_dbm: -91.7
-        predicted_median_dbm: -88.9
+        predicted_median_dbm: -89.2
       tfw_cdf_man:
         points: 15311
-        bias_db: 0.63
-        mae_db: 7.48
-        rmse_db: 9.82
-        within_6db: 0.509
-        correlation: 0.584
+        bias_db: 0.45
+        mae_db: 7.54
+        rmse_db: 9.87
+        within_6db: 0.507
+        correlation: 0.576
         usable_agreement: 0.934
         measured_median_dbm: -93.3
-        predicted_median_dbm: -92.1
+        predicted_median_dbm: -92.3
       tpe_man_ncl:
         points: 10196
-        bias_db: 0.98
-        mae_db: 9.06
-        rmse_db: 11.96
-        within_6db: 0.448
-        correlation: 0.391
+        bias_db: 0.96
+        mae_db: 9.02
+        rmse_db: 11.95
+        within_6db: 0.454
+        correlation: 0.394
         usable_agreement: 0.951
         measured_median_dbm: -89.0
-        predicted_median_dbm: -87.8
+        predicted_median_dbm: -87.6
       wcml_eus_glc:
         points: 41054
-        bias_db: 2.67
-        mae_db: 9.3
-        rmse_db: 12.38
+        bias_db: 2.55
+        mae_db: 9.28
+        rmse_db: 12.34
         within_6db: 0.438
-        correlation: 0.453
+        correlation: 0.455
         usable_agreement: 0.917
         measured_median_dbm: -90.6
-        predicted_median_dbm: -87.8
+        predicted_median_dbm: -87.9
       wcml_eus_man:
         points: 9083
-        bias_db: 0.28
-        mae_db: 7.48
-        rmse_db: 9.92
-        within_6db: 0.519
-        correlation: 0.617
-        usable_agreement: 0.95
+        bias_db: 0.29
+        mae_db: 7.47
+        rmse_db: 9.93
+        within_6db: 0.524
+        correlation: 0.614
+        usable_agreement: 0.952
         measured_median_dbm: -89.0
-        predicted_median_dbm: -88.3
+        predicted_median_dbm: -88.4
+      xc_bri_yrk:
+        points: 8994
+        bias_db: -0.5
+        mae_db: 8.93
+        rmse_db: 11.68
+        within_6db: 0.429
+        correlation: 0.506
+        usable_agreement: 0.949
+        measured_median_dbm: -88.6
+        predicted_median_dbm: -88.6
   with_measured_corrections:
     older_set: true
     older_weight: 0.1
     learned_adjustment: true
     overall:
-      points: 173316
-      bias_db: 0.51
-      mae_db: 8.07
-      rmse_db: 10.97
-      within_6db: 0.504
-      correlation: 0.57
-      usable_agreement: 0.929
-      measured_median_dbm: -90.4
-      predicted_median_dbm: -89.1
+      points: 182310
+      bias_db: 0.37
+      mae_db: 8.05
+      rmse_db: 10.94
+      within_6db: 0.505
+      correlation: 0.574
+      usable_agreement: 0.93
+      measured_median_dbm: -90.3
+      predicted_median_dbm: -89.2
     networks:
       EE:
-        points: 47140
-        bias_db: -0.48
-        mae_db: 7.5
-        rmse_db: 10.23
-        within_6db: 0.529
-        correlation: 0.555
-        usable_agreement: 0.954
+        points: 49620
+        bias_db: -0.6
+        mae_db: 7.49
+        rmse_db: 10.21
+        within_6db: 0.53
+        correlation: 0.56
+        usable_agreement: 0.955
         measured_median_dbm: -89.0
-        predicted_median_dbm: -88.7
+        predicted_median_dbm: -88.8
       O2:
-        points: 45394
-        bias_db: 0.59
-        mae_db: 8.12
-        rmse_db: 10.99
+        points: 47799
+        bias_db: 0.53
+        mae_db: 8.09
+        rmse_db: 10.94
         within_6db: 0.505
-        correlation: 0.546
-        usable_agreement: 0.944
+        correlation: 0.55
+        usable_agreement: 0.945
         measured_median_dbm: -89.6
         predicted_median_dbm: -87.8
       Three:
-        points: 45446
-        bias_db: 0.96
-        mae_db: 7.93
-        rmse_db: 10.78
-        within_6db: 0.509
-        correlation: 0.595
-        usable_agreement: 0.905
-        measured_median_dbm: -93.2
-        predicted_median_dbm: -91.8
+        points: 47815
+        bias_db: 0.65
+        mae_db: 7.88
+        rmse_db: 10.7
+        within_6db: 0.51
+        correlation: 0.601
+        usable_agreement: 0.906
+        measured_median_dbm: -93.0
+        predicted_median_dbm: -92.0
       Vodafone:
-        points: 35336
-        bias_db: 1.13
-        mae_db: 8.94
-        rmse_db: 12.09
-        within_6db: 0.464
-        correlation: 0.554
+        points: 37076
+        bias_db: 1.12
+        mae_db: 8.95
+        rmse_db: 12.12
+        within_6db: 0.467
+        correlation: 0.559
         usable_agreement: 0.909
-        measured_median_dbm: -89.9
-        predicted_median_dbm: -87.8
+        measured_median_dbm: -89.8
+        predicted_median_dbm: -87.6
     settings:
       open:
-        points: 151338
-        bias_db: 0.55
-        mae_db: 8.04
-        rmse_db: 10.9
-        within_6db: 0.505
-        correlation: 0.558
-        usable_agreement: 0.938
-        measured_median_dbm: -89.7
-        predicted_median_dbm: -88.5
+        points: 151132
+        bias_db: 0.38
+        mae_db: 8.01
+        rmse_db: 10.87
+        within_6db: 0.506
+        correlation: 0.555
+        usable_agreement: 0.942
+        measured_median_dbm: -89.3
+        predicted_median_dbm: -88.2
       cutting:
-        points: 20851
-        bias_db: 0.4
-        mae_db: 8.25
-        rmse_db: 11.4
-        within_6db: 0.505
+        points: 29981
+        bias_db: 0.48
+        mae_db: 8.18
+        rmse_db: 11.26
+        within_6db: 0.506
         correlation: 0.568
         usable_agreement: 0.874
-        measured_median_dbm: -95.7
-        predicted_median_dbm: -94.8
+        measured_median_dbm: -96.1
+        predicted_median_dbm: -94.9
       tunnel:
-        points: 1127
-        bias_db: -2.93
-        mae_db: 9.08
-        rmse_db: 12.14
-        within_6db: 0.43
-        correlation: 0.618
-        usable_agreement: 0.82
+        points: 1197
+        bias_db: -2.95
+        mae_db: 9.01
+        rmse_db: 11.96
+        within_6db: 0.429
+        correlation: 0.622
+        usable_agreement: 0.824
         measured_median_dbm: -97.0
-        predicted_median_dbm: -99.0
+        predicted_median_dbm: -99.1
     routes:
       bml_vic_btn:
         points: 5879
-        bias_db: 0.62
-        mae_db: 6.43
-        rmse_db: 9.21
-        within_6db: 0.617
-        correlation: 0.708
-        usable_agreement: 0.915
+        bias_db: 0.67
+        mae_db: 6.46
+        rmse_db: 9.25
+        within_6db: 0.616
+        correlation: 0.705
+        usable_agreement: 0.917
         measured_median_dbm: -93.9
         predicted_median_dbm: -92.9
       chiltern_myb_bmo:
         points: 1569
-        bias_db: 0.15
-        mae_db: 8.69
-        rmse_db: 11.33
-        within_6db: 0.447
-        correlation: 0.54
-        usable_agreement: 0.927
+        bias_db: -0.11
+        mae_db: 8.7
+        rmse_db: 11.35
+        within_6db: 0.442
+        correlation: 0.538
+        usable_agreement: 0.926
         measured_median_dbm: -89.9
-        predicted_median_dbm: -89.1
+        predicted_median_dbm: -89.4
       cornish_pad_pnz:
         points: 20410
-        bias_db: 0.17
-        mae_db: 8.97
-        rmse_db: 11.82
-        within_6db: 0.441
-        correlation: 0.51
-        usable_agreement: 0.926
+        bias_db: 0.08
+        mae_db: 8.93
+        rmse_db: 11.79
+        within_6db: 0.445
+        correlation: 0.514
+        usable_agreement: 0.925
         measured_median_dbm: -90.2
-        predicted_median_dbm: -89.2
+        predicted_median_dbm: -89.3
       ecml_kgx_edb:
         points: 25694
-        bias_db: -0.04
-        mae_db: 8.84
+        bias_db: -0.13
+        mae_db: 8.83
         rmse_db: 11.79
-        within_6db: 0.459
-        correlation: 0.429
+        within_6db: 0.46
+        correlation: 0.431
         usable_agreement: 0.953
         measured_median_dbm: -88.7
-        predicted_median_dbm: -87.9
+        predicted_median_dbm: -88.0
       gwml_pad_swa:
         points: 6325
-        bias_db: -1.26
-        mae_db: 7.62
-        rmse_db: 10.02
-        within_6db: 0.506
+        bias_db: -1.24
+        mae_db: 7.6
+        rmse_db: 10.0
+        within_6db: 0.512
         correlation: 0.618
-        usable_agreement: 0.97
+        usable_agreement: 0.969
         measured_median_dbm: -85.7
         predicted_median_dbm: -86.0
       hs1_stp_dvp:
         points: 2168
-        bias_db: -1.28
+        bias_db: -0.66
         mae_db: 8.32
-        rmse_db: 10.76
-        within_6db: 0.452
-        correlation: 0.556
-        usable_agreement: 0.929
+        rmse_db: 10.74
+        within_6db: 0.455
+        correlation: 0.552
+        usable_agreement: 0.93
         measured_median_dbm: -91.1
-        predicted_median_dbm: -91.2
+        predicted_median_dbm: -90.7
       mml_stp_shf:
         points: 18849
         bias_db: -0.41
-        mae_db: 6.36
-        rmse_db: 8.85
-        within_6db: 0.609
+        mae_db: 6.35
+        rmse_db: 8.84
+        within_6db: 0.614
         correlation: 0.703
         usable_agreement: 0.955
         measured_median_dbm: -88.9
         predicted_median_dbm: -88.7
       nwc_cre_hhd:
         points: 36
-        bias_db: -2.09
-        mae_db: 5.35
-        rmse_db: 6.79
+        bias_db: -2.04
+        mae_db: 5.36
+        rmse_db: 6.77
         within_6db: 0.583
-        correlation: 0.616
+        correlation: 0.583
         usable_agreement: 1.0
         measured_median_dbm: -78.1
-        predicted_median_dbm: -80.4
+        predicted_median_dbm: -80.3
       sc_lds_car:
         points: 11463
-        bias_db: 0.67
-        mae_db: 8.26
-        rmse_db: 11.12
-        within_6db: 0.479
-        correlation: 0.618
-        usable_agreement: 0.848
+        bias_db: 0.28
+        mae_db: 8.22
+        rmse_db: 11.07
+        within_6db: 0.481
+        correlation: 0.62
+        usable_agreement: 0.847
         measured_median_dbm: -96.0
-        predicted_median_dbm: -94.0
+        predicted_median_dbm: -94.5
       swml_wat_wey:
         points: 5279
-        bias_db: 0.9
-        mae_db: 8.61
-        rmse_db: 11.5
-        within_6db: 0.468
-        correlation: 0.617
-        usable_agreement: 0.883
+        bias_db: 0.58
+        mae_db: 8.55
+        rmse_db: 11.42
+        within_6db: 0.469
+        correlation: 0.622
+        usable_agreement: 0.884
         measured_median_dbm: -91.7
-        predicted_median_dbm: -90.2
+        predicted_median_dbm: -90.6
       tfw_cdf_man:
         points: 15311
-        bias_db: 0.34
+        bias_db: 0.32
         mae_db: 6.69
-        rmse_db: 9.02
-        within_6db: 0.574
+        rmse_db: 9.01
+        within_6db: 0.575
         correlation: 0.665
-        usable_agreement: 0.932
+        usable_agreement: 0.931
         measured_median_dbm: -93.3
-        predicted_median_dbm: -92.2
+        predicted_median_dbm: -92.3
       tpe_man_ncl:
         points: 10196
-        bias_db: 0.32
+        bias_db: 0.29
         mae_db: 8.7
         rmse_db: 11.7
-        within_6db: 0.475
-        correlation: 0.436
+        within_6db: 0.474
+        correlation: 0.438
         usable_agreement: 0.951
         measured_median_dbm: -89.0
         predicted_median_dbm: -87.8
       wcml_eus_glc:
         points: 41054
-        bias_db: 2.05
-        mae_db: 8.69
-        rmse_db: 11.92
+        bias_db: 1.99
+        mae_db: 8.67
+        rmse_db: 11.89
         within_6db: 0.486
-        correlation: 0.501
+        correlation: 0.504
         usable_agreement: 0.917
         measured_median_dbm: -90.6
-        predicted_median_dbm: -88.0
+        predicted_median_dbm: -88.1
       wcml_eus_man:
         points: 9083
-        bias_db: -0.54
-        mae_db: 6.91
-        rmse_db: 9.26
-        within_6db: 0.556
-        correlation: 0.675
-        usable_agreement: 0.955
+        bias_db: -0.53
+        mae_db: 6.89
+        rmse_db: 9.25
+        within_6db: 0.557
+        correlation: 0.676
+        usable_agreement: 0.954
         measured_median_dbm: -89.0
         predicted_median_dbm: -89.1
+      xc_bri_yrk:
+        points: 8994
+        bias_db: -0.89
+        mae_db: 8.0
+        rmse_db: 10.69
+        within_6db: 0.491
+        correlation: 0.617
+        usable_agreement: 0.948
+        measured_median_dbm: -88.6
+        predicted_median_dbm: -88.4
 five_g:
   source: Network Rail Global View measurements (Rail Data Marketplace)
   file: Global_View_5G.csv
