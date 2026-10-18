@@ -227,6 +227,10 @@ helps every route: Brighton 10.55 to 8.12 dB alone (6.43 with corrections), Midl
 Transport for Wales 8.99 to 7.48 (6.69), East Coast 9.84 to 9.17 (8.84). In tunnels 12.12 to 9.68 dB alone (9.08 with
 corrections); Vodafone, the hardest network, 10.97 to 9.85 (8.94).
 
+With CrossCountry rebuilt on its real track (18 October 2026) the same check covers 15 routes and 182k route points:
+9.70 dB as calibrated, 8.72 with the learned adjustment, 8.05 with adjustment and measured corrections (50.5 % within
+±6 dB, correlation 0.57, usable agreement 93.0 %). CrossCountry itself goes from 10.01 to 8.93 dB, and 8.00 with corrections.
+
 Tried offline and left out: a mast model instead (a link budget from the masts placed from the logs, and each cell's
 antenna direction: 8.48 to 8.42 dB at most, as the masts exist only where trains measured), and corrections shared
 between networks on the same masts (EE with Three, Vodafone with O2: worse, 8.66 dB). The production trees (`config/learned_adjustment.parquet`) use every measurement; the
