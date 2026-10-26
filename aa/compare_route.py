@@ -522,26 +522,113 @@ def chart_sensitivity(sens: pd.DataFrame, path: Path) -> None:
     plt.close(fig)
 
 
+MOVING_DT_S = 12.0                     # a 50 m sample passed in under 12 s: the train is moving (> 15 km/h)
+
+
+def per_network(df: pd.DataFrame, route: str, name: str) -> list[dict]:
+    """The active antenna's throughput on each network separately (one unit on one SIM, as a field log sees it), while
+    moving, weighted by time: what a download test every few seconds along the journey would show."""
+    m = df[df.dt_s < MOVING_DT_S]
+    w = m.dt_s.to_numpy()
+    nets = [c[2:] for c in m.columns if c.startswith("A_")]
+    rows = []
+    for net in [*nets, "all"]:
+        x = np.concatenate([m[f"A_{n}"].to_numpy() for n in nets]) if net == "all" else m[f"A_{net}"].to_numpy()
+        ww = np.tile(w, len(nets)) if net == "all" else w
+        rows.append({"route": route, "name": name, "network": net, "p10": _wq(x, ww, 0.1), "p50": _wq(x, ww, 0.5), "p90": _wq(x, ww, 0.9),
+                     "share_below_5": float(ww[x < 5].sum() / ww.sum())})
+    return rows
+
+
+def field_reference(path: Path) -> dict:
+    """The moving-test quantiles of a field log summarised by aa/field_throughput.py (its summary.json)."""
+    import json
+
+    return json.loads(Path(path).read_text(encoding="utf-8"))["moving"]
+
+
+def chart_field(nets: pd.DataFrame, field: dict, label: str, path: Path) -> None:
+    """Per route, the active antenna's modelled throughput on one network (p10 - median - p90, all four networks pooled)
+    against a field log's moving tests (band p10 - p90, line at the median)."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    pooled = nets[nets.network == "all"].sort_values("p50")
+    allr = pooled.assign(route="all", name="All routes")
+    allr = allr.iloc[[0]].assign(p10=float(nets[nets.network == "all"].p10.median()), p50=float(nets[nets.network == "all"].p50.median()),
+                                 p90=float(nets[nets.network == "all"].p90.median()))
+    rows = pd.concat([pooled, allr], ignore_index=True)
+    ink, muted, grid, band = "#222222", "#6b6b6b", "#e4e4e0", "#ecebe6"
+    y = np.arange(len(rows))
+    fig, ax = plt.subplots(figsize=(10.5, 0.36 * len(rows) + 1.9))
+    xmax = float(max(rows.p90.max(), field["p90"]) * 1.12)
+    ax.axvspan(field["p10"], field["p90"], color=band, zorder=0)
+    ax.axvline(field["p50"], color=muted, linewidth=1.2, linestyle=(0, (4, 3)), zorder=1)
+    ax.text(field["p10"], len(rows) - 0.35, f" field: p10 {field['p10']:.1f} · median {field['p50']:.0f} (dashed) · p90 {field['p90']:.0f}",
+            color=ink, fontsize=8, va="bottom")
+    for i, r in rows.iterrows():
+        bold = r.route == "all"
+        ax.hlines(i, r.p10, r.p90, color=COLOURS["A"], linewidth=5 if bold else 3.5, alpha=0.45, zorder=2)
+        ax.scatter(r.p50, i, s=60 if bold else 34, color=COLOURS["A"], edgecolor="white", linewidth=1.5, zorder=3)
+    ax.set_yticks(y, [("All routes (median of the routes)" if r.route == "all" else r["name"]) for _, r in rows.iterrows()], fontsize=8, color=ink)
+    ax.set_xlim(0, xmax)
+    ax.set_ylim(-0.6, len(rows) - 0.1)
+    ax.grid(True, axis="x", color=grid, linewidth=0.6, zorder=0)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.tick_params(colors=muted, labelsize=8)
+    ax.set_xlabel("Mbit/s on one network while moving: p10 - median - p90 (dot: median)", color=muted, fontsize=8)
+    fig.suptitle("EDGE Rail active antenna on one network: modelled UK routes against a field log", x=0.01, ha="left", fontsize=11.5, color=ink)
+    fig.text(0.01, 0.005, f"Shaded band and dashed line: {label}, moving tests p10 - p90 and median ({field['tests']} tests).\n"
+             "Model: four UK networks pooled, while moving, interference treated like noise, assumptions as aa/compare_route.py ASSUME.",
+             fontsize=7, color=muted, va="bottom")
+    fig.tight_layout(rect=(0, 0.045, 1, 0.96))
+    fig.savefig(path, dpi=140)
+    plt.close(fig)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("route", help="route id, or 'all'")
-    ap.add_argument("--gv", type=Path, required=True, help="Global View 4G CSV, or a parquet of its per-carrier readings")
-    ap.add_argument("--sinr-fit", type=Path, required=True, help="fit.csv from scripts/fit_rsrp_sinr.py")
+    ap.add_argument("--gv", type=Path, help="Global View 4G CSV, or a parquet of its per-carrier readings")
+    ap.add_argument("--sinr-fit", type=Path, help="fit.csv from scripts/fit_rsrp_sinr.py")
     ap.add_argument("--out", type=Path, default=None, help="default data/aa/compare")
+    ap.add_argument("--field", type=Path, help="summary.json from aa/field_throughput.py: drawn as a reference on compare_field.png")
+    ap.add_argument("--field-label", default=None, help="how the chart names the field log (default: its folder name)")
+    ap.add_argument("--charts-only", action="store_true", help="redraw the all-routes charts from the saved outputs, without recomputing")
     a = ap.parse_args()
-    from tcs.config import ROOT, list_routes
+    from tcs.config import ROOT, list_routes, load_settings
 
     root = a.out or ROOT / "data" / "aa" / "compare"
+    ids = [r["id"] for r in list_routes()] if a.route == "all" else [a.route]
+    if a.charts_only:
+        nets = []
+        for rid in ids:
+            f = root / rid / "samples.parquet"
+            if f.exists():
+                d = pd.read_parquet(f)
+                nets += per_network(d[d.case == "like noise"], rid, load_settings(route_id=rid).route["name"])
+        if a.field and nets:
+            chart_field(pd.DataFrame(nets), field_reference(a.field), a.field_label or f"field log {a.field.parent.name}", root / "compare_field.png")
+            print(f"-> {root / 'compare_field.png'}")
+        return
+    if not (a.gv and a.sinr_fit):
+        ap.error("--gv and --sinr-fit are needed unless --charts-only")
     table = read_gv_table(a.gv)
     national = national_bands(table)
     curve = sinr_curves(a.sinr_fit)
-    ids = [r["id"] for r in list_routes()] if a.route == "all" else [a.route]
-    rows, sens = [], []
+    rows, sens, nets = [], [], []
     for rid in ids:
         r, se = run_route(rid, table, curve, national, root / rid)
         rows += r
         sens += se
+        d = pd.read_parquet(root / rid / "samples.parquet")
+        nets += per_network(d[d.case == "like noise"], rid, r[0]["name"])
     summary, sens = pd.DataFrame(rows), pd.DataFrame(sens)
+    pd.DataFrame(nets).round(2).to_csv(root / ("per_network_all_routes.csv" if a.route == "all" else f"{a.route}/per_network.csv"), index=False)
+    if a.field:
+        chart_field(pd.DataFrame(nets), field_reference(a.field), a.field_label or f"field log {a.field.parent.name}", root / "compare_field.png")
     if a.route == "all":
         summary.round(3).to_csv(root / "summary_all_routes.csv", index=False)
         sens.round(3).to_csv(root / "sensitivity_all_routes.csv", index=False)
