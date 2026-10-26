@@ -440,3 +440,17 @@ def test_satcom_can_be_switched_off():
     assert not sat["available"].any() and set(sat["reason_code"]) == {"NOT_FITTED"}
     assert not any("starlink" in str(a) for a in rc["active_links"])
     assert "satellite" not in {c.key for c in cases(s)}
+
+
+def test_far_from_every_mast_the_serving_distance_keeps_growing():
+    """More than candidate_radius_m from every cell of a network, the train keeps its last serving cell; its distance
+    to that cell must keep counting (it used to become NaN, which the model scored as no distance penalty at all)."""
+    from tcs.pipeline.join_cells import candidate_cells, serving_cells
+
+    s = load_settings(offline=True)
+    samples = pd.DataFrame({"sample_id": np.arange(31), "x": np.arange(31) * 1000.0, "y": 0.0})
+    cells = pd.DataFrame({"cell_key": ["a"], "provider_id": ["ee"], "radio": ["LTE"], "x": [0.0], "y": [500.0], "samples": [10]})
+    serving = serving_cells(s, samples, candidate_cells(s, samples, cells), cells)
+    d = serving.set_index("sample_id")["serving_distance_m"]
+    assert (serving["serving_cell"] == "a").all()
+    np.testing.assert_allclose(d.to_numpy(), np.hypot(samples["x"], 500.0), rtol=1e-6)

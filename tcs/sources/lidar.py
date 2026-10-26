@@ -159,6 +159,22 @@ class _Http:
         return s
 
 
+def _read_index(f: Path):
+    """A cached tile index, or None when it is missing or unreadable (an empty file left by a run that was cut off
+    mid-write, which on 8 Oct failed North Wales Coast in the publish), so the caller asks the service again."""
+    try:
+        return json.loads(f.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _write_index(f: Path, data) -> None:
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_suffix(f".tmp{threading.get_ident()}")
+    tmp.write_text(json.dumps(data))
+    tmp.replace(f)                                          # whole or not at all
+
+
 def _read_tiff(content: bytes) -> tuple[np.ndarray, float, float, float] | None:
     from rasterio.io import MemoryFile
 
@@ -268,9 +284,8 @@ class WalesTiles(_TileSource):
             if ref10 in self._index:
                 return self._index[ref10]
         f = self.cache / f"wales_{ref10}.json"
-        if f.exists():
-            feats = json.loads(f.read_text())
-        else:
+        feats = _read_index(f)
+        if feats is None:
             params = {"service": "WFS", "version": "2.0.0", "request": "GetFeature", "typeNames": WALES_LAYER, "outputFormat": "application/json",
                       "bbox": f"{sx0},{sy0},{sx0 + 10000},{sy0 + 10000},urn:ogc:def:crs:EPSG::27700", "count": "500"}
             try:
@@ -280,8 +295,7 @@ class WalesTiles(_TileSource):
                          for p in (ft.get("properties") or {} for ft in r.json().get("features", []))]
             except (requests.RequestException, ValueError):
                 return None                                 # not cached: try again next time
-            f.parent.mkdir(parents=True, exist_ok=True)
-            f.write_text(json.dumps(feats))
+            _write_index(f, feats)
         with self._lock:
             self._index[ref10] = feats
         return feats
@@ -333,9 +347,8 @@ class ScotlandTiles(_TileSource):
             if key in self._index:
                 return self._index[key]
         f = self.cache / f"scotland_{layer}_{ref10}.json"
-        if f.exists():
-            found = json.loads(f.read_text())
-        else:
+        found = _read_index(f)
+        if found is None:
             found = []
             try:
                 for src in SCOT_SOURCES:
@@ -349,8 +362,7 @@ class ScotlandTiles(_TileSource):
                             found.append([SCOT_BUCKET + k, list(b), SCOT_SOURCES.index(src)])
             except requests.RequestException:
                 return None                                 # not cached: try again next time
-            f.parent.mkdir(parents=True, exist_ok=True)
-            f.write_text(json.dumps(found))
+            _write_index(f, found)
         found = sorted(found, key=lambda t: (t[2], t[1][2] - t[1][0]))      # newest source first, then finer tiles
         with self._lock:
             self._index[key] = found
@@ -419,13 +431,17 @@ OVERHEAD_M = 5.5                                 # surface this far above the ra
 
 def corridor_features(x: np.ndarray, y: np.ndarray, bearing_deg: np.ndarray, on_bridge: np.ndarray, roofed: np.ndarray,
                       lidar: Lidar, *, corridor_m: float = 60.0, antenna_h_m: float = 4.0, azimuths: int = 16,
-                      segment: int = 6, workers: int = 8, retry_pause_s: float = 5.0, log=console.log) -> dict[str, np.ndarray]:
+                      segment: int = 6, workers: int = 8, retry_pause_s: float = 5.0, log=console.log, todo: np.ndarray | None = None,
+                      outliers: bool = True) -> dict[str, np.ndarray]:
     """For every route sample: rail level, cutting walls / embankment fall either side, the near-field skyline
     (DSM, per azimuth, out to corridor_m), the share of the stretch under a structure, and the share of the ground
     within 30 m under trees or buildings. lidar_ok is False where the surveys have no data (keep the DEM values there).
 
     on_bridge: the line itself is on a structure (OSM), so its rail level is the deck (DSM), not the ground below.
-    roofed: a station roof spans the line here, so a long run of high surface is a roof, not a viaduct."""
+    roofed: a station roof spans the line here, so a long run of high surface is a roof, not a viaduct.
+    todo: read only these samples (the rest stay empty), e.g. those an earlier build could not read. Each sample's
+    features depend only on the surveys around it, so they come out as in a full read.
+    outliers: drop rail levels far from their neighbours (drop_rail_outliers); off when the caller merges reads first."""
     from concurrent.futures import ThreadPoolExecutor
 
     n = len(x)
@@ -442,7 +458,8 @@ def corridor_features(x: np.ndarray, y: np.ndarray, bearing_deg: np.ndarray, on_
     def run(s0: int) -> bool:
         """Features for one stretch of samples; False when a read failed, so the stretch is worth another try."""
         s1 = min(n, s0 + segment)
-        xs, ys = x[s0:s1], y[s0:s1]
+        want = np.ones(s1 - s0, dtype=bool) if todo is None else todo[s0:s1]
+        xs, ys = x[s0:s1][want], y[s0:s1][want]
         bbox = tuple(float(v) for v in (np.floor((xs.min() - pad) / RES) * RES, np.floor((ys.min() - pad) / RES) * RES,
                                         np.ceil((xs.max() + pad) / RES) * RES, np.ceil((ys.max() + pad) / RES) * RES))
         dtm, src = lidar.read(bbox, "dtm")
@@ -457,6 +474,8 @@ def corridor_features(x: np.ndarray, y: np.ndarray, bearing_deg: np.ndarray, on_
 
         warnings.simplefilter("ignore", RuntimeWarning)
         for i in range(s0, s1):
+            if not want[i - s0]:
+                continue
             b = np.radians(bearing_deg[i])
             ax_, ay_ = np.sin(b), np.cos(b)                  # along track
             lx_, ly_ = np.cos(b), -np.sin(b)                 # to the right of travel
@@ -500,7 +519,8 @@ def corridor_features(x: np.ndarray, y: np.ndarray, bearing_deg: np.ndarray, on_
             out["lidar_source"][i] = src
         return not dtm.failed
 
-    starts = list(range(0, n, segment))
+    starts = [s0 for s0 in range(0, n, segment) if todo is None or todo[s0:s0 + segment].any()]
+    total = n if todo is None else int(todo.sum())
     done, failed = 0, []
     with ThreadPoolExecutor(max_workers=workers) as ex:
         for s0, good in zip(starts, ex.map(run, starts)):
@@ -508,15 +528,22 @@ def corridor_features(x: np.ndarray, y: np.ndarray, bearing_deg: np.ndarray, on_
             if not good:
                 failed.append(s0)
             if done % 200 == 0:
-                log(f"LiDAR: {done * segment:,} of {n:,} samples")
+                log(f"LiDAR: {min(done * segment, total):,} of {total:,} samples")
     if failed:                                           # busy services: one slower pass over what failed
         log(f"LiDAR: {len(failed) * segment:,} samples hit a service error; trying them again")
         time.sleep(retry_pause_s)
         with ThreadPoolExecutor(max_workers=2) as ex:
             failed = [s0 for s0, good in zip(failed, ex.map(run, failed)) if not good]
         for s0 in failed:
-            out["lidar_failed"][s0:s0 + segment] = True
-    # a rail level far from its neighbours is a misplaced centreline or a gap in the survey, not a step in the railway
+            out["lidar_failed"][s0:s0 + segment] = True if todo is None else todo[s0:s0 + segment]
+    if outliers:
+        drop_rail_outliers(out, on_bridge)
+    return out
+
+
+def drop_rail_outliers(out: dict[str, np.ndarray], on_bridge: np.ndarray) -> None:
+    """A rail level far from its neighbours is a misplaced centreline or a gap in the survey, not a step in the
+    railway: that sample keeps the terrain model (lidar_ok False). In place."""
     rl = out["rail_level_m"]
     ok = out["lidar_ok"] & np.isfinite(rl)
     if ok.sum() > 5:
@@ -525,4 +552,73 @@ def corridor_features(x: np.ndarray, y: np.ndarray, bearing_deg: np.ndarray, on_
         med = pd.Series(np.where(ok, rl, np.nan)).rolling(5, center=True, min_periods=3).median().to_numpy()
         bad = ok & np.isfinite(med) & (np.abs(rl - med) > 3.0) & ~on_bridge
         out["lidar_ok"][bad] = False
-    return out
+
+
+# ---------------------------------------------------------------- United States
+USGS_3DEP = "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage"
+
+
+class Usgs3dep:
+    """US elevation from the USGS 3D Elevation Program (keyless). 'dtm': the national best-available bare-earth
+    mosaic, lidar-derived at 1 m wherever 3DEP lidar has been flown (all of the Northeast Corridor), read at 2 m in the
+    route's own grid. 'dsm': with `surface` (a cache folder), trees, buildings and bridges from the 3DEP lidar point
+    clouds (sources/usgs_ept.py) on top of that bare earth; without it, or where no point cloud covers a cell, the bare
+    earth again (cutting walls, embankments and the ground skyline only). Same interface as Lidar."""
+
+    name = "usgs_3dep"
+
+    def __init__(self, epsg: int, offline: bool = False, surface: Path | None = None):
+        if offline:
+            raise SourceUnavailable("3DEP needs the network")
+        self.epsg = epsg
+        self.ept = None
+        if surface is not None:
+            from .usgs_ept import Ept
+
+            try:
+                self.ept = Ept(epsg, surface)
+            except (requests.RequestException, OSError, ValueError) as exc:
+                console.log(f"[yellow]USGS point clouds unavailable ({exc}); bare earth only")
+        self.surface_cells = [0, 0]                      # cells with a point-cloud surface, cells read
+        self.http = _Http()
+        self._last: dict[int, tuple[tuple, Grid]] = {}
+        self._lock = threading.Lock()
+
+    def read(self, bbox: tuple[float, float, float, float], layer: str) -> tuple[Grid, str | None]:
+        tid = threading.get_ident()
+        with self._lock:
+            hit = self._last.get(tid)
+        if hit is not None and hit[0] == bbox:              # 'dsm' right after 'dtm' for the same window: one request
+            g = hit[1]
+            arr = g.arr.copy()
+            if layer == "dsm" and self.ept is not None and not g.failed and g.missing() < 1.0:
+                try:
+                    top, _ = self.ept.heights(g, g.arr)
+                except (requests.RequestException, OSError, ValueError) as exc:
+                    # a failed read, not "no trees here": flagged, so the stretch is tried again and, if it still
+                    # fails, left out of the feature cache rather than kept as bare earth for every later build
+                    console.log(f"[yellow]USGS point cloud read failed ({exc}); window marked failed")
+                    return Grid(g.x0, g.y1, arr, g.res, True), (self.name if g.missing() < 1.0 else None)
+                with self._lock:
+                    self.surface_cells[0] += int(np.isfinite(top).sum())
+                    self.surface_cells[1] += int(np.isfinite(arr).sum())
+                arr = np.fmax(arr, top)                  # never below the ground; bare earth where the cloud is silent
+            return Grid(g.x0, g.y1, arr, g.res, g.failed), (self.name if g.missing() < 1.0 else None)
+        g = Grid.blank(bbox)
+        h, w = g.arr.shape
+        params = {"bbox": ",".join(f"{v:.1f}" for v in bbox), "bboxSR": self.epsg, "imageSR": self.epsg, "size": f"{w},{h}", "format": "tiff",
+                  "pixelType": "F32", "noDataInterpretation": "esriNoDataMatchAny", "interpolation": "RSP_BilinearInterpolation", "f": "image"}
+        try:
+            r = self.http.session.get(USGS_3DEP, params=params, timeout=120)
+            got = _read_tiff(r.content) if r.ok else None
+        except requests.RequestException:
+            got = None
+        if got is None:
+            g.failed = True
+        else:
+            a, left, top, _ = got
+            if a.shape == g.arr.shape:
+                g.place(a, left, top)
+        with self._lock:
+            self._last[tid] = (bbox, g)
+        return Grid(g.x0, g.y1, g.arr.copy(), g.res, g.failed), (self.name if g.missing() < 1.0 else None)

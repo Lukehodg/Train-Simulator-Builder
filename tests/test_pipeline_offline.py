@@ -23,7 +23,7 @@ def pipeline():
     b.samples = enrich_terrain(s, b)
     prior, b.samples = coverage_prior(s, b)
     cells = corridor_cells(s, b, b.samples)
-    serving = serving_cells(s, b.samples, candidate_cells(s, b.samples, cells))
+    serving = serving_cells(s, b.samples, candidate_cells(s, b.samples, cells), cells)
     b.samples, stations = movement(s, b.samples, b.stations)
     obs, rc = simulate(s, b.samples, prior, serving)
     return s, b, stations, prior, serving, obs, rc
@@ -258,8 +258,8 @@ def test_sensitivity_moves_results_the_right_way(pipeline):
     assert both.sim["vehicle"]["profiles"]["EDGE_RAIL_ACTIVE_ANTENNA"]["score_offset"] == pytest.approx(offset / 2 - 5 / span_db)
 
 
-@pytest.mark.parametrize("calibrated,portal_decay_m", [(False, None), (True, None), (True, 150)])
-def test_browser_model_parity(pipeline, calibrated, portal_decay_m):
+@pytest.mark.parametrize("calibrated,portal_decay_m,measured", [(False, None, False), (True, None, False), (True, 150, False), (True, 150, True)])
+def test_browser_model_parity(pipeline, calibrated, portal_decay_m, measured):
     import copy
     import json
     import shutil
@@ -278,7 +278,14 @@ def test_browser_model_parity(pipeline, calibrated, portal_decay_m):
     cal = {"version": 2, "rsrp_input": "corrected_quality", "section_km": 10,
            "bias": {"ee": 0.08}, "sections": {"ee": {"1": -0.05}},
            "rsrp_map": {"ee": {"slope": 42, "intercept": -119}}} if calibrated else None
-    obs, _ = simulate(s, b.samples, prior, serving, calibration=cal)
+    # measured corrections on every third sample, tunnels included (tcs/corrections.py)
+    corr = pd.DataFrame({"sample_id": b.samples["sample_id"].iloc[::3].to_numpy(), "provider_id": "ee",
+                         "correction_db": np.resize([4.0, -6.0, 9.0], len(b.samples.iloc[::3])), "weight": 2.0}) if measured else None
+    if measured:
+        assert b.samples.set_index("sample_id").loc[corr["sample_id"], "in_tunnel"].any()
+    # a learned adjustment everywhere, tunnels included (tcs/model/adjustment.py)
+    adj = prior[["sample_id", "provider_id"]].assign(adjustment_db=np.resize([-3.0, 2.0, 5.0, -7.0], len(prior))) if measured else None
+    obs, _ = simulate(s, b.samples, prior, serving, calibration=cal, corrections=corr, adjustment=adj)
     providers = [{"id": p["id"], "type": "cellular", "capacity_prior_mbps": p["capacity_prior_mbps"]} for p in s.operators]
     for p in s.starlink["satcom"]["providers"]:
         providers.append({**p, "type": "satcom", "capacity_prior_mbps": p["capacity_prior_mbps"][p["terminal"]]})
@@ -295,12 +302,14 @@ def test_browser_model_parity(pipeline, calibrated, portal_decay_m):
         if g["provider_type"].iloc[0] == "cellular":
             data["base"][pid]["rsrpSlope"] = g["rsrp_slope"].tolist()
             data["base"][pid]["rsrpIntercept"] = g["rsrp_intercept"].tolist()
+            data["base"][pid]["meas"] = g["measured_correction_db"].astype(object).where(g["measured_correction_db"].notna(), None).tolist()
+            data["base"][pid]["adj"] = g["learned_adjustment_db"].astype(object).where(g["learned_adjustment_db"].notna(), None).tolist()
     cases = []
     for policy in POLICIES:
         for ap_capacity, weather in product([0, 300], ["nominal", "rain", "storm"]):
             settings = copy.deepcopy(s)
             settings.sim["passenger_wifi"]["ap_capacity_mbps"] = ap_capacity
-            scenario_obs, result = simulate(settings, b.samples, prior, serving, policy=policy, weather=weather, calibration=cal)
+            scenario_obs, result = simulate(settings, b.samples, prior, serving, policy=policy, weather=weather, calibration=cal, corrections=corr, adjustment=adj)
             case_data = {**data, "meta": {**data["meta"], "sim": settings.sim}}
             cases.append({"data": case_data, "scenario": {"policy": policy, "vehicle": settings.sim["vehicle"]["profile"], "weather": weather},
                           "expected": {"rsrp": {pid: g.sort_values("sample_id")["signal_primary"].tolist() for pid, g in scenario_obs[scenario_obs["provider_type"] == "cellular"].groupby("provider_id")},
@@ -349,5 +358,5 @@ def test_offline_geometry_for_every_route(route_id):
     assert list(st["crs"]) == [x["crs"] for x in s.route["stations"]]
     assert st["distance_m"].is_monotonic_increasing and st["distance_m"].iloc[0] < 1500
     assert st["distance_m"].iloc[-1] > b.samples["distance_m"].max() - 1500
-    # Synthetic tunnels belong to the reference route only.
-    assert b.samples["in_tunnel"].any() == bool(synthetic.FALLBACK_TUNNELS_KM.get(route_id))
+    # Synthetic tunnels belong to the reference route, and to routes that list their own by portal position (the US).
+    assert b.samples["in_tunnel"].any() == bool(synthetic.FALLBACK_TUNNELS_KM.get(route_id) or s.route.get("tunnels"))

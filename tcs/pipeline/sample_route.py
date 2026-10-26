@@ -47,7 +47,9 @@ def build_route(settings: Settings) -> RouteBundle:
     warnings: list[str] = []
     geom: RouteGeometry | None = None
 
-    if gsrc in ("osm", "file") and not settings.offline:
+    if gsrc in ("osm", "file") and not settings.offline and settings.country_profile.get("stations") == "ntad_amtrak":
+        geom = _us_route(settings, gsrc, crs_codes, raw_dir, warnings)
+    elif gsrc in ("osm", "file") and not settings.offline:
         try:
             if gsrc == "osm":
                 geom = fetch_route(crs_codes, rcfg["country"], raw_dir, corridor_m=8000, overpass_url=settings.key("OVERPASS_URL"),
@@ -80,6 +82,16 @@ def build_route(settings: Settings) -> RouteBundle:
     st = geom.stations.copy()
     sx, sy = proj.to_xy(st["lon"].values, st["lat"].values)
     st["distance_m"] = [line_xy.project(Point(a, b)) for a, b in zip(sx, sy)]
+    if not st["distance_m"].is_monotonic_increasing:
+        # a train that runs out and back (Lakeland - Tampa - Lakeland) passes a place twice: look for each station
+        # only beyond the one before it
+        from shapely.ops import substring
+
+        d, out = 0.0, []
+        for a, b in zip(sx, sy):
+            d += substring(line_xy, d, line_xy.length).project(Point(a, b)) if d < line_xy.length else 0.0
+            out.append(d)
+        st["distance_m"] = out
     st["sample_id"] = np.clip(np.round(st["distance_m"] / settings.spacing_m).astype(int), 0, n - 1)
     cfg_by_crs = {c["crs"]: c for c in stations_cfg}
     st["stop"] = st["crs"].map(lambda c: bool(cfg_by_crs[c].get("stop", False)))
@@ -117,6 +129,13 @@ def build_route(settings: Settings) -> RouteBundle:
             m = (km >= start) & (km <= start + length)
             in_tunnel |= m
             tunnel_name[m] = name
+    if geom.source != "osm" and rcfg.get("tunnels"):
+        # Geometry without tunnel tags (NTAD, a supplied file, offline): the route file's own list, by portal position.
+        for t in rcfg["tunnels"]:
+            a, b = (line_xy.project(Point(proj.to_xy(p[1], p[0]))) for p in (t["from"], t["to"]))
+            m = (samples["distance_m"].values >= min(a, b)) & (samples["distance_m"].values <= max(a, b))
+            in_tunnel |= m
+            tunnel_name[m] = t["name"]
     samples["in_tunnel"] = in_tunnel
     samples["tunnel_name"] = tunnel_name
     samples["osm_cutting"] = cutting
@@ -140,6 +159,51 @@ def build_route(settings: Settings) -> RouteBundle:
     prov = {"route": geom.provenance.__dict__, "warnings": warnings + geom.warnings, "straight_legs": geom.straight_legs}
     return RouteBundle(samples=samples, stations=st, proj=proj, line_lonlat=list(geom.line.coords), geometry_source=geom.source,
                        provenance=prov, warnings=warnings + geom.warnings)
+
+
+def _us_route(settings: Settings, gsrc: str, crs_codes: list[str], raw_dir: Path, warnings: list[str]) -> RouteGeometry | None:
+    """US route: Amtrak stations from NTAD, the track routed through OpenStreetMap (or a supplied file), and the NTAD line
+    of the named Amtrak service (geometry.ntad_route) when Overpass cannot be reached. None = synthetic stand-in."""
+    from ..sources import ntad_amtrak
+
+    rcfg = settings.route
+    if all("lat" in s and "lon" in s for s in rcfg["stations"]):
+        # positions in the route file (written from the operator's GTFS stops by tools/amtrak_routes.py): no lookup, and
+        # stations outside the US (Toronto, Montreal, Vancouver) that NTAD does not list work too
+        st = pd.DataFrame([{"crs": s["crs"], "name": s["name"], "lat": float(s["lat"]), "lon": float(s["lon"])} for s in rcfg["stations"]])
+    else:
+        try:
+            st = ntad_amtrak.fetch_stations(crs_codes, raw_dir, offline=False)
+            st["name"] = [s["name"] for s in rcfg["stations"]]      # NTAD names are towns ("Boston, MA" twice): keep the route file's
+        except SourceUnavailable as exc:
+            warnings.append(f"Amtrak stations unavailable ({exc}); using synthetic geometry")
+            console.log(f"[yellow]{warnings[-1]}")
+            return None
+    guide = None
+    if rcfg.get("geometry", {}).get("guide") == "gtfs_shape":
+        from ..sources import gtfs_feed
+
+        g = (rcfg.get("timetable") or {}).get("gtfs") or {}
+        try:
+            guide = gtfs_feed.trip_shape(gtfs_feed.feed(settings), g["route"], rcfg["origin_crs"], rcfg["destination_crs"], g.get("train"))
+        except (SourceUnavailable, KeyError) as exc:
+            console.log(f"[yellow]GTFS shape unavailable ({exc}); searching for the track around the station chain")
+    try:
+        if gsrc == "file":
+            return load_route_file(Path(rcfg["geometry"]["file"]), crs_codes, st)
+        return fetch_route(crs_codes, rcfg["country"], raw_dir, corridor_m=8000, overpass_url=settings.key("OVERPASS_URL"),
+                           timeout=int(rcfg.get("geometry", {}).get("overpass_timeout_s", 180)), stations=st, guide=guide)
+    except SourceUnavailable as exc:
+        name = rcfg.get("geometry", {}).get("ntad_route")
+        console.log(f"[yellow]route source '{gsrc}' unavailable ({exc})" + (f"; trying the NTAD '{name}' line" if name else ""))
+        if name:
+            try:
+                return ntad_amtrak.fetch_route(st, name, Projector(local_crs(st["lon"].mean(), st["lat"].mean(), rcfg["country"])), raw_dir)
+            except SourceUnavailable as exc2:
+                exc = exc2
+        warnings.append(f"route source '{gsrc}' unavailable ({exc}); using synthetic geometry")
+        console.log(f"[yellow]{warnings[-1]}")
+        return None
 
 
 def urban_from_point_density(samples: pd.DataFrame, px: np.ndarray, py: np.ndarray, radius_m: float = 1000, saturate: int = 60) -> np.ndarray:

@@ -40,7 +40,10 @@ route:
     stop: true
     trainshed: true
   timetable:
-    source: yaml
+    # A real weekday train from Network Rail's SCHEDULE feed (tcs/sources/nr_schedule.py): first at or after `departure`;
+    # the calls below are used when the feed can't be read (no NETWORK_RAIL_USERNAME / _PASSWORD, offline).
+    source: network_rail
+    network_rail: {toc: SR}
     departure: 09:00
     calls:
       EDB: 09:00

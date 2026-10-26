@@ -118,6 +118,11 @@ h4 { margin: var(--s4) 0 var(--s2); }
   background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
   background-position: calc(100% - 12px) 55%, calc(100% - 8px) 55%; background-size: 4px 4px; background-repeat: no-repeat; }
 .route-pick:hover { background-color: var(--surface-3); }
+.seg.region-pick { width: auto; flex: none; }
+.region-pick[hidden] { display: none; }
+.seg.region-pick button { flex: none; padding: 4px 10px; font: 600 var(--t-micro)/1 var(--display); letter-spacing: .06em; }
+.region-pick button:disabled { opacity: .45; cursor: not-allowed; }
+.region-pick button:disabled:hover { color: var(--muted); }
 .route-meta { color: var(--muted); font: 400 var(--t-sm) var(--mono); white-space: nowrap; font-variant-numeric: tabular-nums; flex: none; }
 .appbar-right { margin-left: auto; display: flex; align-items: center; gap: var(--s2); min-width: 0; }
 
@@ -431,6 +436,8 @@ h4 { margin: var(--s4) 0 var(--s2); }
 @media (max-width: 640px) {
   .appbar { gap: var(--s2); padding: 0 var(--s2); }
   .route-pick { min-width: 0; max-width: 42vw; font-size: var(--t-sm); }
+  .brand-name span { display: none; }
+  .seg.region-pick button { padding: 4px 7px; }
   .scenario-pill, .prov, #btnReport, #btnExport, #btnBuilder, .appbar-right > .vr { display: none; }
   .speeds button:nth-child(2), .speeds button:nth-child(4) { display: none; }
   .clock b { font-size: var(--t-md); }

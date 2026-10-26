@@ -105,6 +105,7 @@ export function applyDesign(meta: Meta, d: TrainDesign | null, baseline: Meta): 
   for (const p of m.providers) {
     if (p.type !== 'satcom') continue
     p.enabled = d.satcom_units > 0
+    p.terminals = Math.max(1, d.satcom_units)
     if (d.satcom_terminal && p.capacity_priors && p.capacity_priors[d.satcom_terminal] != null) { p.terminal = d.satcom_terminal; p.capacity_prior_mbps = p.capacity_priors[d.satcom_terminal] }
   }
   m.sim.train = { ...(m.sim.train ?? {}), design: { ...d, n_carriages: d.carriages.length } }

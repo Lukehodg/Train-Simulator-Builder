@@ -88,6 +88,39 @@ list (CRS codes), calling times and flags; everything else — centreline, tunne
 fetched by the pipeline. Add a route by copying one file. Stations are matched to any track within 90 m, so
 multi-track stations route correctly (mileages come out within ~1 % of the published figures).
 
+### United States
+
+A route file with `country: US` (first: `nec_was_bos`, the Acela on the Northeast Corridor, Washington → Boston) runs
+on the US country profile in `config/countries/US/` instead of the GB defaults; GB routes are unaffected. In the viewer, the UK / USA switch beside the route list changes region (it opens the route last viewed there);
+the route list shows that region's routes, and `?region=us` opens the US directly. UK stays the default. What changes:
+
+| Input | GB | US |
+|---|---|---|
+| Stations | OSM `ref:crs` | Amtrak codes from the US DOT's NTAD Amtrak Stations layer (keyless) |
+| Track | OSM, routed station to station | OSM the same way; the NTAD Amtrak Routes line (`geometry.ntad_route`) when Overpass is unavailable, with tunnels from the route file's `tunnels` |
+| Networks | EE, O2, Vodafone, Three | AT&T, Verizon, T-Mobile, matched to OpenCellID by their US PLMNs (several MCCs each) |
+| Coverage prior | Ofcom API / Connected Nations by postcode | Operators' FCC National Broadband Map filings (in-vehicle / outdoor, 4G / 5G); distance to OpenCellID sites where a network has none, uncalibrated |
+| Terrain | OS Terrain 50 + open LiDAR | Copernicus GLO-30 |
+| Network speed | Calibrated to GB measurement trains | Each network's capacity scaled by local Ookla phone-test speeds (`ookla.capacity` in the US profile), damped and clamped |
+| Timetable | Route file calls | One real Acela from Amtrak's GTFS feed (`timetable.source: gtfs`, keyless, weekly); the route file's calls if the feed can't be read |
+| Calibration | Yellow Train national fit, Global View corrections and masts | None yet: the figures are uncalibrated until US measurements are fitted |
+
+**Every Amtrak service.** Besides the hand-written Acela, `scripts/amtrak_routes.py` writes a route file for each of the
+other train services in Amtrak's GTFS feed (42 as of October 2026, `<service>_<from>_<to>.yaml`), each from one real
+weekday train (pinned by number): the full run, its stations with their positions (so Toronto, Montreal and Vancouver
+work), its calling times, the states it crosses (Census Bureau boundaries, for the FCC files) and a sample spacing that
+keeps it to ~20,000 samples (50 m up to 1,000 km, up to 225 m on the Texas Eagle). The track is searched for in OSM
+around the feed's shape of that train (`geometry.guide: gtfs_shape`), in 200 km pieces. Times are Amtrak's (US
+Eastern), and a train that runs past midnight more than once keeps counting days. Run the script again when Amtrak
+changes its timetable. Not in Amtrak's feed, so not here yet: the Gold Runner (California's own feed).
+
+The viewer's region switch (UK / USA) picks the country, the evidence packs drop the Ofcom and Network Rail wording for US
+routes, and the publish workflow's live-Ofcom check applies to GB routes only. The publish workflow builds US routes side
+by side, one job each, and adds them to the site with the GB routes. Building all of them takes about 2,500 runner
+minutes, so bundles built on main are kept in the `us-bundles` release and a publish rebuilds only the US routes whose
+route file or US settings changed, or whose bundle is six months old (the "rebuild_us" input rebuilds them all). Add another country by adding
+`config/countries/<CC>/profile.yaml` (and its networks file) and route files with that `country`.
+
 ## Evidence pack (`tcs report`)
 
 A Word report laid out for a tender submission, and an Excel data appendix, per route and scenario:

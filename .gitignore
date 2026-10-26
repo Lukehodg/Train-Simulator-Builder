@@ -8,6 +8,7 @@ __pycache__/
 data/raw/*
 data/interim/*
 data/processed/*
+data/ept_cache/
 !data/**/.gitkeep
 data/*.log
 web/node_modules/

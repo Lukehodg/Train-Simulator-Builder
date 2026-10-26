@@ -5,16 +5,19 @@ Signal at a given spot repeats from trip to trip far more closely than any cover
 power and aim, a cutting, a bend behind a hill), so earlier passes are the best guide to later ones. Per route,
 network and 50 m route point:
 
-    error_j      = measured_j - predicted_j - level        (open-air route points; one level per measurement set and
-                                                             network, so a scanner that reads low everywhere does not
-                                                             shift the route)
+    error_j      = measured_j - predicted_j - level        (one level per measurement set and network across every
+                                                             route it covers, from open-air route points, so a scanner
+                                                             that reads low everywhere does not shift a route but a
+                                                             route the model over- or under-rates is corrected)
     correction_i = sum_j w_j g(d_ij) error_j / (sum_j w_j g(d_ij) + SHRINK)
+                                                            (in tunnels from in-tunnel points only, outside from
+                                                             open-air ones only: each corrects its own model)
 
 with g a Gaussian along the track (SCALE_M) and w_j the measurement set's weight: 1 for the current Global View logs,
 0.1 for the 2018-19 Yellow Train logs (older networks, but cuttings and hills have not moved). SHRINK pulls a
 correction towards zero where few measurements are near, so a stretch measured once moves less than one measured
 often. Corrections are in dB of RSRP, added to the score through the calibration's dB scale, so everything downstream
-(capacity, latency, the viewer) follows; inside tunnels the portal model still applies.
+(capacity, latency, the viewer) follows; inside a measured tunnel the correction goes on the portal or DAS model.
 
 Tested on later trips (Global View, corrections from 16 Mar - 6 Apr 2026 plus Yellow Train, tested from 7 Apr through
 the model): the error fell from 9.7 to 8.3 dB on average, on every route (docs/validation.md). `tcs check-national`
@@ -38,36 +41,50 @@ COLUMNS = ["route_id", "provider_id", "latitude", "longitude", "correction_db", 
 INTERIM_FILE = "measured_corrections.parquet"     # this build's corrections, matched to its samples
 
 
-def errors(j: pd.DataFrame, weight: float) -> pd.DataFrame:
-    """Model error at measured route points (open air only): sample_id, provider_id, distance_m, error_db, w.
-    j: measured route points with the model's prediction there (national.predict): sample_id, provider_id, rsrp_dbm,
-    signal_primary, _in_tunnel, distance_m."""
+def levels(j: pd.DataFrame) -> pd.Series:
+    """A measurement set's own level per network (provider_id -> dB): the median of measured minus predicted over its
+    open-air route points on every route it covers. j: as for errors(), pooled over the set's routes."""
     j = j[~j["_in_tunnel"].astype(bool) & np.isfinite(j["rsrp_dbm"]) & np.isfinite(j["signal_primary"])]
+    return (j["rsrp_dbm"] - j["signal_primary"]).groupby(j["provider_id"]).median()
+
+
+def errors(j: pd.DataFrame, weight: float, level: pd.Series | None = None) -> pd.DataFrame:
+    """Model error at measured route points: sample_id, provider_id, distance_m, in_tunnel, error_db, w.
+    j: measured route points with the model's prediction there (national.predict): sample_id, provider_id, rsrp_dbm,
+    signal_primary, _in_tunnel, distance_m. level: the set's levels() over all its routes; None takes it from j alone,
+    which also removes the route's own offset."""
+    j = j[np.isfinite(j["rsrp_dbm"]) & np.isfinite(j["signal_primary"])]
     if j.empty:
-        return pd.DataFrame(columns=["sample_id", "provider_id", "distance_m", "error_db", "w"])
+        return pd.DataFrame(columns=["sample_id", "provider_id", "distance_m", "in_tunnel", "error_db", "w"])
+    level = levels(j) if level is None else level
     diff = j["rsrp_dbm"] - j["signal_primary"]
-    level = diff.groupby(j["provider_id"]).transform("median")
     return pd.DataFrame({"sample_id": j["sample_id"].to_numpy(), "provider_id": j["provider_id"].to_numpy(), "distance_m": j["distance_m"].to_numpy(float),
-                         "error_db": (diff - level).to_numpy(float), "w": float(weight)})
+                         "in_tunnel": j["_in_tunnel"].astype(bool).to_numpy(),
+                         "error_db": (diff - j["provider_id"].map(level).fillna(0.0)).to_numpy(float), "w": float(weight)})
 
 
 def smooth(err: pd.DataFrame, samples: pd.DataFrame, scale_m: float = SCALE_M, shrink: float = SHRINK) -> pd.DataFrame:
     """Per network, the shrunk Gaussian-weighted mean error along the track at every route sample with measurements
-    within 3 scales: sample_id, provider_id, correction_db, weight."""
+    within 3 scales: sample_id, provider_id, correction_db, weight. Tunnel samples take in-tunnel errors only and the
+    rest open-air ones only (when both frames say which is which)."""
     out = []
-    dist = samples["distance_m"].to_numpy(float)
-    sid = samples["sample_id"].to_numpy()
-    for pid, g in err.groupby("provider_id"):
-        order = np.argsort(g["distance_m"].to_numpy())
-        d, e, w = (g[c].to_numpy(float)[order] for c in ("distance_m", "error_db", "w"))
-        lo, hi = np.searchsorted(d, dist - 3 * scale_m), np.searchsorted(d, dist + 3 * scale_m)
-        corr, wsum = np.zeros(len(dist)), np.zeros(len(dist))
-        for i in np.flatnonzero(hi > lo):
-            k = w[lo[i]:hi[i]] * np.exp(-0.5 * ((d[lo[i]:hi[i]] - dist[i]) / scale_m) ** 2)
-            wsum[i] = k.sum()
-            corr[i] = (k * e[lo[i]:hi[i]]).sum() / (wsum[i] + shrink)
-        keep = wsum > 0
-        out.append(pd.DataFrame({"sample_id": sid[keep], "provider_id": pid, "correction_db": corr[keep], "weight": wsum[keep]}))
+    split = "in_tunnel" in err and "in_tunnel" in samples
+    s_tun = samples["in_tunnel"].fillna(False).to_numpy(bool) if split else np.zeros(len(samples), bool)
+    e_tun = err["in_tunnel"].astype(bool).to_numpy() if split else np.zeros(len(err), bool)
+    for inside in (False, True):
+        sel = samples[s_tun == inside]
+        dist, sid = sel["distance_m"].to_numpy(float), sel["sample_id"].to_numpy()
+        for pid, g in err[e_tun == inside].groupby("provider_id"):
+            order = np.argsort(g["distance_m"].to_numpy())
+            d, e, w = (g[c].to_numpy(float)[order] for c in ("distance_m", "error_db", "w"))
+            lo, hi = np.searchsorted(d, dist - 3 * scale_m), np.searchsorted(d, dist + 3 * scale_m)
+            corr, wsum = np.zeros(len(dist)), np.zeros(len(dist))
+            for i in np.flatnonzero(hi > lo):
+                k = w[lo[i]:hi[i]] * np.exp(-0.5 * ((d[lo[i]:hi[i]] - dist[i]) / scale_m) ** 2)
+                wsum[i] = k.sum()
+                corr[i] = (k * e[lo[i]:hi[i]]).sum() / (wsum[i] + shrink)
+            keep = wsum > 0
+            out.append(pd.DataFrame({"sample_id": sid[keep], "provider_id": pid, "correction_db": corr[keep], "weight": wsum[keep]}))
     return pd.concat(out, ignore_index=True) if out else pd.DataFrame(columns=["sample_id", "provider_id", "correction_db", "weight"])
 
 

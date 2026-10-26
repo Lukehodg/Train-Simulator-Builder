@@ -18,14 +18,16 @@ from .sample_route import RouteBundle
 
 SAMPLE_COLS = ["sample_id", "distance_m", "latitude", "longitude", "elevation_m", "terrain_m", "bearing_deg", "in_tunnel", "tunnel_name",
                "cutting_depth_m", "embankment_height_m", "on_bridge", "canopy_probability", "urban_density", "sky_visibility", "horizon_deg",
-               "lidar", "overhead_fraction", "speed_kph", "sim_seconds", "next_station", "time_to_next_station_s", "station_nearby"]
+               "lidar", "overhead_fraction", "capacity_scale", "speed_kph", "sim_seconds", "next_station", "time_to_next_station_s", "station_nearby"]
 PROVIDER_COLS = ["quality_score", "quality_base", "signal_primary", "signal_secondary", "capacity_mbps", "latency_ms", "packet_loss_pct",
                  "available", "confidence", "reason_code", "serving_cell", "serving_distance_m", "handover", "handover_penalty",
-                 "radio_technology", "source_flags", "rsrp_slope", "rsrp_intercept", "measured_correction_db"]
+                 "radio_technology", "source_flags", "rsrp_slope", "rsrp_intercept", "measured_correction_db",
+                 "learned_adjustment_db"]
 SHORT = {"quality_score": "q", "quality_base": "qb", "signal_primary": "sig", "signal_secondary": "sig2", "capacity_mbps": "cap", "latency_ms": "lat",
          "packet_loss_pct": "loss", "available": "avail", "confidence": "conf", "reason_code": "reason", "serving_cell": "cell",
          "serving_distance_m": "celld", "handover": "ho", "handover_penalty": "hp", "radio_technology": "tech", "source_flags": "src",
-         "rsrp_slope": "rsrp_slope", "rsrp_intercept": "rsrp_intercept", "measured_correction_db": "meas"}
+         "rsrp_slope": "rsrp_slope", "rsrp_intercept": "rsrp_intercept", "measured_correction_db": "meas",
+         "learned_adjustment_db": "adj"}
 
 
 def _cast(df: pd.DataFrame, schema: pa.Schema) -> pa.Table:
@@ -35,7 +37,7 @@ def _cast(df: pd.DataFrame, schema: pa.Schema) -> pa.Table:
 
 
 def export_all(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame, stations: pd.DataFrame, cells: pd.DataFrame,
-               obs: pd.DataFrame, rc: pd.DataFrame, prior: pd.DataFrame) -> dict[str, Path]:
+               obs: pd.DataFrame, rc: pd.DataFrame, prior: pd.DataFrame, extra_meta: dict | None = None) -> dict[str, Path]:
     paths = settings.paths()
     out, web = paths["processed"], paths["web"]
     out.mkdir(parents=True, exist_ok=True)
@@ -105,6 +107,7 @@ def export_all(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame, s
         else:
             sp = next(s for s in all_sat if s["id"] == p["id"])
             p["terminal"] = sp["terminal"]
+            p["terminals"] = int(sp.get("terminals", 1))
             p["capacity_prior_mbps"] = sp["capacity_prior_mbps"][sp["terminal"]]
             p["capacity_priors"] = sp["capacity_prior_mbps"]          # all terminal classes, so the viewer can switch designs
             dsp = next((d for d in settings.starlink_defaults.get("satcom", {}).get("providers", []) if d["id"] == p["id"]), sp)
@@ -124,6 +127,7 @@ def export_all(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame, s
         "length_m": float(samples["distance_m"].max()),
         "duration_s": float(samples["sim_seconds"].max()),
         "departure": settings.route.get("timetable", {}).get("departure", "09:00"),
+        "timetable": {k: v for k, v in (settings.route.get("timetable", {}).get("resolved") or {"source": settings.route.get("timetable", {}).get("source", "yaml")}).items() if k != "stops"},
         "n_samples": int(len(samples)),
         "providers": providers,
         "stations": [{"crs": r["crs"], "name": r["name"], "lat": float(r["latitude"]), "lon": float(r["longitude"]), "distance_m": float(r["distance_m"]),
@@ -143,6 +147,7 @@ def export_all(settings: Settings, bundle: RouteBundle, samples: pd.DataFrame, s
         "calibration": describe_calibration(settings, paths["interim"]),   # what the predictions were calibrated against, and how well
         "warnings": bundle.warnings,
     }
+    meta.update(extra_meta or {})
     (web / "meta.json").write_text(json.dumps(meta, indent=1, default=_json_default), encoding="utf-8")
     written["web_meta"] = web / "meta.json"
     return written

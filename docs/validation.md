@@ -132,6 +132,24 @@ Both go into `config/calibration.yaml` (a re-run of `tcs calibrate-national` kee
 (sections 8.2 and 8.3, and the sources table) and in the viewer's Sources tab.
 
 
+### Far from every mast (model 0.4.2)
+
+More than 12 km (`candidate_radius_m`) from every cell of a network, the train kept its serving cell but its distance
+was left blank, and the model read a blank as no distance penalty: the signal there scored better than at 11 km. It
+hit 35 % of the Great Eastern's (route point, network) rows, 31 % of the Highland's, 17 % of the Cornish main line's
+and 10 % of the East Coast's, where OpenCellID has no cells for long stretches. The distance now keeps counting. Refitted
+on the 8 October routes, the measurements then choose no distance penalty (0 per km); the same refit without the fix
+keeps 0.01 per km. The cutting depth (10 m) and tunnel floor (0.06) moved with the newer route data, with or without the fix.
+
+| | model 0.4.1 | model 0.4.2 |
+|---|---|---|
+| 2019 Yellow Train test, mean absolute error | 10.73 dB | 10.72 dB |
+| 2026 Global View check, model as calibrated | 9.73 dB | 9.74 dB |
+| 2026 Global View check, with measured corrections | 8.19 dB | 8.20 dB |
+
+(0.4.1 here is the published calibration on the 8 October routes.) Per route the 2026 error moves by at most 0.2 dB
+(HS1 8.20 to 8.00) and the share of the route with good or excellent Wi-Fi by at most 0.7 points.
+
 ### Measured corrections (`tcs correct-routes`)
 
 Signal at a given spot repeats from trip to trip far more closely than any coverage prediction places it (a mast's own
@@ -142,26 +160,38 @@ weight, applied through the model, against the Global View measurements from the
 
 | | model as calibrated | with measured corrections |
 |---|---|---|
-| mean absolute error | 9.67 dB | 8.30 dB |
-| within ±6 dB | 40.1 % | 48.3 % |
-| correlation | 0.39 | 0.55 |
-| usable / not usable (−110 dBm) agreement | 92.6 % | 92.8 % |
+| mean absolute error | 9.74 dB | 8.20 dB |
+| within ±6 dB | 39.9 % | 49.3 % |
+| correlation | 0.38 | 0.56 |
+| usable / not usable (−110 dBm) agreement | 92.6 % | 92.9 % |
 
-Better on every one of the 15 routes the 2026 logs cover (by 0.7–2.3 dB). Global View's earlier trips alone give
-8.66 dB; the 2018–19 Yellow Train logs still help because hills and cuttings have not moved. Tested offline before
-building it in: a Gaussian scale of 100 m and a shrink of 0.5 did best (75–150 m and 0.25–1 within 0.03 dB), Yellow
-Train at 0.1 better than 0.25 or 0.5. The production corrections (`config/route_corrections.parquet`, 365k route points on all 18
-routes, typically 3–5 dB) use every measurement, so on the routes the logs cover the published model sits nearer the
-measurements than this test shows; a route no train has measured gets none, and the model alone (9.67 dB).
+(On the routes as published on 3 October 2026, with the masts placed from the logs; the routes the first version of
+this test ran on gave 9.67 and 8.30 dB.) Better on every one of the 15 routes the 2026 logs cover, by 0.8–4.0 dB. Global View's
+earlier trips alone give 8.60 dB; the 2018–19 Yellow Train logs still help because hills and cuttings have not moved.
+Tested offline before building it in: a Gaussian scale of 100 m and a shrink of 0.5 did best (75–150 m and 0.25–1
+within 0.03 dB), Yellow Train at 0.1 better than 0.25 or 0.5. The production corrections
+(`config/route_corrections.parquet`, 371k route points on all 18 routes, typically 3–5 dB) use every measurement, so on
+the routes the logs cover the published model sits nearer the measurements than this test shows; a route no train has
+measured gets none, and the model alone (9.74 dB).
+
+**One level per measurement set, and tunnels (model 0.4.1).** The first version took each set's own level per route and
+network, so an error the model makes along a whole route went with the scanner's level; it also left tunnels to the
+portal model. The level is now one per set and network over every route the set covers, and in-tunnel errors correct
+the portal or DAS model where trains measured inside (smoothed apart from open-air ones). Same routes, same test:
+
+| corrections | mean error | within ±6 dB | correlation | in tunnels (1.2k points) |
+|---|---|---|---|---|
+| level per route, tunnels left out (0.4.0) | 8.35 dB | 48.0 % | 0.547 | 11.43 dB |
+| one level per set and network | 8.21 dB | 49.2 % | 0.558 | 11.41 dB |
+| tunnels corrected | 8.33 dB | 48.1 % | 0.549 | 9.24 dB |
+| both (0.4.1) | 8.20 dB | 49.3 % | 0.561 | 9.19 dB |
+
+Brighton gains most (8.22 to 6.79 dB; its bias from +4.6 to +1.0 dB), then HS1 (8.56 to 8.00), South Western (9.32 to
+8.83), Midland Main Line (6.93 to 6.57) and TransPennine (9.09 to 8.86); Vodafone 9.38 to 9.13 dB. Chiltern (9.01 to
+9.08) and the North Wales Coast (36 test points) are within 0.1 dB of where they were.
 
 Looked at and left out:
 
-- **A learned adjustment** (gradient-boosted trees on the score model's error, from what is known everywhere along the
-  track: Ofcom level, LiDAR cutting and skyline, distance to the serving mast, urban density, line speed, height above
-  the surrounding land). Trained on the other routes' Yellow Train logs, on routes it never saw it cut the error by
-  0.8 dB on the 2019 test and 0.5 dB on the 2026 check (better on all 15 routes). With measured corrections it adds
-  nothing (8.25 against 8.24 dB), and every route in the catalogue has been measured, so it is not built in; it is the
-  next step for a route no train has measured.
 - **Snapping placed masts to OpenStreetMap's mapped masts** (11,937 telecom masts and towers in GB, export of
   3 October 2026). Only 17 % of the masts placed from the logs have a mapped mast within 500 m. On the later-trips test
   (masts placed before 7 April, 418k readings from it) moving each to the nearest mapped mast made the error worse
@@ -172,3 +202,36 @@ Looked at and left out:
   the track, so they cannot sharpen a prediction at a point; the Ofcom API the model queries already returns the
   operators' predictions location by location.
 
+### Learned adjustment (`tcs learn-adjustment`, model 0.4.3)
+
+Measured corrections fix the model only where trains have run. On the 2026 check, the test points with earlier Global
+View trips nearby (58 %) were already at about 7.1 dB, close to the trip-to-trip noise (a perfect model scores about
+6.6 dB against single trips: per-trip spread about 10 dB at a 50 m spot); the 42 % with none were 10.2 dB out and held
+nearly all the remaining error. Gradient-boosted trees learn the calibrated model's error from what is known at every
+route point (32 features: Ofcom level and spread, LiDAR cutting, skyline and walls, distance to the serving mast and
+masts within 2 and 5 km, urban density, line speed, height above the surrounding land, network; tcs/model/adjustment.py)
+and apply it everywhere; measured corrections are then fitted on top. `tcs check-national` fits its own trees from the
+Global View measurements before the split (plus Yellow Train at 0.1) and tests on those from it (173k route points on
+the 14 routes the later logs cover; CrossCountry left out while its track is approximate):
+
+| | model as calibrated | with learned adjustment | with adjustment and measured corrections |
+|---|---|---|---|
+| mean absolute error | 9.77 dB | 8.73 dB | 8.07 dB |
+| within ±6 dB | 39.7 % | 45.6 % | 50.4 % |
+| correlation | 0.37 | 0.51 | 0.57 |
+| usable / not usable (−110 dBm) agreement | 92.7 % | 92.8 % | 92.9 % |
+
+Measured corrections alone on the same routes and test give 8.19 dB (49.6 %, correlation 0.56), so the adjustment
+adds 0.12 dB where trains have run and 1.0 dB on the model alone, which is what a route no train has measured gets. It
+helps every route: Brighton 10.55 to 8.12 dB alone (6.43 with corrections), Midland Main Line 9.12 to 7.42 (6.36),
+Transport for Wales 8.99 to 7.48 (6.69), East Coast 9.84 to 9.17 (8.84). In tunnels 12.12 to 9.68 dB alone (9.08 with
+corrections); Vodafone, the hardest network, 10.97 to 9.85 (8.94).
+
+With CrossCountry rebuilt on its real track (18 October 2026) the same check covers 15 routes and 182k route points:
+9.70 dB as calibrated, 8.72 with the learned adjustment, 8.05 with adjustment and measured corrections (50.5 % within
+±6 dB, correlation 0.57, usable agreement 93.0 %). CrossCountry itself goes from 10.01 to 8.93 dB, and 8.00 with corrections.
+
+Tried offline and left out: a mast model instead (a link budget from the masts placed from the logs, and each cell's
+antenna direction: 8.48 to 8.42 dB at most, as the masts exist only where trains measured), and corrections shared
+between networks on the same masts (EE with Three, Vodafone with O2: worse, 8.66 dB). The production trees (`config/learned_adjustment.parquet`) use every measurement; the
+US model leaves them out, as they are learned from GB scanner trains along GB routes.

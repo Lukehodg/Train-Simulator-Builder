@@ -73,6 +73,11 @@ export function simulate(data: RouteData, sc: Scenario): SimResult {
         const isDas = tun && dasAt(das, data.tunnelName[i], data.distance[i] / 1000)
         let q = open(i)
         if (isDas) q = cfg.tunnels.das_score; else if (tun) q = inside(i)
+        // inside a tunnel the measured correction and learned adjustment go on the portal or DAS model (open air has them in qb)
+        if (tun) {
+          const db = (b.meas && Number.isFinite(b.meas[i]) ? b.meas[i] : 0) + (b.adj && Number.isFinite(b.adj[i]) ? b.adj[i] : 0)
+          if (db) q += db / (b.rsrpSlope?.[i] ?? (cfg.rsrp_dbm.at_one - cfg.rsrp_dbm.at_zero))
+        }
         q = clamp(q, 0, 1)
         const hp = b.hp[i] || 0
         const tech = b.tech[i] ?? '4G'
@@ -80,7 +85,7 @@ export function simulate(data: RouteData, sc: Scenario): SimResult {
         const usable = Math.pow(clamp((q - floor) / (1 - floor), 0, 1), expo)
         const speedF = 1 - 0.08 * clamp((data.speed[i] || 0) / 200, 0, 1)
         r.q[i] = q
-        r.cap[i] = prior * usable * speedF * (1 - (1 - h.capacity_factor) * hp) * unitsFactor
+        r.cap[i] = prior * usable * speedF * (1 - (1 - h.capacity_factor) * hp) * unitsFactor * (data.capScale ? data.capScale[i] : 1)
         r.lat[i] = cfg.latency_ms.base + cfg.latency_ms.at_zero_extra * (1 - q) + h.latency_spike_ms * hp
         r.loss[i] = lossTable(q, cfg.packet_loss_pct) + h.packet_loss_pct * hp
         r.avail[i] = q > floor ? 1 : 0
@@ -89,7 +94,7 @@ export function simulate(data: RouteData, sc: Scenario): SimResult {
         if (!onTrain) { r.avail[i] = 0; r.reason[i] = 'NOT_FITTED' }    // the network's own signal still shows; the train cannot use it
       }
     } else {
-      const av = p.availability!, w = av.weather[sc.weather] ?? av.weather.nominal, prior = p.capacity_prior_mbps as number, lp = p.latency_prior_ms!
+      const av = p.availability!, w = av.weather[sc.weather] ?? av.weather.nominal, prior = (p.capacity_prior_mbps as number) * (p.terminals ?? 1), lp = p.latency_prior_ms!
       const satFitted = sim.satcom_enabled !== false && p.enabled !== false   // switched off, or no terminal in the design
       const satEnabled = satFitted && (!p.service_area || p.service_area.countries.some(c => c.toUpperCase() === meta.route.country.toUpperCase()))
       for (let i = 0; i < n; i++) {

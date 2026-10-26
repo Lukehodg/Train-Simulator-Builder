@@ -1,0 +1,68 @@
+# US terrestrial providers (replaces config/networks.yaml for routes with `country: US`; see profile.yaml).
+# US networks span several MCCs, so each lists its PLMNs ("mcc-mnc") for matching OpenCellID records; `mcc`/`mnc`
+# name the main one (used for synthetic stand-ins). UScellular's network is listed under T-Mobile, which bought its
+# wireless operations in 2025.
+
+cellular:
+  operators:
+    - id: att
+      fcc_provider_id: 130077            # FCC Broadband Data Collection provider id
+      name: AT&T
+      mcc: 310
+      mnc: [410]
+      plmn: [310-030, 310-070, 310-080, 310-090, 310-150, 310-170, 310-280, 310-380, 310-410, 310-560, 310-680, 310-950,
+             311-070, 311-090, 311-180, 312-090, 312-680, 313-100, 313-110, 313-120, 313-130, 313-140]   # 313-1x0 FirstNet
+      aliases: [AT&T Mobility, ATT, FirstNet, Cingular]
+      capacity_prior_mbps: {4G: 70, 5G: 180, blend: 110}    # p50 usable throughput at excellent signal, rooftop antenna
+    - id: verizon
+      fcc_provider_id: 131425            # FCC Broadband Data Collection provider id
+      name: Verizon
+      mcc: 311
+      mnc: [480]
+      plmn: [310-004, 310-010, 310-012, 310-013, 310-590, 310-890, 310-910, 311-110, 311-270, 311-271, 311-272, 311-273,
+             311-274, 311-275, 311-276, 311-277, 311-278, 311-279, 311-280, 311-281, 311-282, 311-283, 311-284, 311-285,
+             311-286, 311-287, 311-288, 311-289, 311-390, 311-480, 311-481, 311-482, 311-483, 311-484, 311-485, 311-486,
+             311-487, 311-488, 311-489, 312-770]
+      aliases: [Verizon Wireless, VZW, Cellco]
+      capacity_prior_mbps: {4G: 70, 5G: 220, blend: 130}
+    - id: tmobile
+      fcc_provider_id: 130403            # FCC Broadband Data Collection provider id
+      name: T-Mobile
+      mcc: 310
+      mnc: [260]
+      plmn: [310-160, 310-200, 310-210, 310-220, 310-230, 310-240, 310-250, 310-260, 310-270, 310-300, 310-310, 310-490,
+             310-530, 310-580, 310-660, 310-800, 310-120, 311-490, 311-660, 311-870, 311-880, 311-882, 312-190, 312-250,
+             312-530, 311-580, 311-220]   # 310-120 / 311-490 / 311-87x / 312-190 / 312-250 ex-Sprint; 311-580 / 311-220 ex-UScellular
+      aliases: [T-Mobile USA, TMO, Sprint, UScellular, U.S. Cellular]
+      capacity_prior_mbps: {4G: 75, 5G: 260, blend: 160}    # widest mid-band 5G holding (2.5 GHz n41)
+
+opencellid:
+  # Bulk download per MCC (CSV.gz, OPENCELLID_TOKEN): the US files are large, so they are cached in data/raw/shared.
+  bulk_url: "https://opencellid.org/ocid/downloads?token={token}&type=mcc&file={mcc}.csv.gz"
+  area_url: "https://opencellid.org/cell/getInArea?key={token}&BBOX={bbox}&format=json"
+  radios: [LTE, NR, UMTS, GSM]
+  min_samples: 2
+  candidate_radius_m: 15000      # US rural sites are sparser and taller than the UK's
+  candidates_per_sample: 5
+  attribution: "OpenCellID (CC BY-SA 4.0) - community contributed; a missing cell does not mean no service."
+
+# The site-distance prior (profile.yaml coverage_prior: opencellid_sites): score by distance to the nearest site of
+# the network, as [distance_km, score] knots interpolated linearly, plus a lift for 5G (NR) sites. These are
+# assumptions until US measurements calibrate them.
+site_prior:
+  knots: [[0.0, 0.84], [1.0, 0.78], [3.0, 0.64], [6.0, 0.46], [10.0, 0.30], [15.0, 0.15], [25.0, 0.05]]
+  nr_lift: 0.04                  # a 5G site within nr_radius_km
+  nr_radius_km: 3.0
+  density_radius_km: 5.0         # more sites within this radius: more capacity and fill-in
+  density_lift_per_site: 0.01
+  density_lift_max: 0.06
+
+# FCC National Broadband Map filings -> prior score (tcs/sources/fcc_bdc.py). A rooftop antenna on a moving train
+# sits between the FCC's two environments, so in-vehicle coverage scores highest. Assumptions until US measurements
+# calibrate them.
+fcc_bdc:
+  as_of: null                    # null = the latest filing round
+  scores: {invehicle_5g: 0.82, invehicle_4g: 0.72, stationary_5g: 0.58, stationary_4g: 0.50, none: 0.10}
+
+fitted_masts:
+  file: null                     # masts placed from Network Rail's Global View logs: GB only

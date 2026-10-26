@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .config import ROOT, list_routes, load_settings
+from .config import ROOT, list_routes, load_settings, normalise_country
 
 app = typer.Typer(add_completion=False, help="Train Route 3D Connectivity Simulation pipeline")
 console = Console()
@@ -41,14 +41,15 @@ def run(offline: bool = typer.Option(False, help="Use cached/synthetic sources o
 def run_pipeline(offline: bool = False, route: str | None = None, weather: str = "nominal", policy: str | None = None, limit_postcodes: int | None = None,
                  copy_to_web: bool = True, train: Path | None = None, preset: str | None = None, satcom: bool = True):
     from . import corrections
-    from .model import calibration
+    from .model import adjustment, calibration
     from .model.simulate import simulate
     from .pipeline.export import export_all
     from .pipeline.join_cells import candidate_cells, corridor_cells, serving_cells
-    from .pipeline.join_coverage import coverage_prior
+    from .pipeline.join_coverage import coverage_prior, needs_cells
     from .pipeline.movement import movement
     from .pipeline.obstruction import enrich_terrain
     from .pipeline.sample_route import build_route, save_bundle
+    from .sources import gtfs_feed, nr_schedule
 
     s = load_settings(offline=offline, route_id=route)
     interim = _interim(s)
@@ -79,10 +80,16 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     for w in b.warnings:
         console.log(f"[yellow]{w}")
     b.samples = enrich_terrain(s, b)
-    prior, b.samples = coverage_prior(s, b, limit=limit_postcodes)
-    cells = corridor_cells(s, b, b.samples)
+    if needs_cells(s):                                         # prior read from the cell sites (US): cells first
+        cells = corridor_cells(s, b, b.samples)
+        prior, b.samples = coverage_prior(s, b, limit=limit_postcodes, cells=cells)
+    else:
+        prior, b.samples = coverage_prior(s, b, limit=limit_postcodes)
+        cells = corridor_cells(s, b, b.samples)
     cand = candidate_cells(s, b.samples, cells)
-    serving = serving_cells(s, b.samples, cand)
+    serving = serving_cells(s, b.samples, cand, cells)
+    gtfs_feed.apply(s)                                         # timetable.source: gtfs -> one real train's calls
+    nr_schedule.apply(s)                                       # timetable.source: network_rail -> the same, GB
     b.samples, stations = movement(s, b.samples, b.stations)
     b.stations = stations
     save_bundle(b, interim)
@@ -91,10 +98,31 @@ def run_pipeline(offline: bool = False, route: str | None = None, weather: str =
     serving.to_parquet(interim / "serving.parquet", index=False)
     cal = calibration.for_route(s, interim)
     corr = corrections.for_build(s, b, interim)
+    adj = adjustment.for_build(s, b.samples, prior, serving, cells, interim)
     if corr is not None:
         console.log(f"measured corrections: {corr['sample_id'].nunique():,} of {len(b.samples):,} samples on at least one network")
-    obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, policy=policy, corrections=corr)
-    written = export_all(s, b, b.samples, stations, cells, obs, rc, prior)
+    if adj is not None:
+        console.log(f"learned adjustment: median {adj['adjustment_db'].abs().median():.1f} dB either way")
+    extra, got = {}, None
+    ocfg = s.country_profile.get("ookla") or {}
+    if ocfg.get("check") or ocfg.get("capacity"):             # crowd-sourced phone speeds (US): a check, and optionally an input
+        from .sources import ookla
+
+        got = ookla.for_build(s, b.samples, s.paths()["raw"])
+        if got is not None:
+            b.samples = b.samples.merge(got[0], on="sample_id", how="left")
+            if ocfg.get("capacity"):
+                b.samples["capacity_scale"] = ookla.capacity_scale(b.samples, got[0], ocfg.get("capacity_scale")).astype("float32")
+                cs = b.samples["capacity_scale"]
+                console.log(f"Ookla capacity scale: {cs.quantile(0.1):.2f} / {cs.median():.2f} / {cs.quantile(0.9):.2f} (10th / median / 90th percentile)")
+            save_bundle(b, interim)                            # `tcs report` re-simulates from these samples
+    obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, policy=policy, corrections=corr, adjustment=adj)
+    if got is not None:
+        extra["ookla_check"] = ookla.check(b.samples, obs, got[0], got[1]) | {"used_as_input": bool(ocfg.get("capacity"))}
+        c = extra["ookla_check"]
+        console.log(f"Ookla check: median phone download {c['median_ookla_down_mbps']} Mbps vs model best network {c['median_model_best_mbps']} Mbps; "
+                    f"section rank correlation {c.get('section_rank_correlation')}, slowest-fifth overlap {c.get('slowest_fifth_overlap')}")
+    written = export_all(s, b, b.samples, stations, cells, obs, rc, prior, extra_meta=extra)
     if copy_to_web:
         dest = ROOT / "web" / "public" / "data" / s.route_id
         dest.mkdir(parents=True, exist_ok=True)
@@ -161,7 +189,7 @@ def write_index() -> Path:
         except json.JSONDecodeError:
             continue
         st = m.get("stations", [])
-        items.append({"id": m["route"]["id"], "name": m["route"].get("name"), "operator": m["route"].get("operator"), "origin": st[0]["name"] if st else None,
+        items.append({"id": m["route"]["id"], "name": m["route"].get("name"), "operator": m["route"].get("operator"), "country": normalise_country(m["route"].get("country")), "origin": st[0]["name"] if st else None,
                       "destination": st[-1]["name"] if st else None, "length_km": round(m.get("length_m", 0) / 1000, 1), "duration_min": round(m.get("duration_s", 0) / 60),
                       "geometry_source": m.get("geometry_source"), "terrain_source": m.get("terrain_source"), "n_samples": m.get("n_samples")})
     out = root / "index.json"
@@ -199,20 +227,27 @@ def package(out: Path | None = typer.Option(None, help="Output folder (default: 
 
 
 @app.command()
-def routes():
-    """List the route catalogue (config/routes) and which ones have a built bundle."""
+def routes(country: str | None = typer.Option(None, help="Only this country's routes (GB or US)"),
+           ids_json: bool = typer.Option(False, "--ids-json", help="Print just the ids as a JSON list (for a CI build matrix)")):
+    """List the route catalogue (config/routes: GB, and the US through config/countries/US) and which are built."""
+    if ids_json:
+        print(json.dumps([r["id"] for r in list_routes() if not country or r["country"] == normalise_country(country)]))
+        return
     built = {p.parent.name for p in (ROOT / "web" / "public" / "data").glob("*/meta.json")}
     t = Table(title="Routes")
-    t.add_column("id"), t.add_column("name"), t.add_column("from → to"), t.add_column("built")
+    t.add_column("id"), t.add_column("country"), t.add_column("name"), t.add_column("from → to"), t.add_column("built")
     for r in list_routes():
-        t.add_row(r["id"], r["name"] or "", f"{r['origin']} → {r['destination']}", "yes" if r["id"] in built else "-")
+        if country and r["country"] != normalise_country(country):
+            continue
+        t.add_row(r["id"], r["country"], r["name"] or "", f"{r['origin']} → {r['destination']}", "yes" if r["id"] in built else "-")
     console.print(t)
 
 
 @app.command("build-all")
-def build_all(offline: bool = typer.Option(False), only: str | None = typer.Option(None, help="Comma-separated route ids"), skip_built: bool = typer.Option(False)):
+def build_all(offline: bool = typer.Option(False), only: str | None = typer.Option(None, help="Comma-separated route ids"), skip_built: bool = typer.Option(False),
+              country: str | None = typer.Option(None, help="Only this country's routes (GB or US)")):
     """Run the pipeline for every route in the catalogue (continues past failures; writes index.json)."""
-    ids = [r["id"] for r in list_routes()]
+    ids = [r["id"] for r in list_routes() if not country or r["country"] == normalise_country(country)]
     if only:
         wanted = {x.strip() for x in only.split(",") if x.strip()}
         unknown = sorted(wanted - set(ids))
@@ -257,7 +292,7 @@ def report(route: str | None = typer.Option(None, help="Route id (default: confi
 def _build_report(route: str | None, preset: str | None, train: Path | None, policy: str | None, weather: str, out: Path | None,
                   info: dict[str, str] | None = None, satcom: bool = True) -> dict[str, Path]:
     from . import corrections
-    from .model import calibration
+    from .model import adjustment, calibration
     from .model.simulate import simulate
     from .pipeline.export import _lidar_meta
     from .pipeline.sample_route import load_bundle
@@ -299,7 +334,8 @@ def _build_report(route: str | None, preset: str | None, train: Path | None, pol
     stations = pd.read_parquet(processed / "stations.parquet")
     cal = calibration.for_route(s, interim)
     corr = corrections.load_interim(interim)
-    obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, corrections=corr)
+    adj = adjustment.load_interim(interim)
+    obs, rc = simulate(s, b.samples, prior, serving, calibration=cal, weather=weather, corrections=corr, adjustment=adj)
     meta = json.loads((processed / "web" / "meta.json").read_text(encoding="utf-8"))
     meta["model_version"] = s.sim["model_version"]
     meta["calibration"] = calibration.describe(s, interim)     # as simulated now, not as when the bundle was built
@@ -316,12 +352,12 @@ def _build_report(route: str | None, preset: str | None, train: Path | None, pol
         from .report_docx import POLICIES, VEHICLES
 
         base = load_settings(route_id=route)
-        obs_b, rc_b = simulate(base, b.samples, prior, serving, calibration=cal, corrections=corr)
+        obs_b, rc_b = simulate(base, b.samples, prior, serving, calibration=cal, corrections=corr, adjustment=adj)
         v, p = base.sim["vehicle"]["profile"], base.sim["wan"]["policy"]
         baseline = {"title": f"{VEHICLES.get(v, v).lower()}, {POLICIES.get(p, p).split(' (')[0].lower()}", "obs": obs_b, "rc": rc_b}
     from .sensitivity import run as sensitivity
 
-    sens = sensitivity(s, b.samples, prior, serving, calibration=cal, weather=weather, corrections=corr)
+    sens = sensitivity(s, b.samples, prior, serving, calibration=cal, weather=weather, corrections=corr, adjustment=adj)
     return build_report(s, meta, b.samples, obs, rc, stations, out or (processed / "reports"), label, validation, weather=weather, baseline=baseline,
                         sensitivity=sens, variant=variant)
 
@@ -331,6 +367,7 @@ REPORT_SCENARIOS = ("baseline", "edge_rail_fleet_connect")
 
 @app.command("report-all")
 def report_all(only: str | None = typer.Option(None, help="Comma-separated route ids (default: every built route)"),
+               country: str | None = typer.Option(None, help="Only this country's routes (GB or US)"),
                scenarios: str = typer.Option(",".join(REPORT_SCENARIOS), help="'baseline' and/or preset ids"),
                web_data: Path = typer.Option(ROOT / "web" / "public" / "data", help="Viewer data folder holding the route bundles")):
     """Evidence packs for every built route, placed beside its viewer bundle (<web-data>/<route>/reports/) with the
@@ -340,6 +377,9 @@ def report_all(only: str | None = typer.Option(None, help="Comma-separated route
     ids = sorted(p.parent.name for p in web_data.glob("*/meta.json"))
     if only:
         ids = [i for i in ids if i in {x.strip() for x in only.split(",")}]
+    if country:
+        mine = {r["id"] for r in list_routes() if r["country"] == normalise_country(country)}
+        ids = [i for i in ids if i in mine]
     wanted = [x.strip() for x in scenarios.split(",") if x.strip()]
     presets = load_settings().sim.get("presets", {})
     failures = []
@@ -371,6 +411,16 @@ def report_all(only: str | None = typer.Option(None, help="Comma-separated route
     console.log(f"{len(ids) * len(wanted) - len(failures)}/{len(ids) * len(wanted)} reports built" + (f"; failed: {', '.join(failures)}" if failures else ""))
     if failures:
         raise typer.Exit(code=1)
+
+
+@app.command("probe-fcc")
+def probe_fcc(provider_id: str = typer.Argument("130077", help="FCC provider id (AT&T 130077, Verizon 131425, T-Mobile 130403)"),
+              state: str = typer.Argument("NY")):
+    """Print what the FCC National Broadband Map API lists for one provider and state (needs FCC_BDC_USERNAME / FCC_BDC_TOKEN)."""
+    from .sources.fcc_bdc import probe
+
+    s = load_settings(route_id="nec_was_bos")
+    console.print_json(json.dumps(probe(s, s.paths()["raw"], provider_id, state), default=str))
 
 
 @app.command("probe-ofcom")
@@ -478,6 +528,38 @@ def locate_masts(measurements: Path = typer.Argument(..., help="Scanner logs nam
     console.log(f"wrote {len(m):,} masts to {out} ({', '.join(f'{k} {v:,}' for k, v in m['network'].value_counts().items())})")
 
 
+@app.command("learn-adjustment")
+def learn_adjustment(four_g: Path = typer.Option(..., "--four-g", help="Current scanner logs along the routes, e.g. Global View 4G (CSV or parquet)"),
+                     older: Path | None = typer.Option(None, help="An older measurement set (e.g. Yellow Train), at a tenth of the weight"),
+                     preset_4g: str = typer.Option("global_view_4g"), preset_older: str = typer.Option("yellow_train"),
+                     only: str | None = typer.Option(None, help="Comma-separated route ids (default: every built route)"),
+                     out: Path = typer.Option(ROOT / "config" / "learned_adjustment.parquet")):
+    """The learned adjustment (tcs/model/adjustment.py): trees fitted to the calibrated model's errors where trains have
+    measured, applied along every route on the next build. Writes the trees only. Run after `tcs calibrate-national`
+    and before `tcs correct-routes`; `tcs check-national` tests the same fit on later trips."""
+    import datetime
+
+    from . import corrections, national
+    from .model import adjustment
+
+    ids = [r["id"] for r in list_routes()]
+    if only:
+        ids = [i for i in ids if i in {x.strip() for x in only.split(",")}]
+    every = pd.Timestamp("2100-01-01", tz="UTC")                 # every measurement informs the trees
+    sets, sources = [], []
+    for path, preset, weight in ((four_g, preset_4g, corrections.SET_WEIGHT.get(preset_4g, 1.0)),
+                                 *([(older, preset_older, corrections.SET_WEIGHT.get(preset_older, 0.1))] if older else [])):
+        routes, _ = national.collect(ids, path, preset, every, log=console.log)
+        sets.append((routes, "fit", weight))
+        sources.append({"file": Path(path).name, "preset": preset, "weight": weight, **national._period(routes, "fit")})
+    table = national.learn_adjustment(sets, log=console.log)
+    cal = yaml_load(ROOT / "config" / "calibration.yaml")
+    adjustment.save(table, out, meta={"sources": sources, "built_on": datetime.date.today().isoformat(),
+                                      "calibration_fitted_on": cal.get("fitted_on"), "model_version": load_settings().sim["model_version"],
+                                      "params": adjustment.PARAMS})
+    console.log(f"wrote {int(table['tree'].max()) + 1} trees to {out}")
+
+
 @app.command("correct-routes")
 def correct_routes(four_g: Path = typer.Option(..., "--four-g", help="Current scanner logs along the routes, e.g. Global View 4G (CSV or parquet)"),
                    older: Path | None = typer.Option(None, help="An older measurement set (e.g. Yellow Train), at a tenth of the weight"),
@@ -486,7 +568,8 @@ def correct_routes(four_g: Path = typer.Option(..., "--four-g", help="Current sc
                    out: Path = typer.Option(ROOT / "config" / "route_corrections.parquet")):
     """Measured corrections along each route (tcs/corrections.py): the calibrated model's errors at the measurements,
     smoothed along the track, added to its predictions there on the next build. Writes positions, networks and dB only.
-    Re-run after `tcs calibrate-national`; `tcs check-national` reports how such corrections fare on later trips."""
+    Re-run after `tcs calibrate-national` and `tcs learn-adjustment`; `tcs check-national` reports how such corrections
+    fare on later trips."""
     import datetime
 
     from . import corrections, national

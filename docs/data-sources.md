@@ -14,7 +14,7 @@ the app bar and the **Sources** tab show exactly which inputs produced the bundl
 | Cell sites / handovers | OpenCellID bulk MCC download (token); 4G mast positions fitted to Network Rail Global View logs (`config/masts.csv`) | `tcs/sources/opencellid.py`, `tcs/masts.py` | synthetic sites | + cells → 0.65 |
 | Measured RF (calibration + validation) | Network Rail Yellow Train LTE logs and Global View 4G/5G logs (Rail Data Marketplace), Ofcom drive-test CSVs, Ofcom Connectivity on Trains study annexes, Network Survey, modem logs | `tcs/sources/measurements.py`, `tcs/model/calibration.py`, `tcs/validate/metrics.py` | none | 0.70–0.92 |
 | Satcom | Stage 1: geometry only. Stage 2: Starlink terminal telemetry (`starlink-grpc-tools` export) + train GPS | `tcs/sources/starlink.py` | predictive only | 0.35 → 0.85 |
-| Timetable | YAML calling pattern; CIF (Network Rail Open Data / RDG) with CORPUS; GTFS | `tcs/sources/timetable.py` | YAML | — |
+| Timetable | Network Rail Open Data SCHEDULE (daily full extract, JSON) with CORPUS (free account, GB); GTFS (US); YAML calling pattern | `tcs/sources/nr_schedule.py`, `tcs/sources/gtfs_feed.py` | YAML | — |
 
 ## 1. Route geometry — OpenStreetMap
 
@@ -144,8 +144,14 @@ errors at every measured route point, smoothed along the track, are written to `
 (route, network, position and dB only; the Rail Data Marketplace licence allows derived results). The next build of each
 route matches them to its samples (within 60 m, on OSM or file geometry only) and adds them to the prediction; the
 Sources tab, the evidence pack and each sample's inspector show where and by how much. They are fitted against the
-calibration of the time: re-run `tcs correct-routes` after `tcs calibrate-national`. `cellular.measured_corrections:
-null` in `config/simulation.yaml` turns them off.
+calibration of the time: re-run `tcs correct-routes` after `tcs calibrate-national` and `tcs learn-adjustment`.
+`cellular.measured_corrections: null` in `config/simulation.yaml` turns them off.
+
+**Learned adjustment** (`tcs learn-adjustment --four-g <Global View 4G> --older <Yellow Train>`, needs
+`pip install -e ".[fit]"`): trees fitted to the same errors, from what is known at every route point, written to
+`config/learned_adjustment.parquet` (split features, thresholds and leaf values; no measurements). Every GB build applies
+them, measured or not (docs/model.md). The order is `tcs calibrate-national`, `tcs learn-adjustment`, `tcs correct-routes`,
+then `tcs check-national`. `cellular.learned_adjustment: null` turns it off.
 
 `tcs calibrate <csv> --preset network_survey|ofcom_drive|modem_log` attaches each measurement to its nearest
 sample (≤ 250 m) and fits, per operator:
@@ -184,9 +190,40 @@ An optional orbital layer from CelesTrak TLEs is visualisation only and never cl
 
 ## 7. Timetable
 
-`route.yaml` carries the calling pattern; the movement model stretches physics-based run times to match it. For
-real schedules use `timetable.from_cif(path, train_uid, corpus_json)` (Network Rail Open Data SCHEDULE feed + the
-CORPUS TIPLOC reference, free registration) or `from_gtfs()`.
+`route.yaml` carries the calling pattern; the movement model stretches physics-based run times to match it.
+
+GB routes set `timetable.source: network_rail` and follow a real train from Network Rail Open Data
+(`tcs/sources/nr_schedule.py`; free account, `NETWORK_RAIL_USERNAME` / `NETWORK_RAIL_PASSWORD`). The daily SCHEDULE full
+extract (CIF_ALL_FULL_DAILY, JSON, ~135 MB gzipped) is downloaded once a day and shared by every route; TIPLOCs map to
+station codes from its own TIPLOC records and CORPUS. The train is the first passenger service of the route's operator
+(`timetable.network_rail.toc`, ATOC code or a list) to leave the origin at or after `departure` and call later at the
+destination, as timetabled for the coming Wednesday, with short-term cancellations and overlays applied; `train` (a
+headcode or UID) pins one. Its public calls replace `calls`, route stations it doesn't call at become passing points,
+and meta.json records it (`timetable`). Without the account, or offline, the route file's `calls` are used. US routes
+use the operator's GTFS feed (section 8).
+
+## 8. United States (`config/countries/US`)
+
+Routes with `country: US` swap four feeds; everything else (OpenCellID, Copernicus, Starlink, the models) is shared.
+
+- **Stations: NTAD Amtrak Stations** (US DOT Bureau of Transportation Statistics, public domain), queried by Amtrak code
+  through its ArcGIS service (`tcs/sources/ntad_amtrak.py`, cached 90 days). The track is still routed through OSM.
+- **Track fallback: NTAD Amtrak Routes**, one generalised polyline per named service. Used only when Overpass fails; it
+  has no tunnel, cutting or speed tags, so the route file's `tunnels` (portal positions) mark the tunnels, and the
+  viewer shows the geometry as partly live.
+- **Coverage prior: FCC National Broadband Map** (`tcs/sources/fcc_bdc.py`), the US counterpart of Ofcom: each
+  operator's filed 4G LTE and 5G-NR coverage per state, outdoor stationary and in-vehicle. Needs a free
+  broadbandmap.fcc.gov account: `FCC_BDC_USERNAME` (login email) and `FCC_BDC_TOKEN` (Manage API Access). Each file is
+  clipped to the corridor once and only the clip kept; the route file's `fcc_states` names the states to fetch.
+  In-vehicle coverage scores highest, stationary-only lower (`fcc_bdc.scores` in `networks.yaml`). `tcs probe-fcc`
+  shows what the API lists. Confidence 0.55, as Ofcom's.
+- **Fallback prior: OpenCellID site distance** (`tcs/sources/cell_prior.py`), for networks without FCC filings or
+  when the FCC account is not set. Each network's prior is read from the
+  distance to its nearest OpenCellID site (knots in `networks.yaml` `site_prior`), with small lifts for nearby 5G
+  sites and dense sites. Confidence is held at 0.40. A network with no site in the corridor gets no record, never a
+  guess. Without `OPENCELLID_TOKEN` the prior and the sites both fall back to the synthetic stand-ins.
+- **Networks:** AT&T, Verizon and T-Mobile (UScellular's network included under T-Mobile), each with the PLMNs it uses
+  across MCCs 310-316. The OpenCellID bulk files for those MCCs are downloaded once and shared by every US route.
 
 ## Licences and attribution
 

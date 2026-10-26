@@ -76,9 +76,11 @@ def tunnel_quality(q: np.ndarray, sample_pos: np.ndarray, provider: np.ndarray, 
 
 
 def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.DataFrame, serving: pd.DataFrame,
-                          calibration: dict | None = None, corrections: pd.DataFrame | None = None) -> pd.DataFrame:
+                          calibration: dict | None = None, corrections: pd.DataFrame | None = None,
+                          adjustment: pd.DataFrame | None = None) -> pd.DataFrame:
     """corrections: measured corrections along the route (tcs/corrections.py): sample_id, provider_id, correction_db,
-    weight; added to the score through the calibration's dB scale."""
+    weight; added to the score through the calibration's dB scale. adjustment: the learned adjustment
+    (tcs/model/adjustment.py): sample_id, provider_id, adjustment_db; added the same way, under the corrections."""
     cfg = settings.sim["cellular"]
     vcfg = settings.sim["vehicle"]
     vprof = vcfg["profiles"][vcfg["profile"]]
@@ -86,7 +88,8 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
     das = set(cfg["tunnels"].get("das_tunnels", []))
 
     df = prior.merge(serving, on=["sample_id", "provider_id"], how="left")
-    df = df.merge(samples[["sample_id", "distance_m", "cutting_depth_m", "in_tunnel", "tunnel_name", "urban_density", "speed_kph"]], on="sample_id", how="left")
+    df = df.merge(samples[["sample_id", "distance_m", "cutting_depth_m", "in_tunnel", "tunnel_name", "urban_density", "speed_kph"]
+                          + (["capacity_scale"] if "capacity_scale" in samples else [])], on="sample_id", how="left")
     s = df["prior_score"].astype(float).values
     has_prior = ~np.isnan(s)
     s = np.where(has_prior, s, 0.45)                       # no record: neutral prior, low confidence (see confidence.py)
@@ -115,22 +118,31 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
         if not np.isfinite(correction).all():
             raise ValueError("calibration biases must be finite")
         q_base = q_base + correction
-    meas_db, meas_w = np.full(len(df), np.nan), np.zeros(len(df))
+    meas_db, meas_w, meas_q = np.full(len(df), np.nan), np.zeros(len(df)), np.zeros(len(df))
+    nominal = float(cfg["rsrp_dbm"]["at_one"] - cfg["rsrp_dbm"]["at_zero"])
+    slope_db = df["provider_id"].map({k: float(v["slope"]) for k, v in (calibration or {}).get("rsrp_map", {}).items()}).fillna(nominal).to_numpy(float)
     if corrections is not None and len(corrections):
         m = df[["sample_id", "provider_id"]].merge(corrections[["sample_id", "provider_id", "correction_db", "weight"]], on=["sample_id", "provider_id"], how="left")
         meas_db, meas_w = m["correction_db"].to_numpy(float), m["weight"].fillna(0).to_numpy(float)
-        nominal = float(cfg["rsrp_dbm"]["at_one"] - cfg["rsrp_dbm"]["at_zero"])
-        slope_db = df["provider_id"].map({k: float(v["slope"]) for k, v in (calibration or {}).get("rsrp_map", {}).items()}).fillna(nominal).to_numpy(float)
-        q_base = q_base + np.where(np.isfinite(meas_db), meas_db / slope_db, 0.0)
+        meas_q = np.where(np.isfinite(meas_db), meas_db / slope_db, 0.0)
+    adj_db = np.zeros(len(df))
+    adj_out = np.full(len(df), np.nan)
+    if adjustment is not None and len(adjustment):
+        a = df[["sample_id", "provider_id"]].merge(adjustment[["sample_id", "provider_id", "adjustment_db"]], on=["sample_id", "provider_id"], how="left")
+        adj_out = a["adjustment_db"].to_numpy(float)
+        adj_db = np.nan_to_num(adj_out)
+    meas_q = meas_q + adj_db / slope_db                     # both shift the score by dB on the calibration's scale
+    tun = df["in_tunnel"].fillna(False).values.astype(bool)
+    q_base = q_base + np.where(tun, 0.0, meas_q)            # inside tunnels the correction goes on the tunnel model, below
     q_base = np.clip(q_base, 0, 1).astype(np.float32)
     q = np.clip(q_base + vehicle, 0, 1)
-    tun = df["in_tunnel"].fillna(False).values.astype(bool)
     tun_das = tun & das_mask(das, df["tunnel_name"].values, df["distance_m"].values / 1000.0)
     tcfg = cfg["tunnels"]
     ordered = samples.sort_values("distance_m", kind="stable").reset_index(drop=True)
     pos = df["sample_id"].map(pd.Series(np.arange(len(ordered)), index=ordered["sample_id"].to_numpy())).to_numpy()
     q_tun = tunnel_quality(q, pos, df["provider_id"].to_numpy(), ordered, float(tcfg["default_score"]), tcfg.get("portal_decay_m"))
     q = np.where(tun_das, tcfg["das_score"], np.where(tun, q_tun, q))
+    q = np.where(tun, q + meas_q, q)                        # measured inside: corrects the portal or DAS model there
     q = np.clip(q, 0, 1).astype(np.float32)
 
     # Handover degradation
@@ -156,13 +168,20 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
     rsrp = rsrp_slope * q + rsrp_intercept
     sinr = cfg["sinr_db"]["at_zero"] + (cfg["sinr_db"]["at_one"] - cfg["sinr_db"]["at_zero"]) * q
     tech = df["radio_technology"].fillna("4G").astype(str).values
-    cap_prior = np.array([ops[p]["capacity_prior_mbps"].get(t, ops[p]["capacity_prior_mbps"]["4G"]) for p, t in zip(df["provider_id"], tech)], dtype=np.float32)
+    # one lookup per (network, technology) pair rather than per row: this list comprehension was most of a call, and
+    # the national calibration calls this thousands of times
+    pairs = pd.MultiIndex.from_arrays([df["provider_id"].to_numpy(), tech])
+    uniq = pairs.unique()
+    caps = {(p, t): ops[p]["capacity_prior_mbps"].get(t, ops[p]["capacity_prior_mbps"]["4G"]) for p, t in uniq}
+    cap_prior = np.asarray([caps[k] for k in uniq], dtype=np.float32)[uniq.get_indexer(pairs)]
     floor = cfg["throughput"]["score_floor"]
     usable = np.clip((q - floor) / (1 - floor), 0, 1) ** cfg["throughput"]["curve_exponent"]
     # Mild speed effect (Doppler / scheduler) and multi-cell variance from the serving distance.
     speed_f = 1 - 0.08 * np.clip(df["speed_kph"].fillna(0).values / 200, 0, 1)
     vcap = float(vprof.get("capacity_factor", 1.0) or 1.0)             # antenna/MIMO class (EDGE Rail 4x4 vs passive 2x2)
-    cap = cap_prior * usable * speed_f * (1 - (1 - hcfg["capacity_factor"]) * hp) * vcap
+    # US: capacity follows local phone-test speeds (Ookla) where the build applied them (sources/ookla.capacity_scale)
+    scale = df["capacity_scale"].fillna(1.0).to_numpy(float) if "capacity_scale" in df else 1.0
+    cap = cap_prior * usable * speed_f * (1 - (1 - hcfg["capacity_factor"]) * hp) * vcap * scale
     lat = cfg["latency_ms"]["base"] + cfg["latency_ms"]["at_zero_extra"] * (1 - q) + hcfg["latency_spike_ms"] * hp
     loss = _interp_loss(q, cfg["packet_loss_pct"]) + hcfg["packet_loss_pct"] * hp
     avail = q > floor
@@ -171,7 +190,8 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
     flags = np.char.add(flags.astype(str), np.where(mapped, "|calibrated_rsrp", "|synthetic_rsrp"))
     flags = np.where(df["serving_cell"].notna().values, np.char.add(flags.astype(str), "|cells"), flags)
     flags = np.char.add(flags.astype(str), np.where(calibrated, "|calibrated", ""))
-    flags = np.char.add(flags.astype(str), np.where(np.isfinite(meas_db) & ~tun, "|measured_correction", ""))
+    flags = np.char.add(flags.astype(str), np.where(np.isfinite(meas_db), "|measured_correction", ""))
+    flags = np.char.add(flags.astype(str), np.where(adj_db != 0, "|learned_adjustment", ""))
 
     out = pd.DataFrame({
         "sample_id": df["sample_id"].values, "route_id": settings.route_id, "provider_id": df["provider_id"].values,
@@ -183,8 +203,8 @@ def cellular_observations(settings: Settings, samples: pd.DataFrame, prior: pd.D
         "handover": df["handover"].fillna(False).values.astype(bool), "source_flags": flags, "model_version": settings.sim["model_version"],
         "quality_base": q_base, "handover_penalty": hp,
         "rsrp_slope": rsrp_slope, "rsrp_intercept": rsrp_intercept,
-        "measured_correction_db": np.where(tun, np.nan, meas_db).astype(np.float32),
-        "_calibrated": calibrated, "_meas_w": np.where(tun, 0.0, meas_w),
+        "measured_correction_db": meas_db.astype(np.float32), "learned_adjustment_db": adj_out.astype(np.float32),
+        "_calibrated": calibrated, "_meas_w": meas_w,
         "_has_prior": has_prior, "_prior_source": df["source"].astype(str).values, "_in_tunnel": tun,
     })
     return out

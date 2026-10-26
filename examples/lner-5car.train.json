@@ -1,0 +1,67 @@
+{
+ "app": "motion-applied-train-studio",
+ "version": 1,
+ "project": {
+  "title": "LNER 5-car",
+  "cars": [
+   {
+    "id": "c1",
+    "type": "cabL",
+    "aps": 1,
+    "sw": true,
+    "edge": 1,
+    "fleet": true,
+    "custom": {}
+   },
+   {
+    "id": "c2",
+    "type": "mid",
+    "aps": 1,
+    "sw": true,
+    "edge": 1,
+    "fleet": false,
+    "custom": {}
+   },
+   {
+    "id": "c3",
+    "type": "mid",
+    "aps": 1,
+    "sw": true,
+    "edge": 0,
+    "fleet": false,
+    "custom": {
+     "t-star": true
+    }
+   },
+   {
+    "id": "c4",
+    "type": "mid",
+    "aps": 1,
+    "sw": true,
+    "edge": 1,
+    "fleet": false,
+    "custom": {}
+   },
+   {
+    "id": "c5",
+    "type": "cabR",
+    "aps": 1,
+    "sw": true,
+    "edge": 1,
+    "fleet": false,
+    "custom": {}
+   }
+  ],
+  "types": [
+   {
+    "id": "t-star",
+    "slug": "starlink",
+    "name": "Starlink",
+    "placement": "roof",
+    "link": true,
+    "hardwareKind": "satcom",
+    "presetId": "starlink"
+   }
+  ]
+ }
+}

@@ -113,16 +113,20 @@ def test_http_get_never_exposes_token(tmp_path, monkeypatch, failure):
 
 
 def test_fallback_coordinates_cover_route_catalogue():
-    """Offline mode needs a coordinate for every station of every route in config/ (a new route file must add its own)."""
+    """Offline mode needs a coordinate for every station of every route in config/: in the fallback table, or in the
+    route file itself (the generated Amtrak routes)."""
     import yaml
 
     from tcs.config import list_routes
-    from tcs.sources.fallback_stations import STATIONS
+    from tcs.sources.fallback_stations import STATIONS, US_STATIONS, for_country
 
     for r in list_routes():
         with open(r["file"], encoding="utf-8") as fh:
             stations = yaml.safe_load(fh)["route"]["stations"]
-        missing = [s["crs"] for s in stations if s["crs"] not in STATIONS]
+        table = for_country(r["country"])
+        missing = [s["crs"] for s in stations if s["crs"] not in table and not ("lat" in s and "lon" in s)]   # or in the file
         assert not missing, f"{r['id']}: no offline coordinates for {missing}"
     for crs, (lat, lon) in STATIONS.items():
         assert 49.8 < lat < 60.9 and -8.7 < lon < 1.8, crs          # Great Britain bounding box
+    for crs, (lat, lon) in US_STATIONS.items():
+        assert 24.5 < lat < 49.5 and -125 < lon < -66.9, crs        # contiguous United States

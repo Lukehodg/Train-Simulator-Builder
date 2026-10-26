@@ -47,9 +47,11 @@ route:
   das_tunnels: ["km:0-2.5", "km:630-640"]   # King's Cross approach (Gasworks, Copenhagen) and Calton Tunnel into Waverley
 
   # Timetable. Version 1 interpolates between these times with accel/decel curves and line-speed caps.
-  # Replace with a CIF schedule (tcs fetch-timetable --cif <file>) when available.
   timetable:
-    source: yaml
+    # A real weekday train from Network Rail's SCHEDULE feed (tcs/sources/nr_schedule.py): first at or after `departure`;
+    # the calls below are used when the feed can't be read (no NETWORK_RAIL_USERNAME / _PASSWORD, offline).
+    source: network_rail
+    network_rail: {toc: GR}
     departure: "09:00"
     calls:                    # hh:mm at calling points; passing stations are timed by the speed model
       KGX: "09:00"

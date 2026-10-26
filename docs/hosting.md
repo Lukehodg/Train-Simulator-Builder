@@ -67,6 +67,7 @@ In the GitHub repository: **Settings** → **Secrets and variables** → **Actio
 | `OPENCELLID_TOKEN` | from your `.env` |
 | `CLOUDFLARE_API_TOKEN` | the token from step 1 (Workers Scripts → Edit) |
 | `CLOUDFLARE_ACCOUNT_ID` | the Account ID from step 1 |
+| `NETWORK_RAIL_USERNAME`, `NETWORK_RAIL_PASSWORD` | optional: your Network Rail Open Data login (publicdatafeeds.networkrail.co.uk). GB routes then follow a real weekday train from the SCHEDULE feed |
 
 Secrets are write-only: nobody, including you, can read them back from GitHub, and they never reach the site.
 
