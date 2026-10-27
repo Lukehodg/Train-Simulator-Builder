@@ -197,6 +197,12 @@ Looked at and left out:
   (masts placed before 7 April, 418k readings from it) moving each to the nearest mapped mast made the error worse
   (8.98 dB as placed; 9.04 dB snapping within 500 m, 9.34 dB within 1 km), and moving it to the mapped mast the earlier
   readings fit best changed nothing (8.97 dB). The positions stay as the logs place them.
+- **OpenCellID cells with a single report** (the build keeps cells with 2+; GB file of 27 October 2026). Matched to the
+  masts placed from the logs by eNodeB, a single-report cell sits a median 1.9 km from its mast, 29 % of them over 5 km
+  and 10 % over 55 km, against 1.2 km and 13 % over 5 km with 2+ reports. All of them carry OpenCellID's default 1 km
+  range, so nothing tells the good ones apart. They would add 802 of the 10,952 placed masts (7 %); 4,472 (41 %) are
+  not in OpenCellID at all. On TransPennine they would close EE's apparent gaps at Stalybridge and Mirfield–Dewsbury,
+  each on one phone's report. With positions this far out they were not taken on to the later-trips test.
 - **Ofcom Connected Nations 2025 downloads** (coverage as of July 2025): shares of premises, land and roads covered by
   0–4 networks per local authority and constituency, per network only for the UK and nations. Nothing is located along
   the track, so they cannot sharpen a prediction at a point; the Ofcom API the model queries already returns the

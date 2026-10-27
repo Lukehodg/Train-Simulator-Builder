@@ -51,7 +51,7 @@ opencellid:
   bulk_url: "https://opencellid.org/ocid/downloads?token={token}&type=mcc&file={mcc}.csv.gz"
   area_url: "https://opencellid.org/cell/getInArea?key={token}&BBOX={bbox}&format=json"
   radios: [LTE, NR, UMTS, GSM]
-  min_samples: 2               # drop cells with fewer community observations
+  min_samples: 2               # drop cells with fewer community observations (single reports: docs/validation.md)
   candidate_radius_m: 12000
   candidates_per_sample: 5
   attribution: "OpenCellID (CC BY-SA 4.0) - community contributed; a missing cell does not mean no service."
